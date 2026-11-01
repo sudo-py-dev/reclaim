@@ -399,7 +399,14 @@ fn hebrew_header_settings_button_opens_settings_directly() {
             ctx.run_ui(input(size), |ui| app.render(ui))
                 .drop_without_applying_deltas();
         }
-        let pos = egui::pos2(148.0, 26.0);
+        // macOS uses native traffic lights, so the RTL Settings button is the
+        // leftmost header action. Custom decorations reserve 120 px before it.
+        let x = if window::CUSTOM_DECORATIONS {
+            148.0
+        } else {
+            30.0
+        };
+        let pos = egui::pos2(x, 26.0);
         for pressed in [true, false] {
             let mut frame_input = input(size);
             frame_input.events = vec![
