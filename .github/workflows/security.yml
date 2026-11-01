@@ -39,11 +39,15 @@ jobs:
       - run: python3 fuzz/seed_corpus.py
       - name: Fuzz scanner with AddressSanitizer
         run: cargo +nightly fuzz run scan --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=2048 -dict=fuzz/scan.dict
+      - name: Fuzz container parsers with AddressSanitizer
+        run: cargo +nightly fuzz run containers --fuzz-dir fuzz/containers --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=1024 -dict=fuzz/scan.dict
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: fuzz-crashes
-          path: fuzz/artifacts/
+          path: |
+            fuzz/artifacts/
+            fuzz/containers/artifacts/
           if-no-files-found: ignore
 
   miri:

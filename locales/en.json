@@ -119,7 +119,6 @@
   "Select all shown": "Select all shown",
   "Select candidates and save them to another physical drive. Existing files are never replaced. Open recovered files and check their contents.": "Select candidates and save them to another physical drive. Existing files are never replaced. Open recovered files and check their contents.",
   "Select the drive or volume where your files were stored, then choose Scan Drive. Linux can request read-only access through desktop authentication. Windows raw drives require administrator access; macOS may require Full Disk Access and administrator privileges. You can open a raw disk image instead. Encrypted volumes must be unlocked first.": "Select the drive or volume where your files were stored, then choose Scan Drive. Linux can request read-only access through desktop authentication. Windows raw drives require administrator access; macOS may require Full Disk Access and administrator privileges. You can open a raw disk image instead. Encrypted volumes must be unlocked first.",
-  "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI": "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI",
   "Small deleted NTFS files can retain their original names and contents inside an MFT record. When a checked record is available, its filename is used. Other results are found by file signatures and receive generated names such as Image 0001.png. Original folders are not reconstructed. Names are made portable when saving, and duplicate names get a numeric suffix.": "Small deleted NTFS files can retain their original names and contents inside an MFT record. When a checked record is available, its filename is used. Other results are found by file signatures and receive generated names such as Image 0001.png. Original folders are not reconstructed. Names are made portable when saving, and duplicate names get a numeric suffix.",
   "Source changed or candidate is truncated": "Source changed or candidate is truncated",
   "Source changed since scanning. Scan it again before recovering.": "Source changed since scanning. Scan it again before recovering.",
@@ -218,5 +217,8 @@
   "Update installed. Close and reopen Reclaim to use it.": "Update installed. Close and reopen Reclaim to use it.",
   "Downloading and verifying update…": "Downloading and verifying update…",
   "Download installer": "Download installer",
-  "Download the new installer, close Reclaim, then run it to update.": "Download the new installer, close Reclaim, then run it to update."
+  "Download the new installer, close Reclaim, then run it to update.": "Download the new installer, close Reclaim, then run it to update.",
+  "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite": "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite",
+  "Recovered container failed validation. The source may have changed since scanning.": "Recovered container failed validation. The source may have changed since scanning.",
+  "Structure checked": "Structure checked"
 }

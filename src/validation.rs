@@ -6,6 +6,17 @@ use std::{
 };
 
 pub fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Validation> {
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+    if kind == "sqlite" {
+        return matches!(crate::detection::sqlite_end(bytes), CandidateEnd::Complete(n) if n == bytes.len())
+            .then_some(Validation::StructureChecked);
+    }
+    if matches!(kind, "ogg" | "opus" | "ogv") {
+        return matches!(crate::detection::Ogg::default().push(bytes, cancel), CandidateEnd::Complete(n) if n == bytes.len())
+            .then_some(Validation::StructureChecked);
+    }
     let boundary_valid = match kind {
         "png" => matches!(png_end(bytes), CandidateEnd::Complete(n) if n == bytes.len()),
         "gif" => matches!(gif_end(bytes), CandidateEnd::Complete(n) if n == bytes.len()),

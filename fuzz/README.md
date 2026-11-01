@@ -28,3 +28,19 @@ before fixing them. CI uploads crash artifacts on failure.
 
 CI checks that the fuzz lockfile uses the production dependency versions and
 checksums. Refresh both lockfiles together when updating production dependencies.
+
+## Container probes
+
+The lightweight probe target compiles the exact `src/detection.rs` production
+module without the desktop dependency stack. It fuzzes SQLite headers/page
+bounds and incremental Ogg framing using the shared production limit and result
+type. It does not replace the full scanner target or test file export.
+
+```sh
+python3 fuzz/check_lock.py
+python3 fuzz/seed_corpus.py
+cargo +nightly fuzz run containers --fuzz-dir fuzz/containers --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=1024 -dict=fuzz/scan.dict
+```
+
+Both targets run in CI. Seeds larger than 64 KiB are excluded; native regression
+tests separately cover the SQLite 64 KiB page-size encoding with a larger file.

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod detection;
+use detection::{CandidateEnd, LIMIT};
 pub mod i18n;
 mod ntfs;
 mod source;
@@ -14,7 +16,7 @@ use std::{
 };
 
 /// Formats currently recognized by the scanner, grouped for the interface.
-pub const FORMAT_SUMMARY: &str = "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI";
+pub const FORMAT_SUMMARY: &str = "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite";
 pub const FILE_CATEGORIES: &[&str] = &[
     "All files",
     "Pictures",
@@ -30,20 +32,20 @@ pub fn category_index(kind: &str) -> usize {
         "jpg" | "png" | "gif" | "bmp" | "webp" => 1,
         "ico" => 7,
         "pdf" | "docx" | "xlsx" | "pptx" | "docm" | "xlsm" | "pptm" | "odt" | "ods" | "odp"
-        | "epub" | "txt" | "csv" | "json" | "xml" | "md" | "html" | "log" => 2,
+        | "epub" | "txt" | "csv" | "json" | "xml" | "md" | "html" | "log" | "sqlite" => 2,
         "zip" => 3,
-        "wav" | "aiff" | "aifc" | "au" | "mp3" => 4,
-        "avi" | "mp4" => 5,
+        "wav" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" => 4,
+        "avi" | "mp4" | "ogv" => 5,
         "jar" | "apk" | "exe" => 6,
         _ => 0,
     }
 }
 
-const LIMIT: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Validation {
     ImageDecoded,
     MetadataChecked,
+    StructureChecked,
     Unverified,
 }
 impl Validation {
@@ -51,6 +53,7 @@ impl Validation {
         match self {
             Self::ImageDecoded => "Image decoded",
             Self::MetadataChecked => "NTFS record checked",
+            Self::StructureChecked => "Structure checked",
             Self::Unverified => "Unverified candidate",
         }
     }
@@ -149,7 +152,7 @@ struct Format {
     tail: &'static [u8],
     ext: &'static str,
 }
-const FORMATS: &[Format] = &[
+static FORMATS: &[Format] = &[
     Format {
         head: b"FORM",
         tail: b"",
@@ -205,15 +208,42 @@ const FORMATS: &[Format] = &[
         tail: b"\x00\x3b",
         ext: "gif",
     },
+    Format {
+        head: b"OggS",
+        tail: b"",
+        ext: "ogg",
+    },
+    Format {
+        head: b"SQLite format 3\0",
+        tail: b"",
+        ext: "sqlite",
+    },
 ];
 
-enum CandidateEnd {
-    More,
-    Invalid,
-    Complete(usize),
+// Dispatch only to signatures sharing the first byte instead of comparing
+// every format at every disk byte. The unit test covers every table entry.
+fn detect_format(bytes: &[u8]) -> Option<&'static Format> {
+    let range = match bytes.first()? {
+        b'F' => 0..1,
+        b'.' => 1..2,
+        0 => 2..3,
+        b'R' => 3..4,
+        b'B' => 4..5,
+        b'P' => 5..6,
+        0xff => 6..7,
+        0x89 => 7..8,
+        b'%' => 8..9,
+        b'G' => 9..11,
+        b'O' => 11..12,
+        b'S' => 12..13,
+        _ => return None,
+    };
+    FORMATS[range].iter().find(|f| bytes.starts_with(f.head))
 }
+
 fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -> CandidateEnd {
     match fmt.ext {
+        "sqlite" => return detection::sqlite_end(bytes),
         "ico" => return validation::ico_end(bytes, cancel),
         "png" => return validation::png_end(bytes),
         "gif" => return validation::gif_end(bytes),
@@ -486,6 +516,19 @@ fn zip_kind(bytes: &[u8]) -> &'static str {
     "zip"
 }
 
+// Interrupted reads must not abort a scan or discard an in-flight candidate.
+fn read_chunk(input: &mut impl Read, bytes: &mut [u8], cancel: &AtomicBool) -> io::Result<usize> {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(0);
+        }
+        match input.read(bytes) {
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
+}
+
 /// Bounded-memory signature carving. Candidates are not proof of valid/deleted files.
 pub fn scan(path: &Path, cancel: &AtomicBool, event: impl FnMut(Event)) -> io::Result<()> {
     scan_reader(&mut File::open(path)?, cancel, event)
@@ -500,6 +543,7 @@ pub fn scan_reader(
     file.seek(SeekFrom::Start(0))?;
     let mut buffer = vec![0; 1024 * 1024];
     let mut carry = Vec::new();
+    let signature_length = FORMATS.iter().map(|f| f.head.len()).max().unwrap_or(1);
     let mut base = 0u64;
     let mut found_count = 0usize;
     let mut skip_until = 0u64;
@@ -508,15 +552,25 @@ pub fn scan_reader(
         if cancel.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let n = file.read(&mut buffer)?;
+        let n = read_chunk(file, &mut buffer, cancel)?;
         carry.extend_from_slice(&buffer[..n]);
         let mut i = 0;
-        while (n == 0 && i < carry.len()) || i + 8 <= carry.len() {
+        while (n == 0 && i < carry.len()) || i + signature_length <= carry.len() {
             if cancel.load(Ordering::Relaxed) {
                 return Ok(());
             }
             if base + (i as u64) < skip_until {
                 i = (skip_until - base).min(carry.len() as u64) as usize;
+                continue;
+            }
+            // Empty disk regions are common. Only ICO begins with zero bytes;
+            // retain the last two zeros so an ICO spanning the run survives.
+            if carry[i..].starts_with(&[0; 16]) {
+                let zeros = carry[i..]
+                    .iter()
+                    .position(|b| *b != 0)
+                    .unwrap_or(carry.len() - i);
+                i += zeros - 2;
                 continue;
             }
             let offset = base + i as u64;
@@ -537,27 +591,37 @@ pub fn scan_reader(
                     event(Event::Found(found));
                 }
             }
-            if let Some(fmt) = FORMATS.iter().find(|f| carry[i..].starts_with(f.head)) {
+            if let Some(fmt) = detect_format(&carry[i..]) {
                 // Read candidate independently so the main streaming buffer stays bounded.
                 let offset = base + i as u64;
                 let position = file.stream_position()?;
                 file.seek(SeekFrom::Start(offset))?;
                 let mut candidate = Vec::new();
+                let mut ogg = detection::Ogg::default();
                 let mut end = None;
                 let mut kind = fmt.ext;
                 let mut checked = Validation::Unverified;
                 let mut chunk = vec![0u8; 8192];
                 while candidate.len() < LIMIT && !cancel.load(Ordering::Relaxed) {
                     let remaining = (LIMIT - candidate.len()).min(chunk.len());
-                    let count = file.read(&mut chunk[..remaining])?;
+                    let count = read_chunk(file, &mut chunk[..remaining], cancel)?;
                     if count == 0 {
                         break;
                     }
                     let from = candidate.len().saturating_sub(fmt.tail.len());
                     candidate.extend_from_slice(&chunk[..count]);
-                    match candidate_end(fmt, &candidate, from, cancel) {
+                    let boundary = if fmt.ext == "ogg" {
+                        ogg.push(&candidate, cancel)
+                    } else {
+                        candidate_end(fmt, &candidate, from, cancel)
+                    };
+                    match boundary {
                         CandidateEnd::Complete(size) => {
-                            kind = candidate_kind(fmt, &candidate[..size]);
+                            kind = if fmt.ext == "ogg" {
+                                ogg.kind()
+                            } else {
+                                candidate_kind(fmt, &candidate[..size])
+                            };
                             if let Some(validation) =
                                 validation::validate(kind, &candidate[..size], cancel)
                             {
@@ -579,7 +643,11 @@ pub fn scan_reader(
                     return Ok(());
                 }
                 if let Some(size) = end {
-                    if checked == Validation::ImageDecoded {
+                    if matches!(
+                        checked,
+                        Validation::ImageDecoded | Validation::StructureChecked
+                    ) || fmt.ext == "zip"
+                    {
                         skip_until = offset + size as u64;
                     }
                     found_count += 1;
@@ -693,16 +761,23 @@ pub fn recover_reader(
             "Source changed or candidate is truncated",
         ));
     }
-    if found.validation == Validation::ImageDecoded {
+    if matches!(
+        found.validation,
+        Validation::ImageDecoded | Validation::StructureChecked
+    ) {
         output.seek(SeekFrom::Start(0))?;
         let mut bytes = Vec::new();
         output.read_to_end(&mut bytes)?;
         if validation::validate(found.kind, &bytes, &AtomicBool::new(false))
-            != Some(Validation::ImageDecoded)
+            != Some(found.validation)
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Recovered image failed validation. The source may have changed since scanning.",
+                if found.validation == Validation::ImageDecoded {
+                    "Recovered image failed validation. The source may have changed since scanning."
+                } else {
+                    "Recovered container failed validation. The source may have changed since scanning."
+                },
             ));
         }
     }
@@ -714,6 +789,17 @@ pub fn recover_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn signature_dispatch_covers_every_format_and_partial_header() {
+        for format in FORMATS {
+            let selected = detect_format(format.head).unwrap();
+            assert!(std::ptr::eq(selected, format));
+            for length in 0..format.head.len() {
+                assert!(detect_format(&format.head[..length]).is_none());
+            }
+        }
+    }
+
     #[test]
     fn carve_boundary_and_recover_without_overwrite() {
         let dir = std::env::temp_dir().join(format!("reclaim-test-{}", std::process::id()));

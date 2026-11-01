@@ -15,3 +15,19 @@ Pillow from a project-owned RGB gradient. They contain valid encoded pixels,
 not placeholder image bodies. ICO fixtures cover multiple PNG/DIB frames and
 the zero-byte directory dimension that means 256 pixels. Test code mutates
 copies in memory to exercise corruption and false-positive rejection.
+
+`real.sqlite` and `large-page.sqlite` are databases generated with Python's
+standard-library SQLite binding, using page sizes of 512 and 65536 bytes. Each
+contains a small table with a text value and the project-owned PNG as a BLOB.
+Both pass SQLite's `PRAGMA integrity_check`; the latter exercises the special
+page-size header value of 1. The embedded image also tests duplicate suppression.
+
+`real.ogg` (Vorbis), `real.opus` (Opus), and `real.ogv` (Theora) were generated
+with FFmpeg from a 440 Hz sine wave or solid blue 32×32 frames, with bitexact
+flags and stripped metadata. They contain actual encoded media; FFmpeg decodes
+all three without errors. Test-created Ogg pages independently calculate their
+CRC bit by bit to exercise invalid sequence numbers and packet continuations.
+
+`embedded-image.zip` stores the project PNG without compression, with a fixed
+2020 timestamp. It verifies that a complete archive produces one candidate,
+while a damaged archive still exposes its independently recoverable image.

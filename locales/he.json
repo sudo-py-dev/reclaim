@@ -119,7 +119,6 @@
   "Select all shown": "בחירת כל המוצגים",
   "Select candidates and save them to another physical drive. Existing files are never replaced. Open recovered files and check their contents.": "בחרו קבצים לשחזור ושמרו אותם בכונן פיזי אחר. קבצים קיימים לא יוחלפו. פתחו את הקבצים ששוחזרו ובדקו את תוכנם.",
   "Select the drive or volume where your files were stored, then choose Scan Drive. Linux can request read-only access through desktop authentication. Windows raw drives require administrator access; macOS may require Full Disk Access and administrator privileges. You can open a raw disk image instead. Encrypted volumes must be unlocked first.": "בחרו את הכונן שבו היו הקבצים ולחצו על סריקת הכונן. בלינוקס אפשר לאשר גישת קריאה בלבד באמצעות בקשת הזדהות. ב־Windows נדרשת הרשאת מנהל לגישה ישירה לכונן; ב־macOS עשויות להידרש גישה מלאה לכונן והרשאת מנהל. אפשר לפתוח דמות כונן גולמית במקום זאת. יש לבטל תחילה נעילה של כוננים מוצפנים.",
-  "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI": "קבצים קטנים מתוך רשומות NTFS · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI",
   "Small deleted NTFS files can retain their original names and contents inside an MFT record. When a checked record is available, its filename is used. Other results are found by file signatures and receive generated names such as Image 0001.png. Original folders are not reconstructed. Names are made portable when saving, and duplicate names get a numeric suffix.": "קובצי NTFS קטנים שנמחקו עשויים לשמור את שמם ואת תוכנם בתוך רשומת MFT. כשנמצאת רשומה תקינה, נעשה שימוש בשם שבה. קבצים אחרים מזוהים לפי חתימות ומקבלים שמות אוטומטיים, למשל Image 0001.png. תיקיות מקוריות אינן משוחזרות. שמות מותאמים למערכת ההפעלה בעת השמירה, ולשמות כפולים נוסף מספר.",
   "Source changed or candidate is truncated": "המקור השתנה או שהנתונים לשחזור קטועים",
   "Source changed since scanning. Scan it again before recovering.": "המקור השתנה מאז הסריקה. סרקו אותו שוב לפני השחזור.",
@@ -218,5 +217,8 @@
   "Update installed. Close and reopen Reclaim to use it.": "העדכון הותקן. יש לסגור ולפתוח מחדש את Reclaim כדי להשתמש בו.",
   "Downloading and verifying update…": "מוריד ומאמת את העדכון…",
   "Download installer": "הורדת תוכנית התקנה",
-  "Download the new installer, close Reclaim, then run it to update.": "יש להוריד את תוכנית ההתקנה החדשה, לסגור את Reclaim ולהפעיל אותה לעדכון."
+  "Download the new installer, close Reclaim, then run it to update.": "יש להוריד את תוכנית ההתקנה החדשה, לסגור את Reclaim ולהפעיל אותה לעדכון.",
+  "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite": "קבצים קטנים מתוך רשומות NTFS · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite",
+  "Recovered container failed validation. The source may have changed since scanning.": "אימות המכל ששוחזר נכשל. ייתכן שהמקור השתנה מאז הסריקה.",
+  "Structure checked": "המבנה נבדק"
 }

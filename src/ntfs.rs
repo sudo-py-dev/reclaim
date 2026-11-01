@@ -223,9 +223,14 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
     }
     let (_, name) = name?;
     let data = data?;
-    let kind = extension_kind(&name);
+    let kind = if data.starts_with(b"SQLite format 3\0") {
+        "sqlite"
+    } else {
+        extension_kind(&name)
+    };
     let validation = match crate::validation::validate(kind, &data, cancel)? {
         Validation::ImageDecoded => Validation::ImageDecoded,
+        Validation::StructureChecked => Validation::StructureChecked,
         _ => Validation::MetadataChecked,
     };
     Some(Found {
@@ -253,6 +258,10 @@ fn extension_kind(name: &str) -> &'static str {
         Some("webp") => "webp",
         Some("ico") => "ico",
         Some("pdf") => "pdf",
+        Some("sqlite" | "sqlite3") => "sqlite",
+        Some("ogg" | "oga") => "ogg",
+        Some("opus") => "opus",
+        Some("ogv") => "ogv",
         Some("zip") => "zip",
         Some("docx") => "docx",
         Some("xlsx") => "xlsx",

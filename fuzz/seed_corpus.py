@@ -6,9 +6,13 @@ import struct
 root = Path(__file__).resolve().parent
 corpus = root / "corpus" / "scan"
 corpus.mkdir(parents=True, exist_ok=True)
+containers = root / "containers" / "corpus" / "containers"
+containers.mkdir(parents=True, exist_ok=True)
 for fixture in (root.parent / "tests" / "fixtures").iterdir():
-    if fixture.is_file() and fixture.suffix != ".md":
+    if fixture.is_file() and fixture.suffix != ".md" and fixture.stat().st_size <= 64 * 1024:
         shutil.copyfile(fixture, corpus / fixture.name)
+        if fixture.suffix in {".sqlite", ".ogg", ".opus", ".ogv"}:
+            shutil.copyfile(fixture, containers / fixture.name)
 
 record = bytearray(1024)
 record[:4] = b"FILE"
