@@ -1,0 +1,104 @@
+# Security review — 2026-11-01
+
+This pass reviewed carving and validation, NTFS resident records, recovery output,
+settings persistence, updater metadata/downloads, and native drive discovery.
+It is a focused source review, not a security certification.
+
+## Changes
+
+- The library forbids unsafe Rust at compile time. This covers first-party
+  library code, not dependency internals or the separate GUI executable.
+- Recovery uses a randomly named private temporary file in the destination
+  directory. It checks completeness and image validity through that open handle,
+  syncs it, then publishes without replacing an existing destination. Failures
+  clean up the temporary file instead of deleting a potentially replaced final
+  path. Unix recovered files have mode 0600.
+- Settings use a private temporary file and atomic replacement instead of a
+  predictable `.tmp` pathname that could follow a pre-existing symlink.
+- Original and generated recovery filenames are sanitized. Unicode direction
+  controls are replaced to reduce extension/name spoofing.
+- Update URLs must match the exact project, release tag, and platform asset.
+  Download verification independently enforces size and digest bounds, including
+  when callers construct public release metadata directly.
+
+## Verification
+
+`cargo test --locked --all-targets --offline`: 64 passed, 2 host-dependent tests ignored.
+
+`cargo clippy --locked --all-targets --offline -- -D warnings -D clippy::correctness -D clippy::suspicious -D clippy::undocumented_unsafe_blocks`: passed.
+
+Regression tests cover incomplete/invalid export cleanup, existing symlink
+protection, Unix permissions, hostile filenames, unexpected release paths,
+and invalid update sizes including u64::MAX.
+
+## Remaining boundaries
+
+- Native Windows/macOS discovery still needs unsafe OS FFI. Those paths were
+  inspected but were not built or exercised on this Linux host.
+- Updates trust GitHub HTTPS and GitHub-provided SHA-256 metadata. This does not
+  provide independent publisher signatures if the release account is compromised.
+- Use an output/config directory controlled by the user. Atomic publication
+  does not protect against an attacker who can rename ancestor directories or
+  modify files with the same account's privileges.
+- Image validation is not malware scanning. Recovered documents, archives and
+  executables remain untrusted content. Parser and decoder limits bound memory
+  in common paths, but do not establish a hard CPU-time limit for hostile input.
+
+## Production tooling follow-up
+
+Tools installed and run locally:
+
+- `cargo-audit 0.22.2`: zero known vulnerabilities in `Cargo.lock`. Three
+  unmaintained-package advisories remain: RUSTSEC-2026-0370 (`zvariant`),
+  RUSTSEC-2026-0371 (`zbus_names`), and RUSTSEC-2026-0372 (`zvariant_derive`).
+- `cargo-deny 0.20.2`: dependency sources and bans pass. The strict advisory
+  check **fails** on those three maintenance advisories. No advisory is ignored.
+- `cargo-fuzz 0.13.2` with libFuzzer: the final two-minute run completed
+  **334 inputs in 121 seconds**, exit status 0, with AddressSanitizer and
+  LeakSanitizer enabled. No crash, address-sanitizer, or leak finding was reported.
+  It used a debug build with overflow checks/assertions, real-format/NTFS seeds,
+  the format dictionary, 64 KiB input and 2 GiB RSS limits, and a 10-second
+  per-input timeout. The fuzz lockfile matches production dependency versions
+  and checksums; CI verifies that match.
+- Miri `0.1.0 (7189d39d9c 2026-10-22)`: four targeted tests passed, covering
+  failed-export cleanup, aligned source reads/seek bounds, and updater checksum,
+  truncation, oversized-download rejection, and hostile/torn/truncated NTFS
+  record rejection. The full security-test target
+  cannot run under Miri because it does not emulate `renameat2` used by
+  `tempfile::persist_noclobber`; this is an interpreter limitation, not a detected
+  undefined-behavior finding. Publication tests pass natively.
+
+The RustSec database used for cargo-audit was fetched on 2026-11-01 at commit
+`2295466c4e9df26647fd67d8fa1c705ac2fc7f81` (1,395 advisories).
+
+The maintenance advisories describe crates merged into zbus 6. Our direct zbus
+5 dependency and the accessibility stack both depend on the old crates. The
+latest accessibility adapter inspected (`accesskit_unix 0.24.1`) still depends
+on zbus 5.19. Upgrading only our direct dependency would retain the affected
+crates and add another D-Bus implementation version. Accessibility was retained;
+a coordinated upstream migration remains necessary. These are maintenance
+findings, not reported exploitable vulnerabilities.
+
+`.github/workflows/security.yml` adds dependency checks, AddressSanitizer fuzzing,
+and the supported Miri checks for pushes, pull requests, manual runs, and weekly
+runs. Action references are pinned to verified immutable hashes, tool releases
+are pinned, and workflow permissions are read-only. The dependency job will
+remain red until the maintenance findings are resolved; the other jobs run
+independently. This workflow has been checked locally as YAML, but has not run
+on GitHub in this session.
+
+`deny.toml` rejects unknown Git/registry sources, wildcard dependencies, yanked
+versions, stale offline advisory databases, and unmaintained packages. See
+`fuzz/README.md` for the reproducible fuzzing commands and scope limits. Local
+machine-readable audit/policy reports and test logs are under
+`target/security-reports/` (ignored build artifacts).
+
+These checks do not prove the absence of vulnerabilities, and the two-minute
+fuzz budget is a smoke check, not a sustained fuzzing campaign.
+
+The initial sandboxed fuzz run completed 408 inputs but its LeakSanitizer
+shutdown failed because process inspection was blocked. An address-only rerun
+completed 318 inputs in 125 seconds. A fixed-fixture replay and then the final
+full sanitizer run succeeded outside that sandbox, without changing kernel
+settings or disabling leak detection. No application fix or crash suppression
+was needed for that tooling limitation.

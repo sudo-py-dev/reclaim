@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod i18n;
 mod ntfs;
 mod source;
@@ -5,7 +7,7 @@ pub mod updater;
 mod validation;
 pub use source::SourceReader;
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io::{self, Read, Seek, SeekFrom},
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
@@ -92,14 +94,16 @@ impl Found {
             7 => "Icon",
             _ => "File",
         };
-        format!("{label} {number:04}.{}", self.kind)
+        portable_name(&format!("{label} {number:04}.{}", self.kind))
     }
 }
 fn portable_name(name: &str) -> String {
     let mut name: String = name
         .chars()
         .map(|c| {
-            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+            if c.is_control()
+                || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+                || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
                 '_'
             } else {
                 c
@@ -671,41 +675,40 @@ pub fn recover_reader(
     if found.resident_data.is_none() {
         input.seek(SeekFrom::Start(found.offset))?;
     }
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)?;
-    let result = (|| {
-        let copied = if let Some(bytes) = &found.resident_data {
-            io::copy(&mut bytes.as_ref(), &mut output)?
-        } else {
-            io::copy(&mut input.take(found.size), &mut output)?
-        };
-        if copied != found.size {
+    // Keep incomplete or unvalidated data private. Publish without replacing an
+    // existing entry, including a symlink, only after all checks succeed.
+    let parent = destination
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut output = tempfile::NamedTempFile::new_in(parent)?;
+    let copied = if let Some(bytes) = &found.resident_data {
+        io::copy(&mut bytes.as_ref(), &mut output)?
+    } else {
+        io::copy(&mut input.take(found.size), &mut output)?
+    };
+    if copied != found.size {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "Source changed or candidate is truncated",
+        ));
+    }
+    if found.validation == Validation::ImageDecoded {
+        output.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        output.read_to_end(&mut bytes)?;
+        if validation::validate(found.kind, &bytes, &AtomicBool::new(false))
+            != Some(Validation::ImageDecoded)
+        {
             return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Source changed or candidate is truncated",
+                io::ErrorKind::InvalidData,
+                "Recovered image failed validation. The source may have changed since scanning.",
             ));
         }
-        output.sync_all()?;
-        if found.validation == Validation::ImageDecoded {
-            let bytes = std::fs::read(destination)?;
-            if validation::validate(found.kind, &bytes, &AtomicBool::new(false))
-                != Some(Validation::ImageDecoded)
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Recovered image failed validation. The source may have changed since scanning.",
-                ));
-            }
-        }
-        Ok(())
-    })();
-    drop(output);
-    if result.is_err() {
-        let _ = std::fs::remove_file(destination);
     }
-    result
+    output.as_file().sync_all()?;
+    output.persist_noclobber(destination).map_err(|e| e.error)?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,0 +1,25 @@
+# Check the desktop platforms we ship, including their target-specific crates.
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "all"
+maximum-db-staleness = "P7D"
+# No ignored advisories. Unmaintained dependencies fail the security gate.
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

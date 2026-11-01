@@ -1,0 +1,67 @@
+name: Rust security
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+      - run: cargo audit
+      # Intentionally fails on unresolved maintenance advisories as well as vulnerabilities.
+      - run: cargo deny --locked check advisories bans sources
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install nightly --profile minimal --component rust-src
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+        with:
+          tool: cargo-fuzz@0.13.2
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+      - run: python3 fuzz/check_lock.py
+      - run: python3 fuzz/seed_corpus.py
+      - name: Fuzz scanner with AddressSanitizer
+        run: cargo +nightly fuzz run scan --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=2048 -dict=fuzz/scan.dict
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
+  miri:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 2
+      # These tests intentionally use private temporary directories on the host.
+      MIRIFLAGS: -Zmiri-disable-isolation
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install nightly --profile minimal --component miri,rust-src
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+      - run: cargo +nightly miri setup
+      # Miri does not emulate renameat2 used by tempfile::persist_noclobber.
+      # Publication/symlink tests run natively in the desktop build workflow.
+      - run: cargo +nightly miri test --locked --test security failed_exports_never_publish_partial_or_invalid_files
+      - run: cargo +nightly miri test --locked --test security source_reader_preserves_bytes_and_checks_seek_bounds
+      - run: cargo +nightly miri test --locked --lib updater::tests::download_rejects_corruption_truncation_and_oversize
+      - run: cargo +nightly miri test --locked --test ntfs_resident rejects_active_directory_external_torn_truncated_and_path_like_records

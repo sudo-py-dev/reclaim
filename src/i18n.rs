@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32, FontFamily, FontId, TextFormat, WidgetText};
 use std::{
     cell::Cell,
     collections::{BTreeMap, HashMap},
-    io::{self, Read},
+    io::{self, Read, Write},
     path::PathBuf,
     sync::{
         OnceLock,
@@ -197,14 +197,15 @@ pub fn set_preference(value: Preference) -> io::Result<()> {
     PREFERENCE.store(number, Ordering::Relaxed);
     if let Some(path) = settings_path() {
         std::fs::create_dir_all(path.parent().unwrap())?;
-        let temporary = path.with_extension("json.tmp");
+        let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
         let text = match value {
             Preference::System => "\"system\"",
             Preference::English => "\"en\"",
             Preference::Hebrew => "\"he\"",
         };
-        std::fs::write(&temporary, text)?;
-        std::fs::rename(temporary, path)?;
+        temporary.write_all(text.as_bytes())?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(path).map_err(|e| e.error)?;
     }
     Ok(())
 }

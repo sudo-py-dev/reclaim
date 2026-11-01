@@ -77,7 +77,9 @@ fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, Stri
     let url = asset["browser_download_url"]
         .as_str()
         .ok_or("Missing download URL")?;
-    if !url.starts_with(&format!("https://github.com/{REPO}/releases/download/")) {
+    if url != format!("https://github.com/{REPO}/releases/download/{tag}/{asset_name}")
+        || !(tag == version.to_string() || tag == format!("v{version}"))
+    {
         return Err("Unexpected release download URL".into());
     }
     let digest = asset["digest"]
@@ -131,6 +133,21 @@ pub fn install(release: &Release) -> Result<(), String> {
     if installer_download(release).is_some() {
         return Err("This installation must be updated using the matching installer.".into());
     }
+    if release.url
+        != format!(
+            "https://github.com/{REPO}/releases/download/v{}/{}",
+            release.version,
+            asset_name()
+        )
+        && release.url
+            != format!(
+                "https://github.com/{REPO}/releases/download/{}/{}",
+                release.version,
+                asset_name()
+            )
+    {
+        return Err("Unexpected release download URL".into());
+    }
     // Private temporary file, bounded streaming download, verify before replacing anything.
     let mut file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
     let mut response = agent()
@@ -149,6 +166,14 @@ fn verify_download(
     mut file: impl Write,
     release: &Release,
 ) -> Result<(), String> {
+    // Release is public: enforce bounds here as well as when parsing the API.
+    if release.size == 0
+        || release.size > MAX_BINARY
+        || release.digest.len() != 64
+        || !release.digest.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err("Invalid update metadata".into());
+    }
     let mut reader = reader.take(release.size + 1);
     let mut hash = Sha256::new();
     let mut size = 0;
@@ -210,6 +235,30 @@ mod tests {
             assert!(verify_download(bad, Vec::new(), &r).is_err());
         }
     }
+    #[test]
+    fn rejects_unbounded_public_release_metadata() {
+        let mut r = parse_release(&release(), "test").unwrap().unwrap();
+        for size in [0, MAX_BINARY + 1, u64::MAX] {
+            r.size = size;
+            assert!(verify_download(&b"abc"[..], Vec::new(), &r).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_download_paths_outside_the_exact_release_asset() {
+        for suffix in [
+            "../other",
+            "test?redirect=other",
+            "test#fragment",
+            "%2e%2e/test",
+        ] {
+            let mut r = release();
+            r["assets"][0]["browser_download_url"] =
+                format!("https://github.com/{REPO}/releases/download/v99.0.0/{suffix}").into();
+            assert!(parse_release(&r, "test").is_err());
+        }
+    }
+
     #[test]
     fn validates_release_contract() {
         assert_eq!(
