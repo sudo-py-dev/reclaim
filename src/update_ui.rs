@@ -90,7 +90,10 @@ impl Updates {
             ui.label(&release.notes);
             if let Some(url) = updater::installer_download(release) {
                 ui.t_label("Download the new installer, close Reclaim, then run it to update.");
-                ui.hyperlink_to(reclaim::i18n::t("Download installer"), url);
+                ui.t_label("Copy the download link into your browser.");
+                if ui.button(reclaim::i18n::t("Copy download link")).clicked() {
+                    ui.ctx().copy_text(url);
+                }
                 return;
             }
             if busy {

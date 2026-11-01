@@ -1350,7 +1350,54 @@ impl Drop for Reclaim {
         self.cancel.store(true, Ordering::Relaxed);
     }
 }
+// Prevent process-backed D-Bus addresses (including unixexec) from reaching
+// our clients or desktop dependencies. A session socket is required so the
+// native dialog library cannot fall back to autolaunching a bus helper.
+#[cfg(target_os = "linux")]
+fn native_bus_addresses() -> Result<(), String> {
+    let session = std::env::var("DBUS_SESSION_BUS_ADDRESS").map_err(|_| {
+        "A native desktop D-Bus session is required; helper autolaunch is disabled.".to_owned()
+    })?;
+    native_bus_address(&session)?;
+    for name in ["DBUS_SYSTEM_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS"] {
+        if let Some(address) = std::env::var_os(name) {
+            native_bus_address(address.to_str().ok_or("Invalid native bus address")?)?;
+        }
+    }
+    Ok(())
+}
+#[cfg(target_os = "linux")]
+fn native_bus_address(value: &str) -> Result<(), String> {
+    if value.contains(';') {
+        return Err("D-Bus address fallback lists are disabled.".into());
+    }
+    let address: zbus::Address = value.parse().map_err(|_| "Invalid native D-Bus address")?;
+    if !matches!(address.transport(), zbus::address::Transport::Unix(_)) {
+        return Err("Only native Unix-socket D-Bus addresses are allowed; process-backed transports are disabled.".into());
+    }
+    Ok(())
+}
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn native_bus_transport_rejects_external_programs() {
+    assert!(native_bus_address("unix:path=/run/user/1000/bus").is_ok());
+    assert!(native_bus_address("unix:abstract=desktop-bus").is_ok());
+    for address in [
+        "unixexec:path=/bin/sh,argv1=-c,argv2=echo",
+        "autolaunch:",
+        "tcp:host=localhost,port=1234",
+        "unix:path=/tmp/bus;unixexec:path=sh",
+    ] {
+        assert!(native_bus_address(address).is_err(), "{address}");
+    }
+}
+
 fn main() -> eframe::Result {
+    #[cfg(target_os = "linux")]
+    if let Err(error) = native_bus_addresses() {
+        eprintln!("{error}");
+        return Ok(());
+    }
     i18n::init();
     eframe::run_native(
         &i18n::t("Reclaim — File Recovery"),

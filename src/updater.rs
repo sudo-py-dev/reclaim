@@ -122,7 +122,7 @@ fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Op
             .any(|p| p.extension().is_some_and(|e| e == "app"))
     {
         Some(format!("reclaim-macos-{}.pkg", std::env::consts::ARCH))
-    } else if cfg!(windows) && executable.parent()?.join("installed-by-inno").is_file() {
+    } else if cfg!(windows) {
         Some("reclaim-windows-x86_64-setup.exe".into())
     } else {
         None
@@ -148,6 +148,9 @@ pub fn install(release: &Release) -> Result<(), String> {
     {
         return Err("Unexpected release download URL".into());
     }
+    if cfg!(windows) {
+        return Err("This installation must be updated using the matching installer.".into());
+    }
     // Private temporary file, bounded streaming download, verify before replacing anything.
     let mut file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
     let mut response = agent()
@@ -156,9 +159,28 @@ pub fn install(release: &Release) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     verify_download(response.body_mut().as_reader(), &mut file, release)?;
     file.as_file().sync_all().map_err(|e| e.to_string())?;
-    self_replace::self_replace(file.path()).map_err(|e| {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    replace_executable(&executable, file.path()).map_err(|e| {
         format!("Could not install update: {e}. Move Reclaim to a writable folder and retry.")
     })
+}
+
+// Unix permits replacing a running executable. Publish a synced file on the
+// same filesystem using Rust filesystem APIs; never spawn a cleanup helper.
+fn replace_executable(
+    executable: &std::path::Path,
+    downloaded: &std::path::Path,
+) -> std::io::Result<()> {
+    let permissions = executable.metadata()?.permissions();
+    let parent = executable
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Executable has no parent"))?;
+    let mut pending = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::copy(&mut std::fs::File::open(downloaded)?, &mut pending)?;
+    pending.as_file().set_permissions(permissions)?;
+    pending.as_file().sync_all()?;
+    pending.persist(executable).map_err(|e| e.error)?;
+    Ok(())
 }
 
 fn verify_download(
@@ -207,9 +229,39 @@ mod tests {
             "browser_download_url":"https://github.com/sudo-py-dev/reclaim/releases/download/v99.0.0/test"}]})
     }
     #[test]
+    fn replacement_uses_filesystem_apis_and_preserves_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join("reclaim");
+        let downloaded = dir.path().join("download");
+        std::fs::write(&installed, b"old").unwrap();
+        std::fs::write(&downloaded, b"new").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        replace_executable(&installed, &downloaded).unwrap();
+        assert_eq!(std::fs::read(&installed).unwrap(), b"new");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                installed.metadata().unwrap().permissions().mode() & 0o777,
+                0o755
+            );
+        }
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
     fn portable_and_packaged_update_paths() {
         let version = semver::Version::parse("1.2.3").unwrap();
+        #[cfg(not(windows))]
         assert!(installer_name(std::path::Path::new("/tmp/reclaim"), &version).is_none());
+        #[cfg(windows)]
+        assert!(
+            installer_name(std::path::Path::new("C:/portable/reclaim.exe"), &version).is_some()
+        );
         #[cfg(target_os = "linux")]
         assert_eq!(
             installer_name(std::path::Path::new("/usr/bin/reclaim"), &version).as_deref(),

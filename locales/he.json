@@ -220,5 +220,7 @@
   "Download the new installer, close Reclaim, then run it to update.": "יש להוריד את תוכנית ההתקנה החדשה, לסגור את Reclaim ולהפעיל אותה לעדכון.",
   "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite": "קבצים קטנים מתוך רשומות NTFS · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite",
   "Recovered container failed validation. The source may have changed since scanning.": "אימות המכל ששוחזר נכשל. ייתכן שהמקור השתנה מאז הסריקה.",
-  "Structure checked": "המבנה נבדק"
+  "Structure checked": "המבנה נבדק",
+  "Copy download link": "העתקת קישור להורדה",
+  "Copy the download link into your browser.": "יש להעתיק את קישור ההורדה לדפדפן."
 }

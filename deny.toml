@@ -18,6 +18,18 @@ maximum-db-staleness = "P7D"
 multiple-versions = "allow"
 wildcards = "deny"
 
+[[bans.deny]]
+name = "self-replace"
+reason = "Windows cleanup launches cmd.exe; use native filesystem updates."
+
+[[bans.deny]]
+name = "webbrowser"
+reason = "Browser helpers are not part of the native API runtime policy."
+
+[[bans.deny]]
+name = "open"
+reason = "Do not launch external programs to open files or URLs."
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

@@ -220,5 +220,7 @@
   "Download the new installer, close Reclaim, then run it to update.": "Download the new installer, close Reclaim, then run it to update.",
   "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite": "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite",
   "Recovered container failed validation. The source may have changed since scanning.": "Recovered container failed validation. The source may have changed since scanning.",
-  "Structure checked": "Structure checked"
+  "Structure checked": "Structure checked",
+  "Copy download link": "Copy download link",
+  "Copy the download link into your browser.": "Copy the download link into your browser."
 }

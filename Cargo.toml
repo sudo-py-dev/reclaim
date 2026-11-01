@@ -40,9 +40,6 @@ version = "0.10"
 [dependencies.tempfile]
 version = "3"
 
-[dependencies.self-replace]
-version = "1.5"
-
 [profile.release]
 opt-level = "z"
 lto = "fat"
