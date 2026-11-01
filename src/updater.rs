@@ -328,7 +328,7 @@ mod tests {
         r["prerelease"] = true.into();
         assert!(parse_release(&r, "test").unwrap().is_none());
         r = release();
-        r["tag_name"] = "v0.1.0".into();
+        r["tag_name"] = format!("v{}", env!("CARGO_PKG_VERSION")).into();
         assert!(parse_release(&r, "test").unwrap().is_none());
         r = release();
         r["assets"][0]["size"] = (MAX_BINARY + 1).into();

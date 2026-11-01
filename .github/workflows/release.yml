@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   build:
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -100,6 +101,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -113,4 +115,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" dist/* --verify-tag --draft --generate-notes --title "Reclaim $TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --draft=false
+          else
+            gh release create "$TAG" dist/* --verify-tag --generate-notes --title "Reclaim $TAG"
+          fi

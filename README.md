@@ -4,7 +4,7 @@
 
 Reclaim helps you look for recoverable photos, documents, and other files on a drive or a saved copy of a drive. A simple interface guides you from choosing a drive to saving the files you want to keep.
 
-**Version 0.1.0 · Early preview · English & Hebrew**
+**Version 0.1.1 · Early preview · English & Hebrew**
 
 ![Reclaim 0.1.0 — choose a drive to scan](docs/screenshots/reclaim-drives.png)
 
@@ -42,7 +42,8 @@ Reclaim scans your source in **read-only mode**. When saving recovered files, it
 | Photos and pictures | JPG, PNG, GIF, BMP, WebP |
 | Documents | PDF, Word, Excel, PowerPoint, OpenDocument, EPUB |
 | Archives and app packages | ZIP, JAR, APK |
-| Audio and video | WAV, AIFF, AU, AVI |
+| Audio and video | WAV, AIFF, AU, AVI, Ogg Vorbis, Opus, Theora |
+| Databases | SQLite |
 | Icons | ICO |
 
 Some smaller files on Windows-formatted NTFS drives can also be recovered with their original names. Their details may include original creation, modification, and access dates, shown in UTC. Other files receive names such as `Image 0001.png`.
@@ -59,7 +60,7 @@ Download an installer from [GitHub Releases](https://github.com/sudo-py-dev/recl
 
 Portable ZIPs remain available. Extract one to a writable folder and run Reclaim. On Linux and macOS, you may need `chmod +x reclaim-*` before the first launch. Linux portable builds require glibc 2.35 or newer and X11/Wayland desktop libraries.
 
-Reclaim checks for stable updates on startup. An update notice opens Settings, where **What’s new** shows the GitHub release notes. **Install update** downloads and verifies the matching executable using GitHub’s SHA-256 digest, then replaces the portable executable. Close and reopen the app to finish. Installation is disabled during scans and recovery. Portable apps must be in a writable folder. Installed Windows, Debian, and macOS apps offer **Download installer** instead: download the new installer, close Reclaim, and run it to upgrade. This preserves package and uninstaller metadata. Checks require access to GitHub and do not send scan data.
+Reclaim checks for stable updates on startup. An update notice opens Settings, where **What’s new** shows the GitHub release notes. **Install update** downloads and verifies the matching executable using GitHub’s SHA-256 digest, then replaces the portable executable on Unix systems. Close and reopen the app to finish. Installation is disabled during scans and recovery. Portable apps must be in a writable folder. Windows apps and installed Debian/macOS apps provide **Copy download link** instead: paste the link into your browser, download the new installer, close Reclaim, and run it to upgrade. This preserves package and uninstaller metadata. Checks require access to GitHub and do not send scan data.
 
 You can also [build from source](docs/DEVELOPMENT.md#build-and-run).
 
@@ -91,6 +92,6 @@ Built with [egui](https://github.com/emilk/egui). Bundled fonts and icons includ
 
 Set the package version in `Cargo.toml`, refresh `Cargo.lock`, commit, and push a matching `vX.Y.Z` tag. The [release workflow](.github/workflows/release.yml) tests and builds Linux x86_64, Windows x86_64, and separate Apple Silicon/Intel macOS executables. Size-focused release settings enable full LTO, symbol stripping, and a single code generation unit. ZIP downloads include license notices; raw executables are also published for the updater, with SHA-256 sidecars for manual verification.
 
-The workflow creates a **draft** only after all four builds pass. Review and edit the generated GitHub release notes, then publish it as a stable release to make the update available in the app. Prereleases and drafts are ignored by the updater. Release asset names form the updater contract and must stay consistent with `src/updater.rs`. Forks should change the repository constant there. Every release also includes a compressed Inno Setup installer, an xz-compressed Debian package, and architecture-specific macOS `.pkg` installers. Installer assets receive SHA-256 sidecars too. The macOS packages are unsigned until Developer ID signing and notarization credentials are configured; the workflow currently uses ad-hoc app signing.
+The workflow publishes a stable GitHub release with generated release notes after all four builds pass, making the downloads and in-app update available immediately. Rerunning it for the same tag replaces the release assets and publishes any existing draft. Prereleases and drafts are ignored by the updater. Release asset names form the updater contract and must stay consistent with `src/updater.rs`. Forks should change the repository constant there. Every release also includes a compressed Inno Setup installer, an xz-compressed Debian package, and architecture-specific macOS `.pkg` installers. Installer assets receive SHA-256 sidecars too. The macOS packages are unsigned until Developer ID signing and notarization credentials are configured; the workflow currently uses ad-hoc app signing.
 
 To build a native installer locally after compiling the release executable, run `python3 scripts/package-release.py linux --binary target/release/reclaim` (or use `windows` / `macos` with the matching executable and `--arch aarch64` for Apple Silicon). The script requires `dpkg-deb` on Linux, Inno Setup 6 on Windows, or Apple command-line tools on macOS. Output goes to `dist/`.
