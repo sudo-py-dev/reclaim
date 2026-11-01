@@ -1,0 +1,25 @@
+[package]
+name = "reclaim"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Read-only disk image carving and file recovery"
+
+[dependencies]
+eframe = { version = "=0.36.2", default-features = false, features = ["glow", "default_fonts", "x11", "wayland", "accesskit"] }
+rfd = "=0.17.2"
+serde_json = "=1.0.151"
+image = { version = "=0.25.10", default-features = false, features = ["ico", "png", "bmp", "jpeg", "gif", "webp"] }
+crc32fast = "=1.5.3"
+sys-locale = "=0.3.2"
+unicode-bidi = "=0.3.18"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "=5.19.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation-sys = "=0.8.7"
+libc = "=0.2.191"

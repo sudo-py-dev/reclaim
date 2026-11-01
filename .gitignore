@@ -1,0 +1,14 @@
+/target/
+/dist/
+/.agents/
+/.aws/
+/.codex/
+.env
+.env.*
+*.img
+*.iso
+*.raw
+*.dd
+/recovered/
+.DS_Store
+Thumbs.db
