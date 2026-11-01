@@ -12,7 +12,15 @@ version = 2
 yanked = "deny"
 unmaintained = "all"
 maximum-db-staleness = "P7D"
-# No ignored advisories. Unmaintained dependencies fail the security gate.
+# AccessKit still requires the zbus 5 wire/name crates merged into zbus 6.
+# These informational notices are reviewed in docs/security-review.md and expire
+# on 2026-12-15 via scripts/check_advisory_policy.py. Vulnerabilities still fail.
+ignore = [
+    { id = "RUSTSEC-2026-0370", reason = "Expires 2026-12-15. zvariant 5 remains required by AccessKit; migrate when its zbus 6 adapter is available." },
+    { id = "RUSTSEC-2026-0371", reason = "Expires 2026-12-15. zbus_names 4 remains required by AccessKit and zbus 5; pending coordinated upstream migration." },
+    { id = "RUSTSEC-2026-0372", reason = "Expires 2026-12-15. zvariant_derive 5 is the matching macro crate for AccessKit's required zvariant 5." },
+]
+unused-ignored-advisory = "deny"
 
 [bans]
 multiple-versions = "allow"

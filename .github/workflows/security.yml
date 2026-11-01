@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# 2026-10-31 nightly fails with E0391 in zvariant_utils before tests run.
+# Update this tested pin deliberately rather than following nightly HEAD.
+env:
+  SECURITY_TOOLCHAIN: nightly-2026-10-23
+
 jobs:
   dependencies:
     runs-on: ubuntu-latest
@@ -18,8 +23,10 @@ jobs:
       - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+      - run: python3 -m unittest discover -s scripts -p test_advisory_policy.py
+      - run: python3 scripts/check_advisory_policy.py
       - run: cargo audit
-      # Intentionally fails on unresolved maintenance advisories as well as vulnerabilities.
+      # Vulnerabilities remain errors; narrowly scoped maintenance exceptions live in deny.toml.
       - run: cargo deny --locked check advisories bans sources
 
   fuzz:
@@ -29,7 +36,7 @@ jobs:
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - run: rustup toolchain install nightly --profile minimal --component rust-src
+      - run: rustup toolchain install "$SECURITY_TOOLCHAIN" --profile minimal --component rust-src
       - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: cargo-fuzz@0.13.2
@@ -38,9 +45,9 @@ jobs:
       - run: python3 fuzz/check_lock.py
       - run: python3 fuzz/seed_corpus.py
       - name: Fuzz scanner with AddressSanitizer
-        run: cargo +nightly fuzz run scan --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=2048 -dict=fuzz/scan.dict
+        run: cargo +"$SECURITY_TOOLCHAIN" fuzz run scan --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=2048 -dict=fuzz/scan.dict
       - name: Fuzz container parsers with AddressSanitizer
-        run: cargo +nightly fuzz run containers --fuzz-dir fuzz/containers --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=1024 -dict=fuzz/scan.dict
+        run: cargo +"$SECURITY_TOOLCHAIN" fuzz run containers --fuzz-dir fuzz/containers --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=1024 -dict=fuzz/scan.dict
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
@@ -59,13 +66,13 @@ jobs:
       MIRIFLAGS: -Zmiri-disable-isolation
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - run: rustup toolchain install nightly --profile minimal --component miri,rust-src
+      - run: rustup toolchain install "$SECURITY_TOOLCHAIN" --profile minimal --component miri,rust-src
       - name: Install Linux dependencies
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
-      - run: cargo +nightly miri setup
+      - run: cargo +"$SECURITY_TOOLCHAIN" miri setup
       # Miri does not emulate renameat2 used by tempfile::persist_noclobber.
       # Publication/symlink tests run natively in the desktop build workflow.
-      - run: cargo +nightly miri test --locked --test security failed_exports_never_publish_partial_or_invalid_files
-      - run: cargo +nightly miri test --locked --test security source_reader_preserves_bytes_and_checks_seek_bounds
-      - run: cargo +nightly miri test --locked --lib updater::tests::download_rejects_corruption_truncation_and_oversize
-      - run: cargo +nightly miri test --locked --test ntfs_resident rejects_active_directory_external_torn_truncated_and_path_like_records
+      - run: cargo +"$SECURITY_TOOLCHAIN" miri test --locked --test security failed_exports_never_publish_partial_or_invalid_files
+      - run: cargo +"$SECURITY_TOOLCHAIN" miri test --locked --test security source_reader_preserves_bytes_and_checks_seek_bounds
+      - run: cargo +"$SECURITY_TOOLCHAIN" miri test --locked --lib updater::tests::download_rejects_corruption_truncation_and_oversize
+      - run: cargo +"$SECURITY_TOOLCHAIN" miri test --locked --test ntfs_resident rejects_active_directory_external_torn_truncated_and_path_like_records

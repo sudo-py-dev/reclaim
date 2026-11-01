@@ -52,7 +52,10 @@ Tools installed and run locally:
   unmaintained-package advisories remain: RUSTSEC-2026-0370 (`zvariant`),
   RUSTSEC-2026-0371 (`zbus_names`), and RUSTSEC-2026-0372 (`zvariant_derive`).
 - `cargo-deny 0.20.2`: dependency sources and bans pass. The strict advisory
-  check **fails** on those three maintenance advisories. No advisory is ignored.
+  check originally failed on those three maintenance advisories. They now have
+  reviewed exceptions restricted to the exact locked versions, expiring on
+  2026-12-15. `scripts/check_advisory_policy.py` enforces those bounds before the
+  dependency scan. Unknown vulnerability advisories remain errors.
 - `cargo-fuzz 0.13.2` with libFuzzer: the final two-minute run completed
   **334 inputs in 121 seconds**, exit status 0, with AddressSanitizer and
   LeakSanitizer enabled. No crash, address-sanitizer, or leak finding was reported.
@@ -82,13 +85,17 @@ findings, not reported exploitable vulnerabilities.
 `.github/workflows/security.yml` adds dependency checks, AddressSanitizer fuzzing,
 and the supported Miri checks for pushes, pull requests, manual runs, and weekly
 runs. Action references are pinned to verified immutable hashes, tool releases
-are pinned, and workflow permissions are read-only. The dependency job will
-remain red until the maintenance findings are resolved; the other jobs run
-independently. This workflow has been checked locally as YAML, but has not run
-on GitHub in this session.
+and nightly compilers are pinned, and workflow permissions are read-only. The dependency job
+accepts only the three reviewed maintenance notices until the deadline;
+all other advisory failures remain blocking. Both nightly jobs pin
+`nightly-2026-10-23` (compiler commit `7189d39d9`), which passed the local
+checks. The moving 2026-10-31 nightly produced E0391 in `zvariant_utils`
+before either fuzzing or Miri could run. The replacement workflow must complete
+on GitHub before its remote result can be confirmed.
 
 `deny.toml` rejects unknown Git/registry sources, wildcard dependencies, yanked
-versions, stale offline advisory databases, and unmaintained packages. See
+versions, stale offline advisory databases, and unmaintained packages outside
+the three reviewed, version-bound, expiring exceptions. See
 `fuzz/README.md` for the reproducible fuzzing commands and scope limits. Local
 machine-readable audit/policy reports and test logs are under
 `target/security-reports/` (ignored build artifacts).
