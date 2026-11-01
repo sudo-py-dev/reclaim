@@ -1,6 +1,7 @@
 pub mod i18n;
 mod ntfs;
 mod source;
+pub mod updater;
 mod validation;
 pub use source::SourceReader;
 use std::{
@@ -52,6 +53,17 @@ impl Validation {
         }
     }
 }
+/// Times captured from a checked deleted NTFS record, as UTC Unix seconds.
+/// NTFS standard information does not supply a deletion timestamp.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NtfsMetadata {
+    pub created: Option<i64>,
+    pub modified: Option<i64>,
+    pub record_changed: Option<i64>,
+    pub accessed: Option<i64>,
+    pub record_number: u32,
+    pub sequence_number: u16,
+}
 #[derive(Clone, Debug)]
 pub struct Found {
     pub offset: u64,
@@ -61,6 +73,7 @@ pub struct Found {
     pub validation: Validation,
     pub original_name: Option<String>,
     pub resident_data: Option<std::sync::Arc<[u8]>>,
+    pub ntfs: Option<NtfsMetadata>,
 }
 impl Found {
     /// A portable original filename when available, otherwise a generated name.
@@ -579,6 +592,7 @@ pub fn scan_reader(
                         validation: checked,
                         original_name: None,
                         resident_data: None,
+                        ntfs: None,
                     }));
                 }
             }

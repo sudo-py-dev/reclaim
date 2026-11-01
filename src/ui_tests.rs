@@ -73,6 +73,7 @@ fn pages_render_at_minimum_and_default_sizes_in_both_themes() {
                             validation: reclaim::Validation::ImageDecoded,
                             original_name: None,
                             resident_data: None,
+                            ntfs: None,
                         })
                         .collect();
                 }
@@ -341,6 +342,7 @@ fn hebrew_pages_use_real_glyphs_and_preserve_data_and_queries() {
                         validation: reclaim::Validation::ImageDecoded,
                         original_name: Some("תמונה 12.png".into()),
                         resident_data: None,
+                        ntfs: None,
                     }];
                     app.status = "Scan complete. 1 file candidates found.".into();
                     app.filter = "תמונה".into();
@@ -491,8 +493,7 @@ fn long_drive_list_keeps_disk_image_action_visible() {
             .iter()
             .find_map(|shape| {
                 if let egui::Shape::Text(text) = &shape.shape {
-                    (text.galley.job.text == "Open a Disk Image…")
-                        .then_some((text.pos, shape.clip_rect))
+                    (text.galley.job.text == "\u{f56d}").then_some((text.pos, shape.clip_rect))
                 } else {
                     None
                 }
@@ -581,6 +582,7 @@ fn recovery_exports_only_selected_files_matching_current_filters() {
             validation: reclaim::Validation::MetadataChecked,
             original_name: Some(name.into()),
             resident_data: Some(Arc::from(&b"data"[..])),
+            ntfs: None,
         })
         .collect();
         app.export(directory.clone());
@@ -790,6 +792,7 @@ fn stopping_scan_preserves_selected_partial_results() {
         validation: reclaim::Validation::MetadataChecked,
         original_name: Some("photo.png".into()),
         resident_data: Some(Arc::from(&b"data"[..])),
+        ntfs: None,
     })))
     .unwrap();
     tx.send(Message::Done(Ok(()))).unwrap();
@@ -798,4 +801,452 @@ fn stopping_scan_preserves_selected_partial_results() {
     assert!(app.scan_stopped);
     assert_eq!(app.recovery_files().len(), 1);
     assert!(app.status.starts_with("Scan stopped."));
+}
+
+#[test]
+fn scan_footer_has_one_stop_control_then_enables_recovery() {
+    i18n::with_language(i18n::Language::English, || {
+        let ctx = egui::Context::default();
+        theme::setup(&ctx);
+        let mut app = Reclaim::default();
+        app.page = 1;
+        app.busy = true;
+        app.total = 100;
+        app.scanned = 25;
+        app.scanned_source = Some("/dev/example".into());
+        app.source_handle = Some(Arc::new(
+            std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap(),
+        ));
+        app.results.push(Found {
+            offset: 0,
+            size: 4,
+            kind: "png",
+            selected: true,
+            validation: reclaim::Validation::MetadataChecked,
+            original_name: Some("photo.png".into()),
+            resident_data: Some(Arc::from(&b"data"[..])),
+            ntfs: None,
+        });
+        let size = [540.0, 580.0];
+        let frame = |app: &mut Reclaim| {
+            let mut output = None;
+            for _ in 0..3 {
+                let mut frame = ctx.run_ui(input(size), |ui| app.render(ui));
+                frame.textures_delta.clear();
+                output = Some(frame);
+            }
+            output.unwrap()
+        };
+        let text_positions = |output: &egui::FullOutput, label: &str| {
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        (text.galley.job.text == label)
+                            .then_some(text.pos + text.galley.size() / 2.0)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        let output = frame(&mut app);
+        let stops = text_positions(&output, "Stop");
+        assert_eq!(stops.len(), 1);
+        assert!(text_positions(&output, "Recover files…").is_empty());
+        assert!(stops[0].y > 490.0 && stops[0].y < 580.0);
+        if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
+            rasterize(&ctx, output, size, &format!("{dir}/scan-footer-active.ppm"));
+        }
+        for pressed in [true, false] {
+            let mut frame_input = input(size);
+            frame_input.events = vec![
+                egui::Event::PointerMoved(stops[0]),
+                egui::Event::PointerButton {
+                    pos: stops[0],
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                },
+            ];
+            ctx.run_ui(frame_input, |ui| app.render(ui))
+                .drop_without_applying_deltas();
+        }
+        assert!(app.cancel.load(Ordering::Relaxed));
+        app.busy = false;
+        app.scan_stopped = true;
+        app.status = "Scan stopped. You can recover partial results.".into();
+        let output = frame(&mut app);
+        assert_eq!(text_positions(&output, "Scan again").len(), 1);
+        assert_eq!(text_positions(&output, "Recover files…").len(), 1);
+        assert!(text_positions(&output, "Stop").is_empty());
+        if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
+            rasterize(
+                &ctx,
+                output,
+                size,
+                &format!("{dir}/scan-footer-stopped.ppm"),
+            );
+        }
+    });
+}
+
+#[test]
+fn file_type_icons_open_details_with_dates_and_unknown_deletion_time() {
+    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+        i18n::with_language(language, || {
+            let ctx = egui::Context::default();
+            theme::setup(&ctx);
+            let mut app = Reclaim::default();
+            app.page = 1;
+            app.scanned_source = Some("/media/Backup/drive.img".into());
+            app.status = "Scan complete. 6 file candidates found.".into();
+            app.results = ["png", "pdf", "docx", "zip", "wav", "avi"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| Found {
+                    offset: index as u64 * 4096,
+                    size: 4096,
+                    kind,
+                    selected: index < 3,
+                    validation: reclaim::Validation::Unverified,
+                    original_name: None,
+                    resident_data: None,
+                    ntfs: None,
+                })
+                .collect();
+            app.results[1].original_name = Some("Project notes.pdf".into());
+            app.results[1].validation = reclaim::Validation::MetadataChecked;
+            app.results[1].ntfs = Some(reclaim::NtfsMetadata {
+                created: Some(1_704_067_200),
+                modified: Some(1_704_153_600),
+                accessed: None,
+                record_changed: Some(1_704_240_000),
+                record_number: 82,
+                sequence_number: 4,
+            });
+            let size = [1120.0, 780.0];
+            let mut output = None;
+            for _ in 0..3 {
+                let mut frame = ctx.run_ui(input(size), |ui| app.render(ui));
+                frame.textures_delta.clear();
+                output = Some(frame);
+            }
+            let output = output.unwrap();
+            let positions: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        (text.galley.job.text == "\u{f05a}")
+                            .then_some(text.pos + text.galley.size() / 2.0)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(positions.len(), 6);
+            if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                rasterize(
+                    &ctx,
+                    output,
+                    size,
+                    &format!("{dir}/file-types-{language:?}.ppm"),
+                );
+            }
+            let pos = positions[1];
+            for pressed in [true, false] {
+                let mut frame_input = input(size);
+                frame_input.events = vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ];
+                ctx.run_ui(frame_input, |ui| app.render(ui))
+                    .drop_without_applying_deltas();
+            }
+            assert_eq!(app.details_file, Some(1));
+            let mut output = None;
+            for step in 0..4 {
+                let mut frame_input = input(size);
+                frame_input.time = Some(2.0 + step as f64 * 0.25);
+                let mut frame = ctx.run_ui(frame_input, |ui| app.render(ui));
+                frame.textures_delta.clear();
+                output = Some(frame);
+            }
+            let output = output.unwrap();
+            assert_eq!(
+                theme::file_date(app.results[1].ntfs.as_ref().unwrap().created),
+                "2024-01-01 00:00:00 UTC"
+            );
+            if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                rasterize(
+                    &ctx,
+                    output,
+                    size,
+                    &format!("{dir}/file-details-{language:?}.ppm"),
+                );
+            }
+            let mut frame_input = input(size);
+            frame_input.events.push(egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            });
+            ctx.run_ui(frame_input, |ui| app.render(ui))
+                .drop_without_applying_deltas();
+            assert_eq!(app.details_file, None);
+        });
+    }
+}
+
+#[test]
+fn short_hover_hints_use_compact_popups_in_both_languages() {
+    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+        i18n::with_language(language, || {
+            let ctx = egui::Context::default();
+            theme::setup(&ctx);
+            ctx.all_styles_mut(|style| {
+                style.interaction.tooltip_delay = 0.0;
+                style.interaction.show_tooltips_only_when_still = false;
+            });
+            let size = [540.0, 580.0];
+            let mut button = Rect::NOTHING;
+            ctx.run_ui(input(size), |ui| {
+                ui.with_layout(i18n::column(), |ui| {
+                    button = theme::icon_button(
+                        ui,
+                        theme::Icon::DeselectAll,
+                        "Deselect all",
+                        false,
+                        egui::vec2(36.0, 36.0),
+                    )
+                    .rect;
+                });
+            })
+            .drop_without_applying_deltas();
+            let mut output = None;
+            for step in 0..6 {
+                let mut frame_input = input(size);
+                frame_input.time = Some(1.0 + step as f64 * 0.25);
+                frame_input
+                    .events
+                    .push(egui::Event::PointerMoved(button.center()));
+                let mut frame = ctx.run_ui(frame_input, |ui| {
+                    ui.with_layout(i18n::column(), |ui| {
+                        theme::icon_button(
+                            ui,
+                            theme::Icon::DeselectAll,
+                            "Deselect all",
+                            false,
+                            egui::vec2(36.0, 36.0),
+                        );
+                    });
+                });
+                frame.textures_delta.clear();
+                output = Some(frame);
+            }
+            let output = output.unwrap();
+            let mut rects = Vec::new();
+            let mut text = None;
+            fn inspect(
+                shape: &egui::Shape,
+                rects: &mut Vec<Rect>,
+                text: &mut Option<Pos2>,
+                label: &str,
+            ) {
+                match shape {
+                    egui::Shape::Rect(shape) => rects.push(shape.rect),
+                    egui::Shape::Text(shape)
+                        if shape
+                            .galley
+                            .job
+                            .text
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            == label =>
+                    {
+                        *text = Some(shape.pos + shape.galley.rect.center().to_vec2())
+                    }
+                    egui::Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            inspect(shape, rects, text, label);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for shape in &output.shapes {
+                inspect(
+                    &shape.shape,
+                    &mut rects,
+                    &mut text,
+                    &i18n::t("Deselect all"),
+                );
+            }
+            let position = text.expect("localized tooltip should appear");
+            let popup = rects
+                .into_iter()
+                .filter(|rect| rect.contains(position))
+                .min_by(|a, b| a.area().total_cmp(&b.area()))
+                .expect("tooltip frame");
+            assert!(
+                popup.width() < 180.0,
+                "short tooltip reserved too much width: {popup:?}"
+            );
+            assert!(
+                popup.height() < 64.0,
+                "short tooltip reserved too much height: {popup:?}"
+            );
+            if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                rasterize(
+                    &ctx,
+                    output,
+                    size,
+                    &format!("{dir}/tooltip-{language:?}.ppm"),
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn expanded_guide_keeps_step_buttons_and_navigation_fixed() {
+    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+        i18n::with_language(language, || {
+            let ctx = egui::Context::default();
+            theme::setup(&ctx);
+            let mut app = Reclaim::default();
+            app.page = 2;
+            app.guide_step = 2;
+            let size = [540.0, 580.0];
+            let position = |output: &egui::FullOutput, label: &str| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| {
+                        if let egui::Shape::Text(text) = &shape.shape {
+                            (text.galley.job.text == label)
+                                .then_some(text.pos + text.galley.rect.center().to_vec2())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| panic!("missing label {label}"))
+            };
+            let mut output = None;
+            for _ in 0..3 {
+                let mut frame = ctx.run_ui(input(size), |ui| app.render(ui));
+                frame.textures_delta.clear();
+                output = Some(frame);
+            }
+            let output = output.unwrap();
+            let nav = position(&output, &i18n::t("Next step"));
+            let step = position(&output, "03");
+            let more = position(&output, &i18n::t("More details"));
+            for pressed in [true, false] {
+                let mut frame_input = input(size);
+                frame_input.events = vec![
+                    egui::Event::PointerMoved(more),
+                    egui::Event::PointerButton {
+                        pos: more,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ];
+                ctx.run_ui(frame_input, |ui| app.render(ui))
+                    .drop_without_applying_deltas();
+            }
+            let mut output = None;
+            for index in 0..5 {
+                let mut frame_input = input(size);
+                frame_input.time = Some(2.0 + index as f64 * 0.25);
+                let mut frame = ctx.run_ui(frame_input, |ui| app.render(ui));
+                frame.textures_delta.clear();
+                output = Some(frame);
+            }
+            let expanded = output.unwrap();
+            assert_eq!(position(&expanded, &i18n::t("Next step")), nav);
+            assert_eq!(position(&expanded, "03"), step);
+            assert!(nav.y > 510.0 && nav.y < 580.0);
+            let mut frame_input = input(size);
+            frame_input.events = vec![
+                egui::Event::PointerMoved(egui::pos2(270.0, 350.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    delta: egui::vec2(0.0, -250.0),
+                    modifiers: Default::default(),
+                },
+            ];
+            ctx.run_ui(frame_input, |ui| app.render(ui))
+                .drop_without_applying_deltas();
+            let mut frame = ctx.run_ui(input(size), |ui| app.render(ui));
+            frame.textures_delta.clear();
+            assert_eq!(position(&frame, &i18n::t("Next step")), nav);
+            assert_eq!(position(&frame, "03"), step);
+            if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                rasterize(
+                    &ctx,
+                    frame,
+                    size,
+                    &format!("{dir}/guide-expanded-{language:?}.ppm"),
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn automatic_drive_updates_preserve_selection_and_scan_results() {
+    let drive = |name: &str| drives::Drive {
+        path: format!("/dev/{name}").into(),
+        name: name.into(),
+        name_is_message: false,
+        size: 64_000_000_000,
+        kind: "USB drive".into(),
+        location: "Not mounted".into(),
+        mounted: false,
+        encrypted: false,
+        sector_size: 512,
+    };
+    let mut app = Reclaim::default();
+    app.drives = vec![drive("usb1")];
+    app.source = Some("/dev/usb1".into());
+    app.scanned_source = app.source.clone();
+    app.busy = true;
+    app.scanned = 4096;
+    app.apply_drive_update(Ok(vec![drive("usb1"), drive("usb2")]));
+    assert_eq!(
+        app.source.as_deref(),
+        Some(std::path::Path::new("/dev/usb1"))
+    );
+    assert!(app.busy);
+    assert_eq!(app.scanned, 4096);
+    app.apply_drive_update(Err("temporary discovery error".into()));
+    assert_eq!(app.drives.len(), 2);
+    assert!(app.source.is_some());
+    app.apply_drive_update(Ok(vec![drive("usb2")]));
+    assert!(app.source.is_none());
+    assert_eq!(
+        app.scanned_source.as_deref(),
+        Some(std::path::Path::new("/dev/usb1"))
+    );
+    assert!(app.busy); // The active reader owns its handle and reports completion/errors.
+    assert!(app.drives_error.is_none());
+    app.source = Some("/media/backup.img".into());
+    app.apply_drive_update(Ok(vec![]));
+    assert_eq!(
+        app.source.as_deref(),
+        Some(std::path::Path::new("/media/backup.img"))
+    );
 }

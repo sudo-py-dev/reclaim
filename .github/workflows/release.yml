@@ -1,0 +1,116 @@
+name: Release
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x86_64
+            asset: reclaim-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x86_64
+            asset: reclaim-windows-x86_64.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
+            arch: aarch64
+            asset: reclaim-macos-aarch64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: macos
+            arch: x86_64
+            asset: reclaim-macos-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version tag
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, re
+          version = re.search(r'^version = "([^"]+)"', open('Cargo.toml').read(), re.M)[1]
+          assert os.environ['GITHUB_REF'] == 'refs/tags/v' + version, 'Run this workflow on the matching vX.Y.Z tag'
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+      - run: cargo test --locked
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Package portable executable and licenses
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          mkdir -p dist bundle
+          binary="target/$TARGET/release/reclaim"
+          if [[ "$RUNNER_OS" == Windows ]]; then binary="$binary.exe"; fi
+          cp "$binary" "dist/$ASSET"
+          if [[ "$RUNNER_OS" == macOS ]]; then codesign --force --sign - "dist/$ASSET"; fi
+          cp "dist/$ASSET" bundle/
+          cp LICENSE assets/fonts/DejaVu-LICENSE.txt assets/fonts/FontAwesome-LICENSE.txt bundle/
+          python - <<'PY'
+          import os, pathlib, zipfile, hashlib
+          asset = os.environ['ASSET']
+          with zipfile.ZipFile('dist/' + asset + '.zip', 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for path in pathlib.Path('bundle').iterdir():
+                  z.write(path, path.name)
+          PY
+      - name: Ensure Inno Setup is available
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $compiler = Get-ChildItem "${env:ProgramFiles(x86)}/Inno Setup */ISCC.exe" -ErrorAction SilentlyContinue
+          if (-not $compiler -and -not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build native installer
+        shell: bash
+        run: python scripts/package-release.py "${{ matrix.platform }}" --binary "dist/${{ matrix.asset }}" --arch "${{ matrix.arch }}"
+      - name: Checksum all downloads
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, hashlib
+          for path in pathlib.Path('dist').glob('*'):
+              if path.is_file() and not path.name.endswith('.sha256'):
+                  path.with_name(path.name + '.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* --verify-tag --draft --generate-notes --title "Reclaim $TAG"

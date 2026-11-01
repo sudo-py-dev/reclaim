@@ -196,6 +196,7 @@ fn generated_names_are_readable_and_keep_the_correct_extension() {
             validation: reclaim::Validation::Unverified,
             original_name: None,
             resident_data: None,
+            ntfs: None,
         };
         assert_eq!(found.recovery_name(3), expected);
         assert_eq!(

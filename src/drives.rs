@@ -10,7 +10,7 @@ pub const AVAILABLE: bool = cfg!(any(
     target_os = "macos"
 ));
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Drive {
     pub path: PathBuf,
     pub name: String,
@@ -32,6 +32,9 @@ impl Drive {
         }
     }
 }
+
+mod monitor;
+pub use monitor::{DriveMonitor, watch};
 
 #[cfg(target_os = "linux")]
 mod linux;

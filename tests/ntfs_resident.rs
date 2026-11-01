@@ -144,3 +144,43 @@ fn empty_files_and_portable_original_names() {
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn deleted_records_preserve_standard_information_dates() {
+    let mut raw = record("notes.txt", b"hello", 0, false);
+    let seconds = [
+        1_704_067_200i64,
+        1_704_153_600,
+        1_704_240_000,
+        1_704_326_400,
+    ];
+    // The fixture's first resident attribute is $STANDARD_INFORMATION.
+    let value = 64 + 24;
+    for (index, seconds) in seconds.iter().enumerate() {
+        let filetime = (*seconds + 11_644_473_600) as u64 * 10_000_000;
+        raw[value + index * 8..value + index * 8 + 8].copy_from_slice(&filetime.to_le_bytes());
+    }
+    let rows = scan(&raw);
+    assert_eq!(rows.len(), 1);
+    let metadata = rows[0].ntfs.as_ref().unwrap();
+    assert_eq!(metadata.created, Some(seconds[0]));
+    assert_eq!(metadata.modified, Some(seconds[1]));
+    assert_eq!(metadata.record_changed, Some(seconds[2]));
+    assert_eq!(metadata.accessed, Some(seconds[3]));
+    assert_eq!(metadata.sequence_number, 7);
+    assert_eq!(rows[0].resident_data.as_deref(), Some(&b"hello"[..]));
+}
+
+#[test]
+fn missing_or_invalid_dates_do_not_invalidate_recoverable_content() {
+    let mut raw = record("notes.txt", b"hello", 0, false);
+    raw[88..96].copy_from_slice(&u64::MAX.to_le_bytes());
+    let rows = scan(&raw);
+    assert_eq!(rows.len(), 1);
+    let metadata = rows[0].ntfs.as_ref().unwrap();
+    assert_eq!(metadata.created, None);
+    assert_eq!(metadata.modified, None);
+    assert_eq!(metadata.accessed, None);
+    assert_eq!(metadata.record_changed, None);
+    assert_eq!(rows[0].resident_data.as_deref(), Some(&b"hello"[..]));
+}

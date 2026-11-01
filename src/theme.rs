@@ -53,6 +53,7 @@ pub fn setup(ctx: &egui::Context) {
         s.spacing.item_spacing = egui::vec2(8.0, 8.0);
         s.spacing.button_padding = egui::vec2(14.0, 9.0);
         s.spacing.interact_size.y = 36.0;
+        s.spacing.tooltip_width = 320.0;
         s.spacing.scroll = egui::style::ScrollStyle::solid();
         s.spacing.scroll.bar_width = 10.0;
         s.spacing.scroll.foreground_color = true;
@@ -74,6 +75,13 @@ pub fn setup(ctx: &egui::Context) {
         } else {
             Color32::from_gray(82)
         });
+        let body_text = if dark {
+            Color32::from_gray(224)
+        } else {
+            Color32::from_gray(48)
+        };
+        s.visuals.widgets.noninteractive.fg_stroke.color = body_text;
+        s.visuals.widgets.inactive.fg_stroke.color = body_text;
         s.visuals.extreme_bg_color = if dark {
             Color32::from_rgb(22, 25, 31)
         } else {
@@ -305,7 +313,7 @@ pub fn drive_row(
     if selection > 0.0 {
         painter.circle_filled(dot, 3.5 * selection, indicator);
     }
-    response.t_on_hover_text(format!("{title}\n{subtitle}\n{size}"))
+    response
 }
 
 /// Keep the built-in disclosure's focus, keyboard, and expanded-state behavior.
@@ -624,6 +632,20 @@ pub enum Icon {
     ChevronDown,
     Guide,
     Results,
+    DiskImage,
+    Shield,
+    Warning,
+    Info,
+    Picture,
+    Document,
+    Pdf,
+    Word,
+    Spreadsheet,
+    Presentation,
+    Archive,
+    Audio,
+    Video,
+    Application,
 }
 
 /// Font Awesome Free 6.7.2 Solid; see the bundled font license.
@@ -650,6 +672,20 @@ impl Icon {
             Self::ChevronDown => '\u{f078}',
             Self::Guide => '\u{f02d}',
             Self::Results => '\u{f03a}',
+            Self::DiskImage => '\u{f56d}',
+            Self::Shield => '\u{f3ed}',
+            Self::Warning => '\u{f071}',
+            Self::Info => '\u{f05a}',
+            Self::Picture => '\u{f03e}',
+            Self::Document => '\u{f15b}',
+            Self::Pdf => '\u{f1c1}',
+            Self::Word => '\u{f1c2}',
+            Self::Spreadsheet => '\u{f1c3}',
+            Self::Presentation => '\u{f1c4}',
+            Self::Archive => '\u{f1c6}',
+            Self::Audio => '\u{f1c7}',
+            Self::Video => '\u{f1c8}',
+            Self::Application => '\u{f1c9}',
         }
     }
 }
@@ -795,4 +831,354 @@ pub fn switch(ui: &mut egui::Ui, value: &mut bool, label: &str) -> egui::Respons
         );
     }
     response.t_on_hover_text(label)
+}
+
+/// Cached portal state is injected before egui begins a frame, so styles and
+/// native theme notifications use the same input path. 255 means not available.
+pub struct SystemThemeWatcher {
+    scheme: std::sync::Arc<std::sync::atomic::AtomicU8>,
+}
+impl SystemThemeWatcher {
+    pub fn apply_input(&self, input: &mut egui::RawInput) {
+        match self.scheme.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => input.system_theme = Some(egui::Theme::Dark),
+            2 => input.system_theme = Some(egui::Theme::Light),
+            0 => input.system_theme = None,
+            _ => {} // No portal value: preserve any native backend input.
+        }
+    }
+}
+#[cfg(any(target_os = "linux", test))]
+fn record_system_theme(ctx: &egui::Context, state: &SystemThemeWatcher, scheme: u32) {
+    let scheme = match scheme {
+        1 => 1,
+        2 => 2,
+        _ => 0,
+    };
+    if state
+        .scheme
+        .swap(scheme, std::sync::atomic::Ordering::Relaxed)
+        != scheme
+    {
+        ctx.request_repaint();
+    }
+}
+
+/// Linux winit reports no theme. Listen to the desktop portal on the session
+/// bus instead; all connection/read/wait work happens off the UI thread.
+/// Windows and macOS already deliver ThemeChanged through egui-winit.
+pub fn watch_system_theme(ctx: &egui::Context) -> Option<SystemThemeWatcher> {
+    #[cfg(target_os = "linux")]
+    {
+        let ctx = ctx.clone();
+        let scheme = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(255));
+        let worker = SystemThemeWatcher {
+            scheme: scheme.clone(),
+        };
+        let _ = std::thread::Builder::new()
+            .name("system-appearance".into())
+            .spawn(move || {
+                loop {
+                    let _ = listen_for_linux_theme(&ctx, &worker);
+                    // Retry if a portal starts late, restarts, or the session bus
+                    // reconnects. This is a background retry, not UI-frame polling.
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                }
+            });
+        Some(SystemThemeWatcher { scheme })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = ctx;
+        None
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Default)]
+struct DesktopAppearance {
+    color_scheme: u32,
+    gnome_scheme: String,
+    gtk_theme: String,
+}
+#[cfg(any(target_os = "linux", test))]
+impl DesktopAppearance {
+    fn resolved_scheme(&self) -> u32 {
+        match self.color_scheme {
+            1 | 2 => self.color_scheme,
+            _ => match self.gnome_scheme.as_str() {
+                "prefer-dark" => 1,
+                "prefer-light" => 2,
+                _ if self.gtk_theme.to_ascii_lowercase().ends_with("dark") => 1,
+                _ => 2, // Default desktop themes are light when no preference is set.
+            },
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn listen_for_linux_theme(ctx: &egui::Context, state: &SystemThemeWatcher) -> zbus::Result<()> {
+    use std::collections::HashMap;
+    use zbus::{
+        blocking::{Proxy, connection::Builder},
+        zvariant::OwnedValue,
+    };
+    const APPEARANCE: &str = "org.freedesktop.appearance";
+    const GNOME: &str = "org.gnome.desktop.interface";
+    let connection = Builder::session()?
+        .method_timeout(std::time::Duration::from_secs(3))
+        .build()?;
+    let proxy = Proxy::new(
+        &connection,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Settings",
+    )?;
+    // Subscribe before the snapshot. Observe both standard and GTK settings:
+    // GNOME can change gtk-theme while the standard scheme remains zero.
+    let signals = proxy.receive_signal("SettingChanged")?;
+    let settings: HashMap<String, HashMap<String, OwnedValue>> =
+        proxy.call("ReadAll", &(vec![APPEARANCE, GNOME],))?;
+    let mut desktop = DesktopAppearance::default();
+    if let Some(value) = settings
+        .get(APPEARANCE)
+        .and_then(|map| map.get("color-scheme"))
+    {
+        desktop.color_scheme = u32::try_from(value).unwrap_or(0);
+    }
+    if let Some(values) = settings.get(GNOME) {
+        desktop.gnome_scheme = values
+            .get("color-scheme")
+            .and_then(|v| <&str>::try_from(v).ok())
+            .unwrap_or_default()
+            .into();
+        desktop.gtk_theme = values
+            .get("gtk-theme")
+            .and_then(|v| <&str>::try_from(v).ok())
+            .unwrap_or_default()
+            .into();
+    }
+    record_system_theme(ctx, state, desktop.resolved_scheme());
+    for signal in signals {
+        let Ok((namespace, key, value)) =
+            signal.body().deserialize::<(String, String, OwnedValue)>()
+        else {
+            continue;
+        };
+        match (namespace.as_str(), key.as_str()) {
+            (APPEARANCE, "color-scheme") => {
+                if let Ok(value) = u32::try_from(value) {
+                    desktop.color_scheme = value;
+                }
+            }
+            (GNOME, "color-scheme") => {
+                if let Ok(value) = <&str>::try_from(&value) {
+                    desktop.gnome_scheme = value.into();
+                }
+            }
+            (GNOME, "gtk-theme") => {
+                if let Ok(value) = <&str>::try_from(&value) {
+                    desktop.gtk_theme = value.into();
+                }
+            }
+            _ => continue,
+        }
+        record_system_theme(ctx, state, desktop.resolved_scheme());
+    }
+    Ok(())
+}
+
+/// File-type silhouettes and category colors make results easy to scan.
+pub fn file_badge(ui: &mut egui::Ui, kind: &str) {
+    let category = reclaim::category_index(kind);
+    let icon = match kind {
+        "pdf" => Icon::Pdf,
+        "docx" | "docm" | "odt" => Icon::Word,
+        "xlsx" | "xlsm" | "ods" | "csv" => Icon::Spreadsheet,
+        "pptx" | "pptm" | "odp" => Icon::Presentation,
+        _ => match category {
+            1 | 7 => Icon::Picture,
+            2 => Icon::Document,
+            3 => Icon::Archive,
+            4 => Icon::Audio,
+            5 => Icon::Video,
+            6 => Icon::Application,
+            _ => Icon::Document,
+        },
+    };
+    let base = match category {
+        1 => TEAL,
+        2 => ACCENT,
+        3 => Color32::from_rgb(182, 121, 27),
+        4 | 7 => Color32::from_rgb(146, 102, 209),
+        5 => Color32::from_rgb(198, 88, 107),
+        _ => Color32::from_rgb(98, 120, 148),
+    };
+    let color = if ui.visuals().dark_mode {
+        blend(base, Color32::WHITE, 0.35)
+    } else {
+        base
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(36.0, 40.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 8, blend(ui.visuals().window_fill, base, 0.15));
+    paint_symbol(ui, rect, icon, 19.0, color);
+    response.raw_on_hover_text(kind.to_uppercase());
+}
+pub fn detail_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 24.0), i18n::row(), |ui| {
+        let label_width = (ui.available_width() * 0.34).clamp(88.0, 144.0);
+        ui.allocate_ui_with_layout(egui::vec2(label_width, 24.0), i18n::column(), |ui| {
+            ui.set_min_width(label_width);
+            ui.add(
+                egui::Label::new(i18n::widget(
+                    ui,
+                    egui::RichText::new(label).small().weak(),
+                    false,
+                ))
+                .truncate(),
+            );
+        });
+        let text = i18n::raw_widget(
+            ui,
+            value,
+            egui::TextStyle::Body.resolve(ui.style()),
+            ui.visuals().text_color(),
+            ui.available_width(),
+        );
+        ui.add(egui::Label::new(text).truncate())
+            .raw_on_hover_text(value);
+    });
+}
+pub fn file_date(timestamp: Option<i64>) -> String {
+    timestamp
+        .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+        .map(|date| date.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+        .unwrap_or_else(|| i18n::t("Not available"))
+}
+
+#[cfg(test)]
+mod system_theme_tests {
+    use super::*;
+    fn update(ctx: &egui::Context, state: &SystemThemeWatcher, scheme: u32) {
+        record_system_theme(ctx, state, scheme);
+        let mut input = egui::RawInput::default();
+        state.apply_input(&mut input);
+        ctx.run_ui(input, |_| {}).drop_without_applying_deltas();
+    }
+    #[test]
+    fn live_system_changes_preserve_explicit_preferences() {
+        let ctx = egui::Context::default();
+        setup(&ctx);
+        let state = SystemThemeWatcher {
+            scheme: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(255)),
+        };
+        ctx.set_theme(egui::ThemePreference::System);
+        update(&ctx, &state, 2);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        update(&ctx, &state, 1);
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
+        ctx.set_theme(egui::ThemePreference::Light);
+        update(&ctx, &state, 1);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        ctx.set_theme(egui::ThemePreference::Dark);
+        update(&ctx, &state, 2);
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
+        ctx.set_theme(egui::ThemePreference::System);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        update(&ctx, &state, 0);
+        assert_eq!(ctx.system_theme(), None);
+        update(&ctx, &state, 99);
+        assert_eq!(ctx.system_theme(), None);
+    }
+    #[test]
+    fn no_preference_follows_gtk_theme_and_explicit_scheme_wins() {
+        let mut desktop = DesktopAppearance {
+            gtk_theme: "Yaru-blue".into(),
+            ..Default::default()
+        };
+        assert_eq!(desktop.resolved_scheme(), 2);
+        desktop.gtk_theme = "Yaru-blue-dark".into();
+        assert_eq!(desktop.resolved_scheme(), 1);
+        desktop.gnome_scheme = "prefer-light".into();
+        assert_eq!(desktop.resolved_scheme(), 2);
+        desktop.color_scheme = 1;
+        assert_eq!(desktop.resolved_scheme(), 1);
+        desktop.color_scheme = 2;
+        assert_eq!(desktop.resolved_scheme(), 2);
+    }
+    #[test]
+    fn native_theme_events_follow_system_while_app_runs() {
+        let ctx = egui::Context::default();
+        setup(&ctx);
+        ctx.set_theme(egui::ThemePreference::System);
+        for system in [egui::Theme::Light, egui::Theme::Dark, egui::Theme::Light] {
+            let input = egui::RawInput {
+                system_theme: Some(system),
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| {
+                assert_eq!(ui.visuals().dark_mode, system == egui::Theme::Dark)
+            })
+            .drop_without_applying_deltas();
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod live_portal_test {
+    #[test]
+    #[ignore = "requires a desktop session bus"]
+    fn read_live_desktop_color_scheme() {
+        let connection = zbus::blocking::Connection::session().unwrap();
+        let proxy = zbus::blocking::Proxy::new(
+            &connection,
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings",
+        )
+        .unwrap();
+        let result: Result<
+            std::collections::HashMap<
+                String,
+                std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+            >,
+            _,
+        > = proxy.call(
+            "ReadAll",
+            &(vec![
+                "org.freedesktop.appearance",
+                "org.gnome.desktop.interface",
+            ],),
+        );
+        match result {
+            Ok(settings) => {
+                let values = settings.get("org.gnome.desktop.interface");
+                let desktop = super::DesktopAppearance {
+                    color_scheme: settings
+                        .get("org.freedesktop.appearance")
+                        .and_then(|m| m.get("color-scheme"))
+                        .and_then(|v| u32::try_from(v).ok())
+                        .unwrap_or(0),
+                    gnome_scheme: values
+                        .and_then(|m| m.get("color-scheme"))
+                        .and_then(|v| <&str>::try_from(v).ok())
+                        .unwrap_or_default()
+                        .into(),
+                    gtk_theme: values
+                        .and_then(|m| m.get("gtk-theme"))
+                        .and_then(|v| <&str>::try_from(v).ok())
+                        .unwrap_or_default()
+                        .into(),
+                };
+                eprintln!(
+                    "Desktop scheme: {}, GTK theme: {}, resolved: {}",
+                    desktop.color_scheme,
+                    desktop.gtk_theme,
+                    desktop.resolved_scheme()
+                );
+            }
+            Err(error) => panic!("Portal read failed: {error}"),
+        }
+    }
 }

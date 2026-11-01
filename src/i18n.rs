@@ -437,8 +437,21 @@ pub fn widget_width(
     width: f32,
     align: egui::Align,
 ) -> WidgetText {
-    let text = text.into();
-    let logical = t(text.text());
+    formatted_widget(ui, text.into(), wrap, width, align, true)
+}
+fn formatted_widget(
+    ui: &egui::Ui,
+    text: WidgetText,
+    wrap: bool,
+    width: f32,
+    align: egui::Align,
+    translate_text: bool,
+) -> WidgetText {
+    let logical = if translate_text {
+        t(text.text())
+    } else {
+        text.text().to_owned()
+    };
     let original = text.clone().into_layout_job(
         ui.style(),
         egui::FontSelection::Default,
@@ -558,16 +571,54 @@ impl LocalizedUi for egui::Ui {
 }
 pub trait LocalizedResponse {
     fn t_on_hover_text(self, text: impl Into<WidgetText>) -> Self;
+    fn raw_on_hover_text(self, text: impl Into<WidgetText>) -> Self;
 }
 impl LocalizedResponse for egui::Response {
     fn t_on_hover_text(self, text: impl Into<WidgetText>) -> Self {
         let text = text.into();
         self.on_hover_ui(|ui| {
-            ui.with_layout(column(), |ui| {
-                ui.t_label(text);
-            });
+            tooltip_content(ui, text, true);
         })
     }
+    fn raw_on_hover_text(self, text: impl Into<WidgetText>) -> Self {
+        let text = text.into();
+        self.on_hover_ui(|ui| {
+            tooltip_content(ui, text, false);
+        })
+    }
+}
+
+// Measure before placing an RTL column: placing it in the popup's default
+// 500-point area first makes a two-word hint reserve that entire width.
+fn tooltip_content(ui: &mut egui::Ui, text: WidgetText, translate_text: bool) -> egui::Response {
+    let limit = (ui.ctx().viewport_rect().width() - 32.0).clamp(40.0, 320.0);
+    let measured = formatted_widget(
+        ui,
+        text.clone(),
+        true,
+        limit,
+        egui::Align::Min,
+        translate_text,
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        limit,
+        egui::TextStyle::Body,
+    );
+    let width = (measured.size().x.ceil() + 6.0).clamp(1.0, limit);
+    let content = formatted_widget(ui, text, true, width, start_align(), translate_text);
+    let mut job =
+        (*content.into_layout_job(ui.style(), egui::FontSelection::Default, start_align())).clone();
+    job.wrap.max_width = width;
+    job.wrap.max_rows = 10;
+    job.wrap.break_anywhere = true;
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    ui.set_width(width);
+    ui.with_layout(column(), |ui| {
+        ui.add(egui::Label::new(WidgetText::Galley(galley)))
+    })
+    .inner
 }
 
 /// Scope presentation to a language without changing the saved preference.
@@ -621,5 +672,44 @@ mod tests {
             translate("Search files…", Language::English, 0),
             "Search files…"
         );
+    }
+    #[test]
+    fn tooltip_width_follows_content_in_english_and_hebrew() {
+        for language in [Language::English, Language::Hebrew] {
+            with_language(language, || {
+                for (text, short) in [
+                    ("Deselect all".to_owned(), true),
+                    (
+                        "For best results, stop using this drive or scan it from another computer."
+                            .repeat(12),
+                        false,
+                    ),
+                    ("/media/תמונות/".repeat(80), false),
+                ] {
+                    let ctx = egui::Context::default();
+                    setup_fonts(&ctx);
+                    let mut bounds = egui::Vec2::ZERO;
+                    ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(900.0, 700.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            tooltip_content(ui, text.clone().into(), short);
+                            bounds = ui.min_rect().size();
+                        },
+                    )
+                    .drop_without_applying_deltas();
+                    assert!(bounds.x <= 321.0, "tooltip too wide: {bounds:?}");
+                    assert!(bounds.y < 220.0, "tooltip too tall: {bounds:?}");
+                    if short {
+                        assert!(bounds.x < 160.0, "short hint stretched: {bounds:?}");
+                    }
+                }
+            });
+        }
     }
 }

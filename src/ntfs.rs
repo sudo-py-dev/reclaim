@@ -1,6 +1,6 @@
 //! Limited NTFS 3-style record recovery. Only deleted base records with one
 //! unnamed resident $DATA value are accepted. No cluster runs are guessed.
-use crate::{Found, Validation};
+use crate::{Found, NtfsMetadata, Validation};
 use std::{
     io::{self, Read},
     sync::{
@@ -15,6 +15,19 @@ fn short(bytes: &[u8], at: usize) -> u16 {
 }
 fn long(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+}
+
+// FILETIME is 100-nanosecond intervals since 1601-01-01 UTC. Zero means
+// unavailable here; reject values beyond year 9999 rather than invent a date.
+fn filetime(bytes: &[u8], at: usize) -> Option<i64> {
+    let ticks = u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?);
+    if ticks == 0 {
+        return None;
+    }
+    let seconds = i64::try_from(ticks / 10_000_000)
+        .ok()?
+        .checked_sub(11_644_473_600)?;
+    (seconds <= 253_402_300_799).then_some(seconds)
 }
 
 pub fn read_record(
@@ -90,6 +103,11 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
     let mut data = None;
     let mut terminated = false;
     let mut standard_info = false;
+    let mut metadata = NtfsMetadata {
+        record_number: long(&record, 44),
+        sequence_number: short(&record, 16),
+        ..Default::default()
+    };
     while at + 4 <= used {
         let kind = long(&record, at);
         if kind == u32::MAX {
@@ -146,7 +164,14 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
                     if value.len() < 48 {
                         return None;
                     }
+                    if standard_info {
+                        return None;
+                    }
                     standard_info = true;
+                    metadata.created = filetime(value, 0);
+                    metadata.modified = filetime(value, 8);
+                    metadata.record_changed = filetime(value, 16);
+                    metadata.accessed = filetime(value, 24);
                 }
                 0x30 => {
                     if attr[9] != 0 || value.len() < 66 {
@@ -211,6 +236,7 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
         validation,
         original_name: Some(name),
         resident_data: Some(data),
+        ntfs: Some(metadata),
     })
 }
 

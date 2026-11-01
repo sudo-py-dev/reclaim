@@ -4,6 +4,7 @@
 )]
 mod drives;
 mod theme;
+mod update_ui;
 mod window;
 use eframe::egui;
 use reclaim::i18n::{self, LocalizedResponse, LocalizedUi};
@@ -24,12 +25,16 @@ enum Message {
     Export(Result<usize, String>),
 }
 struct Reclaim {
+    updates: update_ui::Updates,
+    system_theme: Option<theme::SystemThemeWatcher>,
+    details_file: Option<usize>,
     settings_open: bool,
     settings_error: Option<String>,
     source: Option<PathBuf>,
     source_handle: Option<Arc<std::fs::File>>,
     source_alignment: usize,
     drives: Vec<drives::Drive>,
+    drive_monitor: Option<drives::DriveMonitor>,
     drive_receiver: Option<mpsc::Receiver<Result<Vec<drives::Drive>, String>>>,
     drives_loading: bool,
     drives_error: Option<String>,
@@ -54,12 +59,16 @@ struct Reclaim {
 impl Default for Reclaim {
     fn default() -> Self {
         Self {
+            updates: update_ui::Updates::default(),
+            system_theme: None,
+            details_file: None,
             settings_open: false,
             settings_error: None,
             source: None,
             source_handle: None,
             source_alignment: 1,
             drives: Vec::new(),
+            drive_monitor: None,
             drive_receiver: None,
             drives_loading: false,
             drives_error: None,
@@ -89,6 +98,7 @@ impl Reclaim {
             return;
         };
         self.results.clear();
+        self.details_file = None;
         self.scan_stopped = false;
         self.page = 1;
         self.exporting = false;
@@ -229,33 +239,51 @@ impl Reclaim {
         }
         self.drives_loading = true;
         self.drives_error = None;
+        if self
+            .drive_monitor
+            .as_ref()
+            .is_some_and(|monitor| monitor.request_refresh())
+        {
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         self.drive_receiver = Some(rx);
         std::thread::spawn(move || {
             let _ = tx.send(drives::discover());
         });
     }
+    fn apply_drive_update(&mut self, result: Result<Vec<drives::Drive>, String>) {
+        self.drives_loading = false;
+        match result {
+            Ok(drives) => {
+                let was_drive = self
+                    .source
+                    .as_ref()
+                    .is_some_and(|p| self.drives.iter().any(|d| &d.path == p));
+                if was_drive && !drives.iter().any(|d| Some(&d.path) == self.source.as_ref()) {
+                    self.source = None;
+                }
+                self.drives = drives;
+                self.drives_error = None;
+            }
+            Err(e) => self.drives_error = Some(e),
+        }
+    }
     fn poll(&mut self) {
+        if let Some(result) = self
+            .drive_monitor
+            .as_mut()
+            .and_then(|monitor| monitor.take_update())
+        {
+            self.apply_drive_update(result);
+        }
         if let Some(result) = self
             .drive_receiver
             .as_ref()
             .and_then(|rx| rx.try_recv().ok())
         {
-            self.drives_loading = false;
             self.drive_receiver = None;
-            match result {
-                Ok(drives) => {
-                    let was_drive = self
-                        .source
-                        .as_ref()
-                        .is_some_and(|p| self.drives.iter().any(|d| &d.path == p));
-                    if was_drive && !drives.iter().any(|d| Some(&d.path) == self.source.as_ref()) {
-                        self.source = None;
-                    }
-                    self.drives = drives;
-                }
-                Err(e) => self.drives_error = Some(e),
-            }
+            self.apply_drive_update(result);
         }
         if let Some(rx) = &self.receiver {
             for message in rx.try_iter().take(512) {
@@ -348,15 +376,14 @@ impl Reclaim {
                 });
             },
         );
-        // Reserve the same compact safety area in every source-selection state.
-        // Selecting a mounted drive or finishing a scan must not collapse the list.
-        let list_height = (ui.available_height() - 152.0).max(68.0);
+        // Keep one compact toolbar below the list in every selection state.
+        let list_height = (ui.available_height() - 64.0).max(68.0);
         theme::card(ui).inner_margin(8.0).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             if drives::AVAILABLE {
-                if self.drives_loading {
+                if self.drives_loading && self.drives.is_empty() {
                     ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), ui.spacing().interact_size.y), i18n::row(), |ui| { if !self.busy { ui.spinner(); } ui.t_label("Looking for drives…"); });
-                } else if let Some(error) = &self.drives_error { ui.t_label(error); }
+                } else if let Some(error) = &self.drives_error && self.drives.is_empty() { ui.t_label(error); }
                 else if self.drives.is_empty() { ui.t_label("No drives found. Connect a drive and select Refresh, or open a disk image below."); }
                 else {
                     egui::ScrollArea::vertical()
@@ -369,7 +396,7 @@ impl Reclaim {
                         for drive in &self.drives {
                             ui.push_id(&drive.path, |ui| {
                                 let subtitle = format!("{} · {}", i18n::t(&drive.kind), i18n::t(&drive.location));
-                                if theme::drive_row(ui, &drive.display_name(), &subtitle, &theme::bytes(drive.size), self.source.as_ref() == Some(&drive.path), !self.busy && !drive.encrypted).on_hover_text(drive.path.display().to_string()).clicked() {
+                                if theme::drive_row(ui, &drive.display_name(), &subtitle, &theme::bytes(drive.size), self.source.as_ref() == Some(&drive.path), !self.busy && !drive.encrypted).raw_on_hover_text(format!("{}\n{}\n{} · {}", drive.display_name(), subtitle, theme::bytes(drive.size), drive.path.display())).clicked() {
                                     self.source = Some(drive.path.clone());
                                 }
                             });
@@ -377,43 +404,68 @@ impl Reclaim {
                         });
                     });
                 }
-                ui.separator();
-            }
-            if ui.add_enabled(!self.busy, egui::Button::new(i18n::widget(ui, "Open a Disk Image…", false)).frame(false).min_size(egui::vec2(ui.available_width(), 38.0))).clicked() { self.choose_source(); }
-            if let Some(path) = &self.source && !self.drives.iter().any(|d| d.path == *path) {
-                ui.add(egui::Label::new(egui::RichText::new(path.file_name().unwrap_or(path.as_os_str()).to_string_lossy()).strong()).truncate()).on_hover_text(path.display().to_string());
             }
         });
-        ui.add_space(12.0);
         let mounted = self
             .source
             .as_ref()
             .and_then(|path| self.drives.iter().find(|drive| drive.path == *path))
             .is_some_and(|drive| drive.mounted);
-        theme::card(ui).inner_margin(12.0).show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.with_layout(i18n::column(), |ui| {
-                ui.t_strong(if mounted {
-                    "Drive in Use"
-                } else {
-                    "Read-only recovery"
-                });
-                ui.t_label(if mounted {
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 36.0), i18n::row(), |ui| {
+            if ui
+                .add_enabled_ui(!self.busy, |ui| {
+                    theme::icon_button(
+                        ui,
+                        theme::Icon::DiskImage,
+                        "Open a Disk Image…",
+                        false,
+                        egui::vec2(36.0, 36.0),
+                    )
+                })
+                .inner
+                .clicked()
+            {
+                self.choose_source();
+            }
+            ui.with_layout(i18n::trailing_row(), |ui| {
+                let message = if mounted {
                     "For best results, stop using this drive or scan it from another computer."
                 } else {
                     "Read-only access may require permission from your operating system."
+                };
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+                theme::paint_symbol(
+                    ui,
+                    rect,
+                    if mounted {
+                        theme::Icon::Warning
+                    } else {
+                        theme::Icon::Shield
+                    },
+                    15.0,
+                    ui.visuals().weak_text_color(),
+                );
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Label, true, i18n::t(message))
                 });
+                response.t_on_hover_text(message);
+                if mounted {
+                    ui.t_label(egui::RichText::new("Drive in Use").small());
+                }
             });
         });
     }
-    fn results_view(&mut self, ui: &mut egui::Ui) {
-        if self.busy && !self.exporting && !self.results.is_empty() {
-            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 56.0), i18n::row(), |ui| {
-                theme::scan_radar(ui, 52.0);
-                ui.t_strong("Scanning for recoverable files…");
-            });
-            ui.add_space(4.0);
+    fn stop_operation(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.status = if self.exporting {
+            "Stopping recovery…"
+        } else {
+            "Stopping scan…"
         }
+        .into();
+    }
+    fn results_view(&mut self, ui: &mut egui::Ui) {
         if let Some(p) = &self.scanned_source {
             let name = self
                 .drives
@@ -436,7 +488,7 @@ impl Reclaim {
                 ))
                 .truncate(),
             )
-            .on_hover_text(p.display().to_string());
+            .raw_on_hover_text(p.display().to_string());
         }
         ui.add_space(4.0);
         ui.allocate_ui_with_layout(
@@ -517,10 +569,15 @@ impl Reclaim {
                     }
                 }
                 ui.with_layout(i18n::trailing_row(), |ui| {
-                    ui.t_weak(format!("{} files", visible.len()));
+                    ui.t_weak(if visible.len() == 1 {
+                        "1 file".into()
+                    } else {
+                        format!("{} files", visible.len())
+                    });
                 });
             },
         );
+        let mut inspect = None;
         let height = (ui.available_height() - 8.0).max(100.0);
         theme::card(ui).inner_margin(8.0).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -576,8 +633,9 @@ impl Reclaim {
                                     egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
                                     i18n::row(),
                                     |ui| {
+                                        theme::file_badge(ui, f.kind);
                                         let filename_width =
-                                            (ui.available_width() - 100.0).max(140.0);
+                                            (ui.available_width() - 140.0).max(120.0);
                                         ui.allocate_ui_with_layout(
                                             egui::vec2(filename_width, 54.0),
                                             i18n::column(),
@@ -618,6 +676,17 @@ impl Reclaim {
                                             },
                                         );
                                         ui.with_layout(i18n::trailing_row(), |ui| {
+                                            if theme::icon_button(
+                                                ui,
+                                                theme::Icon::Info,
+                                                "File details",
+                                                false,
+                                                egui::vec2(32.0, 36.0),
+                                            )
+                                            .clicked()
+                                            {
+                                                inspect = Some(visible[row]);
+                                            }
                                             ui.t_weak(theme::bytes(f.size));
                                         });
                                     },
@@ -627,6 +696,9 @@ impl Reclaim {
                     });
             }
         });
+        if let Some(index) = inspect {
+            self.details_file = Some(index);
+        }
     }
     fn guide_view(&mut self, ui: &mut egui::Ui) {
         let steps = [
@@ -656,10 +728,9 @@ impl Reclaim {
             ),
         ];
         ui.vertical_centered(|ui| {
-            ui.t_heading("Recovery guide");
             ui.t_weak("A few careful steps can preserve more of your data.");
         });
-        ui.add_space(20.0);
+        ui.add_space(12.0);
         ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 40.0), i18n::row(), |ui| {
             let width = (ui.available_width() - 3.0 * ui.spacing().item_spacing.x) / 4.0;
             for (index, (title, _, _, _)) in steps.iter().enumerate() {
@@ -693,21 +764,34 @@ impl Reclaim {
                 );
                 ui.t_heading(title);
                 ui.add_space(8.0);
-                ui.t_strong(summary);
-                ui.t_label(body);
-                ui.add_space(12.0);
-                ui.separator();
-                theme::disclosure(ui, "More details", |ui| {
-                    ui.t_label(details);
-                    if self.guide_step >= 2 {
-                        ui.add_space(12.0);
-                        ui.t_strong("About file names");
-                        ui.t_label("Small deleted NTFS files can retain their original names and contents inside an MFT record. When a checked record is available, its filename is used. Other results are found by file signatures and receive generated names such as Image 0001.png. Original folders are not reconstructed. Names are made portable when saving, and duplicate names get a numeric suffix.");
-                    }
-                });
+                let body_height = ui.available_height().max(80.0);
+                egui::ScrollArea::vertical()
+                    .id_salt(("guide_content", self.guide_step))
+                    .max_height(body_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.with_layout(i18n::column(), |ui| {
+                            ui.t_strong(summary);
+                            ui.t_label(body);
+                            ui.add_space(8.0);
+                            ui.separator();
+                            theme::disclosure(ui, "More details", |ui| {
+                                ui.t_label(details);
+                                if self.guide_step >= 2 {
+                                    ui.add_space(12.0);
+                                    ui.t_strong("About file names");
+                                    ui.t_label("Small deleted NTFS files can retain their original names and contents inside an MFT record. When a checked record is available, its filename is used. Other results are found by file signatures and receive generated names such as Image 0001.png. Original folders are not reconstructed. Names are made portable when saving, and duplicate names get a numeric suffix.");
+                                }
+                            });
+                            theme::disclosure(ui, "Know the limits", |ui| {
+                                ui.t_label("Original filenames are available only for supported deleted NTFS resident files. Larger NTFS files, original folders, general fragmented-file reconstruction, FAT/exFAT, APFS, and ext4 metadata recovery are not supported. Overwritten, TRIM-erased, or encrypted data without keys cannot be recovered by this scanner.");
+                            });
+                        });
+                    });
             });
         });
-        ui.add_space(16.0);
+    }
+    fn guide_navigation(&mut self, ui: &mut egui::Ui) {
         ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 40.0), i18n::row(), |ui| {
             if ui
                 .add_enabled_ui(self.guide_step > 0, |ui| {
@@ -742,15 +826,60 @@ impl Reclaim {
                 }
             });
         });
-        ui.add_space(20.0);
-        theme::disclosure(ui, "Know the limits", |ui| {
-            ui.t_label("Original filenames are available only for supported deleted NTFS resident files. Larger NTFS files, original folders, general fragmented-file reconstruction, FAT/exFAT, APFS, and ext4 metadata recovery are not supported. Overwritten, TRIM-erased, or encrypted data without keys cannot be recovered by this scanner.");
-        });
-        ui.add_space(12.0);
-        ui.t_weak("Reclaim 0.1 · MIT license · Built with Rust and egui");
     }
 }
 impl Reclaim {
+    fn file_details_view(&mut self, ctx: &egui::Context) {
+        let Some(index) = self.details_file else {
+            return;
+        };
+        let Some(file) = self.results.get(index) else {
+            self.details_file = None;
+            return;
+        };
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::new("file_details"))
+            .frame(egui::Frame::popup(&ctx.global_style()).inner_margin(20.0).corner_radius(14))
+            .show(ctx, |ui| {
+                ui.set_width((ctx.viewport_rect().width() - 80.0).clamp(260.0, 440.0));
+                ui.with_layout(i18n::column(), |ui| {
+                    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 40.0), i18n::row(), |ui| {
+                        theme::file_badge(ui, file.kind);
+                        ui.t_heading("File details");
+                        ui.with_layout(i18n::trailing_row(), |ui| { close = theme::icon_button(ui, theme::Icon::Close, "Close", false, egui::vec2(32.0,32.0)).clicked(); });
+                    });
+                    let name = file.recovery_name(index + 1);
+                    ui.add(egui::Label::new(i18n::raw_widget(ui, &name, egui::FontId::proportional(16.0), ui.visuals().strong_text_color(), ui.available_width())).wrap());
+                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical().id_salt("file_details_scroll").max_height((ctx.viewport_rect().height() - 200.0).max(160.0)).auto_shrink([false, true]).show(ui, |ui| {
+                        ui.with_layout(i18n::column(), |ui| {
+                            theme::detail_row(ui, "File type", &file.kind.to_uppercase());
+                            theme::detail_row(ui, "Size", &format!("{} ({} {})", theme::bytes(file.size), file.size, i18n::t("bytes")));
+                            theme::detail_row(ui, "Recovery check", &i18n::t(file.validation.label()));
+                            let deleted = file.ntfs.is_some();
+                            theme::detail_row(ui, "Deletion status", &i18n::t(if deleted { "Deleted NTFS record" } else { "Deletion not confirmed" }));
+                            theme::detail_row(ui, "File name", &i18n::t(if file.original_name.is_some() { "Original name recovered" } else { "Generated filename" }));
+                            ui.separator();
+                            if let Some(metadata) = &file.ntfs {
+                                for (label, value) in [("Created", metadata.created), ("Last modified", metadata.modified), ("Last accessed", metadata.accessed), ("Record changed", metadata.record_changed)] {
+                                    theme::detail_row(ui, label, &theme::file_date(value));
+                                }
+                                theme::detail_row(ui, "NTFS record", &format!("{} · {} {}", metadata.record_number, i18n::t("Sequence"), metadata.sequence_number));
+                            } else { ui.t_label("Dates are not available for files found by signature scanning."); }
+                            theme::detail_row(ui, "Deletion date", &i18n::t("Not available"));
+                            ui.t_label(egui::RichText::new("File dates do not indicate when a file was deleted. This scanner does not recover deletion timestamps.").small().weak());
+                            ui.separator();
+                            if let Some(source) = &self.scanned_source { theme::detail_row(ui, "Source", &source.display().to_string()); }
+                            theme::detail_row(ui, "Source offset", &format!("{} {} · 0x{:X}", file.offset, i18n::t("bytes"), file.offset));
+                            ui.t_label(egui::RichText::new("Recovery checks do not guarantee complete or usable contents. Open saved files to verify them.").small().weak());
+                        });
+                    });
+                });
+            });
+        if close || modal.should_close() {
+            self.details_file = None;
+        }
+    }
     fn settings_view(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
             return;
@@ -832,6 +961,7 @@ impl Reclaim {
                                 theme::disclosure(ui, "Supported files", |ui| {
                                     ui.t_label(egui::RichText::new(reclaim::FORMAT_SUMMARY).small());
                                 });
+                                self.updates.view(ui, self.busy || self.exporting);
                                 if let Some(error) = &self.settings_error { ui.t_label(error); }
                             });
                         });
@@ -857,6 +987,16 @@ impl Reclaim {
         self.poll();
         if self.busy || self.drives_loading {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
+        }
+        if self.updates.available() && !self.settings_open {
+            egui::Panel::bottom("update_notice").show(ui, |ui| {
+                ui.with_layout(i18n::row(), |ui| {
+                    ui.t_label("An update is available.");
+                    if ui.button(i18n::t("What’s new")).clicked() {
+                        self.settings_open = true;
+                    }
+                });
+            });
         }
         egui::Panel::top("header")
             .frame(
@@ -929,7 +1069,7 @@ impl Reclaim {
                         egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
                         i18n::row(),
                         |ui| {
-                            let has_results = !self.busy && self.scanned_source.is_some();
+                            let has_results = self.scanned_source.is_some();
                             let label_width = (ui.available_width()
                                 - 188.0
                                 - if has_results { 44.0 } else { 0.0 })
@@ -970,8 +1110,10 @@ impl Reclaim {
                                 },
                             );
                             ui.with_layout(i18n::trailing_row(), |ui| {
-                                let label = if self.busy {
-                                    "View Scan"
+                                let label = if self.busy && self.cancel.load(Ordering::Relaxed) {
+                                    "Stopping…"
+                                } else if self.busy {
+                                    "Stop"
                                 } else if self.source.is_none() {
                                     "Scan"
                                 } else if self
@@ -985,13 +1127,14 @@ impl Reclaim {
                                 };
                                 if ui
                                     .add_enabled(
-                                        self.busy || self.source.is_some(),
+                                        (self.busy || self.source.is_some())
+                                            && !(self.busy && self.cancel.load(Ordering::Relaxed)),
                                         theme::primary(ui, label).min_size(egui::vec2(164.0, 38.0)),
                                     )
                                     .clicked()
                                 {
                                     if self.busy {
-                                        self.page = 1;
+                                        self.stop_operation();
                                     } else {
                                         self.start();
                                     }
@@ -1014,142 +1157,145 @@ impl Reclaim {
                 });
         }
         if self.page == 1 {
-            egui::Panel::bottom("recover_bar")
+            egui::Panel::bottom("results_bar")
                 .frame(
                     egui::Frame::new()
                         .fill(theme::header_color(ui))
                         .inner_margin(egui::Margin::symmetric(24, 12)),
                 )
                 .show(ui, |ui| {
-                    let count = self
+                    let selected = self
                         .visible_result_indices()
                         .into_iter()
                         .filter(|&index| self.results[index].selected)
                         .count();
+                    let recovering = !self.busy && selected > 0;
+                    let stopping = self.busy && self.cancel.load(Ordering::Relaxed);
+                    let fraction = if self.total > 0 {
+                        (self.scanned as f64 / self.total as f64).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
                     ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+                        egui::vec2(ui.available_width(), 44.0),
                         i18n::row(),
                         |ui| {
+                            let reserve = 128.0 + if recovering { 152.0 } else { 0.0 };
+                            let width = (ui.available_width() - reserve).max(100.0);
                             ui.allocate_ui_with_layout(
-                                egui::vec2((ui.available_width() - 172.0).max(80.0), 44.0),
+                                egui::vec2(width, 44.0),
                                 i18n::column(),
                                 |ui| {
-                                    ui.set_min_width((ui.available_width()).max(80.0));
-                                    ui.t_strong(format!("{count} selected"));
-                                    ui.t_label(
-                                        egui::RichText::new("Save to another physical drive")
-                                            .small()
-                                            .weak(),
-                                    );
+                                    ui.set_min_width(width);
+                                    if self.busy {
+                                        ui.t_strong(if stopping {
+                                            "Stopping…"
+                                        } else if self.exporting {
+                                            "Recovering selected files…"
+                                        } else if self.source_handle.is_none() {
+                                            "Preparing scan"
+                                        } else {
+                                            "Scanning for files…"
+                                        });
+                                        let info = if self.exporting {
+                                            i18n::t("Stop after this file")
+                                        } else {
+                                            let files =
+                                                i18n::t(&format!("{} files", self.results.len()));
+                                            if self.total > 0 {
+                                                format!(
+                                                    "{files} · {:.1}% · {}",
+                                                    fraction * 100.0,
+                                                    theme::bytes(self.scanned)
+                                                )
+                                            } else {
+                                                format!("{files} · {}", theme::bytes(self.scanned))
+                                            }
+                                        };
+                                        ui.add(
+                                            egui::Label::new(i18n::widget(
+                                                ui,
+                                                egui::RichText::new(info).small(),
+                                                false,
+                                            ))
+                                            .truncate(),
+                                        );
+                                    } else {
+                                        ui.t_strong(format!("{selected} selected"));
+                                        ui.add(
+                                            egui::Label::new(i18n::widget(
+                                                ui,
+                                                egui::RichText::new(&self.status).small(),
+                                                false,
+                                            ))
+                                            .truncate(),
+                                        )
+                                        .t_on_hover_text(&self.status);
+                                    }
                                 },
                             );
                             ui.with_layout(i18n::trailing_row(), |ui| {
+                                let label = if stopping {
+                                    "Stopping…"
+                                } else if self.busy {
+                                    "Stop"
+                                } else {
+                                    "Scan again"
+                                };
                                 if ui
                                     .add_enabled(
-                                        !self.busy && count > 0,
-                                        theme::primary(ui, "Recover files…")
-                                            .min_size(egui::vec2(144.0, 38.0)),
+                                        !stopping && (self.busy || self.scanned_source.is_some()),
+                                        egui::Button::new(i18n::widget(ui, label, false))
+                                            .min_size(egui::vec2(112.0, 38.0)),
                                     )
                                     .clicked()
-                                    && let Some(dir) = rfd::FileDialog::new()
+                                {
+                                    if self.busy {
+                                        self.stop_operation();
+                                    } else {
+                                        self.source = self.scanned_source.clone();
+                                        self.start();
+                                    }
+                                }
+                                if recovering
+                                    && ui
+                                        .add(
+                                            theme::primary(ui, "Recover files…")
+                                                .min_size(egui::vec2(144.0, 38.0)),
+                                        )
+                                        .clicked()
+                                    && let Some(directory) = rfd::FileDialog::new()
                                         .set_title(i18n::t("Save to a different physical drive"))
                                         .pick_folder()
                                 {
-                                    self.export(dir);
+                                    self.export(directory);
                                 }
                             });
                         },
                     );
-                });
-        }
-        if self.busy || (self.page == 1 && self.scanned_source.is_some()) {
-            egui::Panel::bottom("status")
-                .frame(
-                    egui::Frame::new()
-                        .fill(ui.visuals().panel_fill)
-                        .inner_margin(egui::Margin::symmetric(24, 10)),
-                )
-                .show(ui, |ui| {
-                    let determinate = self.busy
+                    if self.busy
                         && !self.exporting
                         && self.total > 0
-                        && self.source_handle.is_some();
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
-                        i18n::row().with_main_wrap(true),
-                        |ui| {
-                            if self.busy && !determinate {
-                                ui.spinner();
-                            }
-                            ui.t_label(&self.status);
-                            if self.busy
-                                && ui
-                                    .t_button(if self.exporting {
-                                        "Stop after this file"
-                                    } else {
-                                        "Stop scan"
-                                    })
-                                    .clicked()
-                            {
-                                self.cancel.store(true, Ordering::Relaxed);
-                                self.status = if self.exporting {
-                                    "Stopping recovery…"
-                                } else {
-                                    "Stopping scan…"
-                                }
-                                .into();
-                            }
-                        },
-                    );
-                    if self.busy && !self.exporting && self.source_handle.is_some() {
-                        let fraction = if self.total > 0 {
-                            (self.scanned as f64 / self.total as f64).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        if determinate {
-                            ui.add(
-                                egui::ProgressBar::new(fraction as f32)
-                                    .desired_width(ui.available_width())
-                                    .desired_height(6.0)
-                                    .corner_radius(3)
-                                    .animate(false),
-                            );
-                        }
-                        let seconds = self
-                            .started
-                            .map(|t| t.elapsed().as_secs_f64())
-                            .unwrap_or(0.0)
-                            .max(0.01);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
-                            i18n::row(),
-                            |ui| {
-                                ui.t_label(
-                                    egui::RichText::new(format!(
-                                        "{} scanned · {}/s",
-                                        theme::bytes(self.scanned),
-                                        theme::bytes((self.scanned as f64 / seconds) as u64)
-                                    ))
-                                    .small()
-                                    .weak(),
-                                );
-                                if determinate {
-                                    ui.with_layout(i18n::trailing_row(), |ui| {
-                                        ui.t_label(
-                                            egui::RichText::new(format!(
-                                                "{:.1}%",
-                                                fraction * 100.0
-                                            ))
-                                            .small()
-                                            .weak(),
-                                        );
-                                    });
-                                }
-                            },
+                        && self.source_handle.is_some()
+                    {
+                        ui.add(
+                            egui::ProgressBar::new(fraction as f32)
+                                .desired_width(ui.available_width())
+                                .desired_height(4.0)
+                                .corner_radius(2)
+                                .animate(false),
                         );
                     }
                 });
+        }
+        if self.page == 2 {
+            egui::Panel::bottom("guide_navigation")
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::header_color(ui))
+                        .inner_margin(egui::Margin::symmetric(24, 12)),
+                )
+                .show(ui, |ui| self.guide_navigation(ui));
         }
         egui::CentralPanel::default()
             .frame(
@@ -1177,13 +1323,7 @@ impl Reclaim {
                                 ui.add_space(8.0);
                                 self.source_view(ui);
                             } else {
-                                egui::ScrollArea::vertical()
-                                    .id_salt(("page_scroll", self.page))
-                                    .auto_shrink([false, false])
-                                    .show(ui, |ui| {
-                                        ui.add_space(20.0);
-                                        self.guide_view(ui);
-                                    });
+                                self.guide_view(ui);
                             }
                         },
                     );
@@ -1191,10 +1331,17 @@ impl Reclaim {
             });
         window::resize(ui);
         self.settings_view(ui.ctx());
+        self.file_details_view(ui.ctx());
     }
 }
 impl eframe::App for Reclaim {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
+        if let Some(watcher) = &self.system_theme {
+            watcher.apply_input(input);
+        }
+    }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.updates.poll(ui.ctx());
         self.render(ui);
     }
 }
@@ -1218,6 +1365,8 @@ fn main() -> eframe::Result {
         Box::new(|cc| {
             theme::setup(&cc.egui_ctx);
             let mut app = Reclaim::default();
+            app.system_theme = theme::watch_system_theme(&cc.egui_ctx);
+            app.drive_monitor = drives::watch(&cc.egui_ctx);
             app.refresh_drives();
             Ok(Box::new(app))
         }),

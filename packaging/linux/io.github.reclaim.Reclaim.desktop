@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Reclaim
+Comment=Find and recover files from drives and disk images
+Exec=reclaim
+Icon=drive-harddisk
+Terminal=false
+Categories=System;Filesystem;
+Keywords=recovery;disk;files;
+StartupWMClass=io.github.reclaim.Reclaim
