@@ -162,8 +162,14 @@ mod tests {
 
     #[test]
     fn positional_reads_preserve_scanner_cursor() {
-        let mut file = tempfile::tempfile().unwrap();
+        // Anonymous temporary files deny sharing on Windows, which prevents
+        // ReOpenFile. Use a regular source file with the scanner's open mode.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.bin");
+        let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(b"0123456789").unwrap();
+        drop(file);
+        let mut file = crate::drives::open_source(&path).unwrap();
         file.seek(SeekFrom::Start(7)).unwrap();
         let file = Arc::new(file);
         let mut input = Input::new(file.clone()).unwrap();
