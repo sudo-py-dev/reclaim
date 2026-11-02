@@ -25,6 +25,9 @@ OutputDir={#OutputPath}
 OutputBaseFilename=reclaim-windows-x86_64-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
+; Search longer matches and retain one solid block for the best payload ratio.
+LZMANumFastBytes=273
+LZMANumBlockThreads=1
 WizardStyle=modern
 SetupIconFile=..\..\assets\icons\reclaim.ico
 LicenseFile=..\..\LICENSE

@@ -15,6 +15,39 @@ struct Input {
     file: Arc<std::fs::File>,
     position: u64,
 }
+impl Input {
+    fn new(file: Arc<std::fs::File>) -> std::io::Result<Self> {
+        #[cfg(windows)]
+        let file = {
+            use std::os::windows::io::{AsRawHandle, FromRawHandle};
+            use windows_sys::Win32::{
+                Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE},
+                Storage::FileSystem::{
+                    FILE_FLAG_RANDOM_ACCESS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                    ReOpenFile,
+                },
+            };
+            // A duplicated Windows handle shares its cursor. ReOpenFile creates
+            // an independent cursor on the same authorized object, without
+            // resolving the source path again or requesting write access.
+            // SAFETY: file keeps the input handle alive during ReOpenFile.
+            let handle = unsafe {
+                ReOpenFile(
+                    file.as_raw_handle(),
+                    GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    FILE_FLAG_RANDOM_ACCESS,
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: ReOpenFile returned a new owned handle; transfer it once.
+            Arc::new(unsafe { std::fs::File::from_raw_handle(handle) })
+        };
+        Ok(Self { file, position: 0 })
+    }
+}
 impl Read for Input {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         #[cfg(unix)]
@@ -25,6 +58,8 @@ impl Read for Input {
         #[cfg(windows)]
         let count = {
             use std::os::windows::fs::FileExt;
+            // This is safe only on our independently reopened handle:
+            // seek_read changes the Windows file cursor.
             self.file.seek_read(buffer, self.position)?
         };
         self.position += count as u64;
@@ -58,8 +93,12 @@ pub fn load(
         std::borrow::Cow::Borrowed(bytes.as_ref())
     } else {
         let file = handle.ok_or("The source is no longer available.")?;
-        let mut input = reclaim::SourceReader::new(Input { file, position: 0 }, alignment, None)
-            .map_err(|e| e.to_string())?;
+        let mut input = reclaim::SourceReader::new(
+            Input::new(file).map_err(|e| e.to_string())?,
+            alignment,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
         input
             .seek(SeekFrom::Start(found.offset))
             .map_err(|e| e.to_string())?;
@@ -127,10 +166,8 @@ mod tests {
         file.write_all(b"0123456789").unwrap();
         file.seek(SeekFrom::Start(7)).unwrap();
         let file = Arc::new(file);
-        let mut input = Input {
-            file: file.clone(),
-            position: 2,
-        };
+        let mut input = Input::new(file.clone()).unwrap();
+        input.seek(SeekFrom::Start(2)).unwrap();
         let mut bytes = [0; 3];
         input.read_exact(&mut bytes).unwrap();
         assert_eq!(&bytes, b"234");

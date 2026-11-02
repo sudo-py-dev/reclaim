@@ -57,7 +57,7 @@ Description: Read-only disk image carving and file recovery
     for path in root.rglob('*'):
         path.chmod(0o755 if path.is_dir() or path == root / 'usr/bin/reclaim' else 0o644)
     root.chmod(0o755)
-    run('dpkg-deb', '--root-owner-group', '-Zxz', '-z9', '--build', root,
+    run('dpkg-deb', '--root-owner-group', '-Zxz', '-z9', '-Sextreme', '--build', root,
         output / f'reclaim_{VERSION}_amd64.deb')
 
 

@@ -59,6 +59,7 @@ struct Reclaim {
     allocation_ready: bool,
     scanned: u64,
     total: u64,
+    source_size: Option<u64>,
     busy: bool,
     scan_stopped: bool,
     scan_error: Option<String>,
@@ -103,6 +104,7 @@ impl Default for Reclaim {
             allocation_ready: true,
             scanned: 0,
             total: 0,
+            source_size: None,
             busy: false,
             scan_stopped: false,
             scan_error: None,
@@ -139,12 +141,14 @@ impl Reclaim {
         self.unused_scan = true;
         self.allocation_ready = false;
         self.scanned = 0;
-        self.total = self
+        self.total = 0;
+        let source_size = self
             .drives
             .iter()
             .find(|d| d.path == path)
             .map(|d| d.size)
             .unwrap_or_else(|| path.metadata().map(|m| m.len()).unwrap_or(0));
+        self.source_size = (source_size > 0).then_some(source_size);
         self.source_handle = None;
         self.source_alignment = self
             .drives
@@ -159,7 +163,7 @@ impl Reclaim {
                 }
             });
         let alignment = self.source_alignment;
-        let source_size = (self.total > 0).then_some(self.total);
+        let source_size = self.source_size;
         self.scanned_source = Some(path.clone());
         self.busy = true;
         self.status =
@@ -250,7 +254,7 @@ impl Reclaim {
         self.cancel = Arc::new(AtomicBool::new(false));
         let cancel = self.cancel.clone();
         let alignment = self.source_alignment;
-        let source_size = (self.total > 0).then_some(self.total);
+        let source_size = self.source_size;
         std::thread::spawn(move || {
             let result = (|| {
                 let input = handle

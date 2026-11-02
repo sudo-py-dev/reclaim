@@ -1464,3 +1464,50 @@ fn unused_space_progress_does_not_jump_to_the_physical_disk_offset() {
     app.poll();
     assert_eq!(app.scan_activity.unwrap().3, since);
 }
+
+#[test]
+fn scan_total_stays_unknown_until_unused_space_is_mapped() {
+    let source = tempfile::NamedTempFile::new().unwrap();
+    source.as_file().set_len(8192).unwrap();
+    let mut app = Reclaim::default();
+    app.source = Some(source.path().to_owned());
+    app.start();
+    assert_eq!(app.source_size, Some(8192));
+    assert_eq!(app.total, 0);
+    assert!(!app.allocation_ready);
+    app.stop_operation();
+}
+
+#[test]
+fn recovery_reads_offsets_beyond_the_unused_byte_total() {
+    let mut source = tempfile::tempfile().unwrap();
+    source.write_all(&[0; 4096]).unwrap();
+    source.write_all(b"data").unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = Reclaim::default();
+    app.scanned_source = Some("test-volume".into());
+    app.source_handle = Some(Arc::new(source));
+    app.source_size = Some(4100);
+    app.total = 512; // Free space is smaller than the physical file offset.
+    app.results = vec![Found {
+        offset: 4096,
+        size: 4,
+        kind: "txt",
+        selected: true,
+        validation: reclaim::Validation::Unverified,
+        original_name: Some("recovered.txt".into()),
+        resident_data: None,
+        ntfs: None,
+    }];
+    app.export(directory.path().to_owned());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while app.busy && std::time::Instant::now() < deadline {
+        app.poll();
+        std::thread::yield_now();
+    }
+    assert!(!app.busy, "export did not finish");
+    assert_eq!(
+        std::fs::read(directory.path().join("recovered.txt")).unwrap(),
+        b"data"
+    );
+}

@@ -4,7 +4,7 @@
 
 Reclaim helps you look for recoverable photos, documents, and other files on a drive or a saved copy of a drive. A simple interface guides you from choosing a drive to saving the files you want to keep.
 
-**Version 0.1.8 · Early preview · English & Hebrew**
+**Version 0.1.9 · Early preview · English & Hebrew**
 
 ![Reclaim 0.1.0 — choose a drive to scan](docs/screenshots/reclaim-drives.png)
 

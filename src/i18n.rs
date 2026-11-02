@@ -327,7 +327,7 @@ pub fn setup_fonts(ctx: &egui::Context) {
     fonts.font_data.insert(
         "reclaim-icons".into(),
         std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
-            "../assets/fonts/FontAwesome-Solid.ttf"
+            "../assets/fonts/Reclaim-Icons.ttf"
         ))),
     );
     fonts.families.insert(
