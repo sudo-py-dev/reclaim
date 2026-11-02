@@ -1405,6 +1405,12 @@ fn main() -> eframe::Result {
             viewport: egui::ViewportBuilder::default()
                 .with_decorations(!window::CUSTOM_DECORATIONS)
                 .with_app_id("io.github.reclaim.Reclaim")
+                .with_icon(
+                    eframe::icon_data::from_png_bytes(include_bytes!(
+                        "../assets/icons/reclaim.png"
+                    ))
+                    .expect("bundled application icon"),
+                )
                 .with_inner_size([1120.0, 780.0])
                 .with_min_inner_size([540.0, 580.0]),
             ..Default::default()

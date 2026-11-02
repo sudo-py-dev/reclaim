@@ -33,6 +33,9 @@ def deb(binary, output, work):
     applications = root / 'usr/share/applications'
     applications.mkdir(parents=True)
     shutil.copy2(ROOT / 'packaging/linux/io.github.reclaim.Reclaim.desktop', applications)
+    icon_dir = root / 'usr/share/icons/hicolor/256x256/apps'
+    icon_dir.mkdir(parents=True)
+    shutil.copy2(ROOT / 'assets/icons/reclaim.png', icon_dir / f'{IDENTIFIER}.png')
     licenses(root / 'usr/share/doc/reclaim')
     (root / 'DEBIAN/control').write_text(f'''Package: reclaim
 Version: {VERSION}
@@ -72,6 +75,7 @@ def mac(binary, output, work, arch):
     with (contents / 'Info.plist').open('wb') as file:
         plistlib.dump(info, file)
     licenses(contents / 'Resources/licenses')
+    shutil.copy2(ROOT / 'assets/icons/reclaim.icns', contents / 'Resources/reclaim.icns')
     run('codesign', '--force', '--sign', '-', app)
     run('codesign', '--verify', '--deep', '--strict', app)
     components = work / 'components.plist'

@@ -26,6 +26,7 @@ OutputBaseFilename=reclaim-windows-x86_64-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\..\assets\icons\reclaim.ico
 LicenseFile=..\..\LICENSE
 UninstallDisplayIcon={app}\reclaim.exe
 CloseApplications=yes

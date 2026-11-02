@@ -37,6 +37,7 @@ jobs:
           lipo -create target/aarch64-apple-darwin/release/reclaim target/x86_64-apple-darwin/release/reclaim -output dist/Reclaim.app/Contents/MacOS/reclaim
           cp packaging/macos/Info.plist dist/Reclaim.app/Contents/
           mkdir -p dist/Reclaim.app/Contents/Resources
+          cp assets/icons/reclaim.icns dist/Reclaim.app/Contents/Resources/
           cp assets/fonts/DejaVu-LICENSE.txt assets/fonts/FontAwesome-LICENSE.txt dist/Reclaim.app/Contents/Resources/
           codesign --force --sign - dist/Reclaim.app
           ditto -c -k --keepParent dist/Reclaim.app dist/Reclaim-macOS.zip

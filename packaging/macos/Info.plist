@@ -5,9 +5,10 @@
 <key>CFBundleDisplayName</key><string>Reclaim</string>
 <key>CFBundleIdentifier</key><string>io.github.reclaim.Reclaim</string>
 <key>CFBundleExecutable</key><string>reclaim</string>
+<key>CFBundleIconFile</key><string>reclaim.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.1</string>
-<key>CFBundleVersion</key><string>0.1.1</string>
+<key>CFBundleShortVersionString</key><string>0.1.3</string>
+<key>CFBundleVersion</key><string>0.1.3</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSRequiresAquaSystemAppearance</key><false/>
 <key>NSRemovableVolumesUsageDescription</key><string>Read connected drives to look for recoverable files.</string>
