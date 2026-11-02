@@ -88,6 +88,17 @@ Reclaim is free and open source under the [MIT license](LICENSE).
 
 Built with [egui](https://github.com/emilk/egui). Bundled fonts and icons include their [DejaVu](assets/fonts/DejaVu-LICENSE.txt) and [Font Awesome](assets/fonts/FontAwesome-LICENSE.txt) licenses.
 
+## Startup errors and crash reports
+
+Windows uses DirectX 12 rendering, including the Microsoft software adapter when
+available, so a VM does not need an OpenGL driver just to open Reclaim. Startup
+errors, Rust panics, and unhandled Windows exceptions display a native error
+message. Diagnostics are saved to `%LOCALAPPDATA%\Reclaim\logs\reclaim.log`
+(with a fallback under `%TEMP%` if the user-data folder cannot be written).
+The previous log is retained when a log exceeds 1 MiB at startup. Reports stay
+on your computer. A crash guard cannot intercept errors before Windows loads
+the executable or every fatal system failure.
+
 ## Publishing a release
 
 Set the package version in `Cargo.toml`, refresh `Cargo.lock`, commit, and push a matching `vX.Y.Z` tag. The [release workflow](.github/workflows/release.yml) tests and builds Linux x86_64, Windows x86_64, and separate Apple Silicon/Intel macOS executables. Size-focused release settings enable full LTO, symbol stripping, and a single code generation unit. ZIP downloads include license notices; raw executables are also published for the updater, with SHA-256 sidecars for manual verification.

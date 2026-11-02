@@ -2,6 +2,7 @@
     all(target_os = "windows", not(debug_assertions)),
     windows_subsystem = "windows"
 )]
+mod diagnostics;
 mod drives;
 mod theme;
 mod update_ui;
@@ -1343,6 +1344,8 @@ impl eframe::App for Reclaim {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.updates.poll(ui.ctx());
         self.render(ui);
+        static FIRST_FRAME: std::sync::Once = std::sync::Once::new();
+        FIRST_FRAME.call_once(|| diagnostics::write("First application frame completed"));
     }
 }
 impl Drop for Reclaim {
@@ -1392,7 +1395,16 @@ fn native_bus_transport_rejects_external_programs() {
     }
 }
 
-fn main() -> eframe::Result {
+fn main() {
+    diagnostics::install();
+    if let Err(error) = run() {
+        diagnostics::report("Reclaim could not open its window.", &format!("{error:?}"));
+        std::process::exit(1);
+    }
+    diagnostics::write("Reclaim closed normally");
+}
+
+fn run() -> eframe::Result {
     #[cfg(target_os = "linux")]
     if let Err(error) = native_bus_addresses() {
         eprintln!("{error}");
@@ -1402,6 +1414,10 @@ fn main() -> eframe::Result {
     eframe::run_native(
         &i18n::t("Reclaim — File Recovery"),
         eframe::NativeOptions {
+            #[cfg(windows)]
+            renderer: eframe::Renderer::Wgpu,
+            #[cfg(windows)]
+            wgpu_options: windows_graphics_options(),
             viewport: egui::ViewportBuilder::default()
                 .with_decorations(!window::CUSTOM_DECORATIONS)
                 .with_app_id("io.github.reclaim.Reclaim")
@@ -1416,6 +1432,7 @@ fn main() -> eframe::Result {
             ..Default::default()
         },
         Box::new(|cc| {
+            diagnostics::write("Graphics initialized; creating application");
             theme::setup(&cc.egui_ctx);
             let mut app = Reclaim::default();
             app.system_theme = theme::watch_system_theme(&cc.egui_ctx);
@@ -1428,3 +1445,20 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod ui_tests;
+
+// DirectX avoids the OpenGL 1.1-only context on many Windows VMs. Wgpu can
+// select Microsoft's software adapter when accelerated graphics are unavailable.
+#[cfg(windows)]
+fn windows_graphics_options() -> eframe::WgpuConfiguration {
+    let mut options = eframe::WgpuConfiguration::default();
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+        // FXC is supplied by Windows, unlike the optional DXC redistributable.
+        setup
+            .instance_descriptor
+            .backend_options
+            .dx12
+            .shader_compiler = eframe::wgpu::Dx12Compiler::Fxc;
+    }
+    options
+}

@@ -27,6 +27,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/check-windows-runtime.ps1 -Binary "target/release/reclaim.exe"
+      - name: Verify Windows application opens
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-windows-startup.ps1 -Binary "target/release/reclaim.exe"
       - name: Package macOS application
         if: runner.os == 'macOS'
         run: |
