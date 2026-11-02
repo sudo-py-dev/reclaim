@@ -119,18 +119,17 @@ impl Updates {
                 self.receiver = Some(rx);
                 let ctx = ui.ctx().clone();
                 std::thread::spawn(move || {
-                    let _ = tx.send(Message::Opened(updater::open_installer(&path)));
+                    let _ = tx.send(Message::Opened(crate::installer::open_installer(&path)));
                     ctx.request_repaint();
                 });
             }
             ui.t_label("Close Reclaim before completing the installation.");
         }
         if let Some(release) = self.release.clone() {
-            ui.label(format!(
-                "{} {}",
-                reclaim::i18n::t("Available version"),
-                release.version
-            ));
+            ui.with_layout(reclaim::i18n::row(), |ui| {
+                ui.t_label("Available version");
+                ui.label(release.version.to_string());
+            });
             if busy {
                 ui.t_label("Finish scanning or recovering before installing an update.");
             }

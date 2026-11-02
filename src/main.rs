@@ -4,6 +4,7 @@
 )]
 mod diagnostics;
 mod drives;
+mod installer;
 mod theme;
 mod update_ui;
 mod window;
