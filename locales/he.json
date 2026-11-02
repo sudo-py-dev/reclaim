@@ -237,5 +237,6 @@
   "Update downloaded and verified. Open the installer to finish updating.": "העדכון הורד ואומת. פתחו את המתקין להשלמת העדכון.",
   "The desktop returned an unexpected installer request. Open the saved installer from your file manager.": "התקבלה בקשה לא צפויה משולחן העבודה. פתחו את המתקין שנשמר ממנהל הקבצים.",
   "The desktop installer request ended without a response": "בקשת פתיחת המתקין הסתיימה ללא תשובה",
-  "The installer was not opened. You can open the saved file from your file manager.": "המתקין לא נפתח. אפשר לפתוח את הקובץ שנשמר ממנהל הקבצים."
+  "The installer was not opened. You can open the saved file from your file manager.": "המתקין לא נפתח. אפשר לפתוח את הקובץ שנשמר ממנהל הקבצים.",
+  "Could not scan this drive": "לא ניתן לסרוק את הכונן הזה"
 }

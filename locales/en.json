@@ -237,5 +237,6 @@
   "Update downloaded and verified. Open the installer to finish updating.": "Update downloaded and verified. Open the installer to finish updating.",
   "The desktop returned an unexpected installer request. Open the saved installer from your file manager.": "The desktop returned an unexpected installer request. Open the saved installer from your file manager.",
   "The desktop installer request ended without a response": "The desktop installer request ended without a response",
-  "The installer was not opened. You can open the saved file from your file manager.": "The installer was not opened. You can open the saved file from your file manager."
+  "The installer was not opened. You can open the saved file from your file manager.": "The installer was not opened. You can open the saved file from your file manager.",
+  "Could not scan this drive": "Could not scan this drive"
 }

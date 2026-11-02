@@ -1270,3 +1270,47 @@ fn automatic_drive_updates_preserve_selection_and_scan_results() {
         Some(std::path::Path::new("/media/backup.img"))
     );
 }
+
+#[test]
+fn a_failed_scan_displays_its_error_instead_of_no_files_found() {
+    i18n::with_language(i18n::Language::English, || {
+        let ctx = egui::Context::default();
+        theme::setup(&ctx);
+        let mut app = Reclaim::default();
+        app.page = 1;
+        app.busy = true;
+        let (tx, rx) = mpsc::channel();
+        app.receiver = Some(rx);
+        tx.send(Message::Done(Err("Read-only access was denied".into())))
+            .unwrap();
+        app.poll();
+        assert!(!app.busy);
+        let mut labels = Vec::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(input([1120.0, 780.0]), |ui| app.render(ui));
+            labels = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        Some(text.galley.job.text.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+        }
+        assert!(
+            labels
+                .iter()
+                .any(|label| label == "Could not scan this drive")
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.contains("Read-only access was denied"))
+        );
+        assert!(!labels.iter().any(|label| label == "No files found"));
+    });
+}

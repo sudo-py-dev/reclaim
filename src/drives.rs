@@ -140,6 +140,45 @@ fn open_via_desktop(path: &Path) -> io::Result<File> {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "requires RECLAIM_TEST_DEVICE and read-only desktop authorization"]
+    fn live_named_volume_can_read_data() {
+        use std::io::Read;
+        let path =
+            PathBuf::from(std::env::var_os("RECLAIM_TEST_DEVICE").expect("explicit test device"));
+        let drive = discover()
+            .unwrap()
+            .into_iter()
+            .find(|drive| drive.path == path)
+            .expect("named volume must be offered as a scan source");
+        let handle = open_source(&path).expect("read-only volume authorization");
+        let limit = drive.size.min(16 * 1024 * 1024);
+        let mut source =
+            reclaim::SourceReader::new(handle, drive.sector_size, Some(limit)).unwrap();
+        let count = source
+            .read(&mut [0; 4096])
+            .expect("read first sector window");
+        assert_eq!(count, 4096);
+        eprintln!(
+            "Read {count} bytes from {} ({})",
+            drive.name,
+            path.display()
+        );
+        let mut scanned = 0;
+        let mut candidates = 0;
+        reclaim::scan_reader(
+            &mut source,
+            &std::sync::atomic::AtomicBool::new(false),
+            |event| match event {
+                reclaim::Event::Progress(bytes) => scanned = bytes,
+                reclaim::Event::Found(_) => candidates += 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(scanned, limit);
+        eprintln!("Bounded scan read {scanned} bytes and found {candidates} candidates");
+    }
+
+    #[test]
     #[cfg(target_os = "linux")]
     fn udisks_paths_escape_mapper_names() {
         assert_eq!(

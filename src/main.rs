@@ -48,6 +48,7 @@ struct Reclaim {
     total: u64,
     busy: bool,
     scan_stopped: bool,
+    scan_error: Option<String>,
     status: String,
     filter: String,
     page: usize,
@@ -82,6 +83,7 @@ impl Default for Reclaim {
             total: 0,
             busy: false,
             scan_stopped: false,
+            scan_error: None,
             status: "Choose a drive or disk image to get started.".into(),
             filter: String::new(),
             page: 0,
@@ -102,6 +104,7 @@ impl Reclaim {
         self.results.clear();
         self.details_file = None;
         self.scan_stopped = false;
+        self.scan_error = None;
         self.page = 1;
         self.exporting = false;
         self.started = Some(std::time::Instant::now());
@@ -310,7 +313,10 @@ impl Reclaim {
                                     self.results.len()
                                 )
                             }
-                            Err(e) => format!("Scan failed: {e}"),
+                            Err(e) => {
+                                self.scan_error = Some(e.clone());
+                                format!("Scan failed: {e}")
+                            }
                         };
                     }
                     Message::Export(result) => {
@@ -591,6 +597,8 @@ impl Reclaim {
                     } else {
                         "Preparing scan"
                     }
+                } else if self.results.is_empty() && self.scan_error.is_some() {
+                    "Could not scan this drive"
                 } else if self.results.is_empty() && self.scan_stopped {
                     "Scan stopped"
                 } else if self.results.is_empty() {
@@ -604,6 +612,8 @@ impl Reclaim {
                     } else {
                         "The scan will start when the source is ready."
                     }
+                } else if self.results.is_empty() && self.scan_error.is_some() {
+                    self.scan_error.as_deref().unwrap_or_default()
                 } else if self.results.is_empty() && self.scan_stopped {
                     "No files were found before stopping. You can scan this source again."
                 } else if self.results.is_empty() {

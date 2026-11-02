@@ -253,20 +253,17 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             sector_size,
         });
     }
-    // A partition and its parent read the same physical storage. Offer the
-    // entire disk once; retain encrypted / mapped sources with distinct access.
+    // Prefer named volumes over their parent disk. The volume retains its
+    // filesystem label and is the source the user selected before deduplication.
+    // Keep whole disks when no valid partition is available (e.g. lost tables).
     let paths: HashSet<_> = drives.iter().map(|d| d.path.clone()).collect();
-    drives.retain(|drive| {
-        let node = nodes.iter().find(|node| dev.join(&node.name) == drive.path);
-        !node.is_some_and(|node| {
-            node.partition
-                && !drive.encrypted
-                && node
-                    .parents
-                    .iter()
-                    .any(|parent| paths.contains(&dev.join(parent)))
-        })
-    });
+    let represented_parents: HashSet<_> = nodes
+        .iter()
+        .filter(|node| node.partition && paths.contains(&dev.join(&node.name)))
+        .flat_map(|node| node.parents.iter().map(|parent| dev.join(parent)))
+        .collect();
+    drives.retain(|drive| !represented_parents.contains(&drive.path));
+
     Ok(drives)
 }
 
@@ -325,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn a_usb_disk_and_its_partition_appear_once_with_the_whole_disk_size() {
+    fn a_usb_disk_appears_once_using_its_named_scannable_volume() {
         let f = Fixture::new();
         f.disk("sdb", "8:16", "120000");
         f.write("devices/sdb/device/model", "SanDisk 3.2Gen1");
@@ -339,11 +336,12 @@ mod tests {
             "mountinfo",
             "30 1 8:17 / /run/media/user/HBCD_PE_X64 rw - vfat /dev/sdb1 rw\n",
         );
+        f.write("udev/b8:17", "E:ID_FS_LABEL_ENC=HBCD_PE_X64\n");
         let rows = f.discover().unwrap();
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].path.ends_with("sdb"));
-        assert_eq!(rows[0].size, 120000 * 512);
-        assert_eq!(rows[0].name, "SanDisk 3.2Gen1");
+        assert!(rows[0].path.ends_with("sdb1"));
+        assert_eq!(rows[0].size, 119000 * 512);
+        assert_eq!(rows[0].name, "HBCD_PE_X64");
         assert!(rows[0].mounted);
     }
 
@@ -375,19 +373,15 @@ mod tests {
         .unwrap();
         f.write("udev/b259:1", "E:ID_FS_TYPE=crypto_LUKS\n");
         let rows = f.discover().unwrap();
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.mounted));
-        let whole = rows
-            .iter()
-            .find(|row| row.path.ends_with("nvme0n1"))
-            .unwrap();
-        assert_eq!(whole.size, 10000 * 512); // not 10000 * 4096
-        assert_eq!(whole.name, "Test SSD");
+        assert!(!rows.iter().any(|row| row.path.ends_with("nvme0n1")));
         let partition = rows
             .iter()
             .find(|row| row.path.ends_with("nvme0n1p1"))
             .unwrap();
         assert!(partition.encrypted);
+        assert_eq!(partition.size, 9000 * 512); // sysfs units, not 4096-byte sectors
         assert_eq!(partition.sector_size, 4096);
         let unlocked = rows.iter().find(|row| row.path.ends_with("dm-0")).unwrap();
         assert_eq!(unlocked.name, "תמונות חדשות");

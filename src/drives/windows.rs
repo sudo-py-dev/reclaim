@@ -108,6 +108,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
     disks.sort_by_key(|(number, _)| *number);
     let mut rows = Vec::new();
     let mut disk_rows = std::collections::HashMap::new();
+    let mut represented_disks = std::collections::HashSet::new();
     for (number, name) in disks {
         let path = format!(r"\\.\{name}");
         let Some(file) = open(&path) else {
@@ -208,11 +209,8 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             .and_then(|number| disk_rows.get(&number))
             .map(|&index| rows[index].sector_size)
             .unwrap_or(4096);
-        // Do not list the volume again when its whole physical disk is present.
-        // Locked volumes remain visible so their unlock requirement is clear.
-        if !encrypted && u32_at(&extents, extent_offset).is_some_and(|n| disk_rows.contains_key(&n))
-        {
-            continue;
+        if !encrypted && let Some(number) = u32_at(&extents, extent_offset) {
+            represented_disks.insert(number);
         }
         rows.push(Drive {
             path: path.into(),
@@ -238,5 +236,10 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             rows[index].location = "Contains mounted volumes".into();
         }
     }
+    let hidden: std::collections::HashSet<_> = represented_disks
+        .iter()
+        .filter_map(|number| disk_rows.get(number).map(|&index| rows[index].path.clone()))
+        .collect();
+    rows.retain(|row| !hidden.contains(&row.path));
     Ok(rows)
 }
