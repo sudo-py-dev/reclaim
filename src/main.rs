@@ -202,14 +202,16 @@ impl Reclaim {
             .filter(|(i, f)| {
                 let category = reclaim::category_index(f.kind);
                 (self.category == 0 || category == self.category)
-                    && format!(
-                        "{} {} {:x} {}",
-                        f.recovery_name(i + 1).to_lowercase(),
-                        f.original_name.as_deref().unwrap_or("").to_lowercase(),
-                        f.offset,
-                        f.offset
-                    )
-                    .contains(&query)
+                    && (query.is_empty()
+                        || format!(
+                            "{} {} {:x} {}",
+                            f.recovery_name(i + 1),
+                            f.original_name.as_deref().unwrap_or(""),
+                            f.offset,
+                            f.offset
+                        )
+                        .to_lowercase()
+                        .contains(&query))
             })
             .map(|(i, _)| i)
             .collect()
@@ -767,15 +769,17 @@ impl Reclaim {
                     .max_height(height - 16.0)
                     .auto_shrink([false, false])
                     .show_rows(ui, 54.0, visible.len(), |ui, range| {
-                        for row in range.clone() {
-                            // Keep GPU memory bounded while retaining the rows currently on screen.
-                            if self.thumbnails.len() > 256 {
-                                self.thumbnails
-                                    .retain(|index, _| visible[range.clone()].contains(index));
-                            }
+                        // Visible indices are sorted in source-result order.
+                        // Evict once per frame rather than once for every row.
+                        if self.thumbnails.len() > 256 {
+                            self.thumbnails.retain(|index, _| {
+                                visible[range.clone()].binary_search(index).is_ok()
+                            });
+                        }
+                        for row in range {
                             let thumbnail = self.thumbnail(visible[row], ui.ctx());
                             let f = &mut self.results[visible[row]];
-                            ui.push_id(f.offset, |ui| {
+                            ui.push_id(visible[row], |ui| {
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
                                     i18n::row(),

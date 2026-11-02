@@ -55,7 +55,7 @@ pub fn load(
         );
     }
     let bytes = if let Some(bytes) = &found.resident_data {
-        bytes.to_vec()
+        std::borrow::Cow::Borrowed(bytes.as_ref())
     } else {
         let file = handle.ok_or("The source is no longer available.")?;
         let mut input = reclaim::SourceReader::new(Input { file, position: 0 }, alignment, None)
@@ -65,7 +65,7 @@ pub fn load(
             .map_err(|e| e.to_string())?;
         let mut bytes = vec![0; found.size as usize];
         input.read_exact(&mut bytes).map_err(|e| e.to_string())?;
-        bytes
+        std::borrow::Cow::Owned(bytes)
     };
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()

@@ -512,40 +512,43 @@ fn candidate_kind(fmt: &Format, bytes: &[u8]) -> &'static str {
 // Only classify packages from a complete, single-disk classic ZIP directory.
 // Names appearing in compressed payloads must not change the recovered extension.
 fn zip_kind(bytes: &[u8]) -> &'static str {
-    let Some((eocd, _)) = bytes
+    // The classic EOCD is 22 bytes plus at most a u16-sized comment.
+    let search_start = bytes.len().saturating_sub(22 + u16::MAX as usize);
+    let Some((relative, _)) = bytes[search_start..]
         .windows(4)
         .enumerate()
-        .rfind(|(i, w)| *w == b"PK\x05\x06" && valid_zip(bytes, *i))
+        .rfind(|(i, w)| *w == b"PK\x05\x06" && valid_zip(bytes, search_start + *i))
     else {
         return "zip";
     };
-    if bytes.len() < eocd + 22 {
-        return "zip";
-    }
+    let eocd = search_start + relative;
+    // valid_zip already checked the complete directory and local name ranges.
     let u16_at = |p| u16::from_le_bytes([bytes[p], bytes[p + 1]]) as usize;
     let u32_at = |p| u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
-    if u16_at(eocd + 4) != 0 || u16_at(eocd + 6) != 0 || u16_at(eocd + 8) != u16_at(eocd + 10) {
-        return "zip";
-    }
     let count = u16_at(eocd + 10);
-    let size = u32_at(eocd + 12);
     let mut cursor = u32_at(eocd + 16);
-    if cursor.checked_add(size) != Some(eocd) {
-        return "zip";
-    }
-    let mut names = Vec::new();
+    const PACKAGE_NAMES: &[&[u8]] = &[
+        b"[Content_Types].xml",
+        b"word/document.xml",
+        b"word/vbaProject.bin",
+        b"xl/workbook.xml",
+        b"xl/vbaProject.bin",
+        b"ppt/presentation.xml",
+        b"ppt/vbaProject.bin",
+        b"META-INF/container.xml",
+        b"AndroidManifest.xml",
+        b"classes.dex",
+        b"META-INF/MANIFEST.MF",
+    ];
+    let mut names = [false; PACKAGE_NAMES.len()];
     let mut mime = None;
     for _ in 0..count {
-        if cursor + 46 > eocd || &bytes[cursor..cursor + 4] != b"PK\x01\x02" {
-            return "zip";
-        }
         let name_len = u16_at(cursor + 28);
         let next = cursor + 46 + name_len + u16_at(cursor + 30) + u16_at(cursor + 32);
-        if next > eocd {
-            return "zip";
-        }
         let name = &bytes[cursor + 46..cursor + 46 + name_len];
-        names.push(name);
+        if let Some(index) = PACKAGE_NAMES.iter().position(|&known| known == name) {
+            names[index] = true;
+        }
         if name == b"mimetype" {
             let local = u32_at(cursor + 42);
             if local.checked_add(30).is_some_and(|end| end <= eocd)
@@ -562,10 +565,12 @@ fn zip_kind(bytes: &[u8]) -> &'static str {
         }
         cursor = next;
     }
-    if cursor != eocd {
-        return "zip";
-    }
-    let has = |name: &[u8]| names.contains(&name);
+    let has = |name: &[u8]| {
+        PACKAGE_NAMES
+            .iter()
+            .position(|&known| known == name)
+            .is_some_and(|index| names[index])
+    };
     if has(b"[Content_Types].xml") {
         if has(b"word/document.xml") {
             return if has(b"word/vbaProject.bin") {
@@ -960,6 +965,26 @@ pub fn recover_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn zip_classification_handles_maximum_comment_and_false_footer() {
+        let mut bytes = include_bytes!("../tests/fixtures/package.docx").to_vec();
+        let eocd = bytes
+            .windows(4)
+            .enumerate()
+            .rfind(|(i, w)| *w == b"PK\x05\x06" && valid_zip(&bytes, *i))
+            .unwrap()
+            .0;
+        assert_eq!(zip_kind(&bytes), "docx");
+        bytes.truncate(eocd + 22);
+        bytes[eocd + 20..eocd + 22].copy_from_slice(&u16::MAX.to_le_bytes());
+        bytes.resize(bytes.len() + u16::MAX as usize, 0);
+        // A later signature inside the comment must not hide the real footer.
+        let fake = bytes.len() - 22;
+        bytes[fake..fake + 4].copy_from_slice(b"PK\x05\x06");
+        assert_eq!(zip_kind(&bytes), "docx");
+        assert_eq!(zip_kind(b"PK\x05\x06"), "zip");
+    }
+
     #[test]
     fn signature_dispatch_covers_every_format_and_partial_header() {
         for format in FORMATS {

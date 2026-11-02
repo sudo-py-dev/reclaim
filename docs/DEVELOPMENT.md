@@ -90,6 +90,11 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
+Run the project-specific Python rules with `python3 scripts/check_project.py`
+(Python 3.11+), or add `--full` to run Python tests and the Rust checks above.
+Use `--previews /tmp/reclaim-previews` to also save headless UI renderings.
+See [the code and UI audit](CODE_UI_AUDIT.md) for findings, project rules, and limits.
+
 Tests cover signature boundaries, image validation, NTFS records, filtered exports, collision protection, sector-aligned reads, native Linux metadata fixtures, cancellation, RTL rendering, keyboard controls, and responsive layouts.
 
 Optional headless UI previews:
