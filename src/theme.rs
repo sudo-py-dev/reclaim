@@ -1068,132 +1068,6 @@ pub fn file_date(timestamp: Option<i64>) -> String {
         .unwrap_or_else(|| i18n::t("Not available"))
 }
 
-#[cfg(test)]
-mod system_theme_tests {
-    use super::*;
-    fn update(ctx: &egui::Context, state: &SystemThemeWatcher, scheme: u32) {
-        record_system_theme(ctx, state, scheme);
-        let mut input = egui::RawInput::default();
-        state.apply_input(&mut input);
-        ctx.run_ui(input, |_| {}).drop_without_applying_deltas();
-    }
-    #[test]
-    fn live_system_changes_preserve_explicit_preferences() {
-        let ctx = egui::Context::default();
-        setup(&ctx);
-        let state = SystemThemeWatcher {
-            scheme: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(255)),
-        };
-        ctx.set_theme(egui::ThemePreference::System);
-        update(&ctx, &state, 2);
-        assert_eq!(ctx.theme(), egui::Theme::Light);
-        update(&ctx, &state, 1);
-        assert_eq!(ctx.theme(), egui::Theme::Dark);
-        ctx.set_theme(egui::ThemePreference::Light);
-        update(&ctx, &state, 1);
-        assert_eq!(ctx.theme(), egui::Theme::Light);
-        ctx.set_theme(egui::ThemePreference::Dark);
-        update(&ctx, &state, 2);
-        assert_eq!(ctx.theme(), egui::Theme::Dark);
-        ctx.set_theme(egui::ThemePreference::System);
-        assert_eq!(ctx.theme(), egui::Theme::Light);
-        update(&ctx, &state, 0);
-        assert_eq!(ctx.system_theme(), None);
-        update(&ctx, &state, 99);
-        assert_eq!(ctx.system_theme(), None);
-    }
-    #[test]
-    fn no_preference_follows_gtk_theme_and_explicit_scheme_wins() {
-        let mut desktop = DesktopAppearance {
-            gtk_theme: "Yaru-blue".into(),
-            ..Default::default()
-        };
-        assert_eq!(desktop.resolved_scheme(), 2);
-        desktop.gtk_theme = "Yaru-blue-dark".into();
-        assert_eq!(desktop.resolved_scheme(), 1);
-        desktop.gnome_scheme = "prefer-light".into();
-        assert_eq!(desktop.resolved_scheme(), 2);
-        desktop.color_scheme = 1;
-        assert_eq!(desktop.resolved_scheme(), 1);
-        desktop.color_scheme = 2;
-        assert_eq!(desktop.resolved_scheme(), 2);
-    }
-    #[test]
-    fn native_theme_events_follow_system_while_app_runs() {
-        let ctx = egui::Context::default();
-        setup(&ctx);
-        ctx.set_theme(egui::ThemePreference::System);
-        for system in [egui::Theme::Light, egui::Theme::Dark, egui::Theme::Light] {
-            let input = egui::RawInput {
-                system_theme: Some(system),
-                ..Default::default()
-            };
-            ctx.run_ui(input, |ui| {
-                assert_eq!(ui.visuals().dark_mode, system == egui::Theme::Dark)
-            })
-            .drop_without_applying_deltas();
-        }
-    }
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod live_portal_test {
-    #[test]
-    #[ignore = "requires a desktop session bus"]
-    fn read_live_desktop_color_scheme() {
-        let connection = zbus::blocking::Connection::session().unwrap();
-        let proxy = zbus::blocking::Proxy::new(
-            &connection,
-            "org.freedesktop.portal.Desktop",
-            "/org/freedesktop/portal/desktop",
-            "org.freedesktop.portal.Settings",
-        )
-        .unwrap();
-        let result: Result<
-            std::collections::HashMap<
-                String,
-                std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
-            >,
-            _,
-        > = proxy.call(
-            "ReadAll",
-            &(vec![
-                "org.freedesktop.appearance",
-                "org.gnome.desktop.interface",
-            ],),
-        );
-        match result {
-            Ok(settings) => {
-                let values = settings.get("org.gnome.desktop.interface");
-                let desktop = super::DesktopAppearance {
-                    color_scheme: settings
-                        .get("org.freedesktop.appearance")
-                        .and_then(|m| m.get("color-scheme"))
-                        .and_then(|v| u32::try_from(v).ok())
-                        .unwrap_or(0),
-                    gnome_scheme: values
-                        .and_then(|m| m.get("color-scheme"))
-                        .and_then(|v| <&str>::try_from(v).ok())
-                        .unwrap_or_default()
-                        .into(),
-                    gtk_theme: values
-                        .and_then(|m| m.get("gtk-theme"))
-                        .and_then(|v| <&str>::try_from(v).ok())
-                        .unwrap_or_default()
-                        .into(),
-                };
-                eprintln!(
-                    "Desktop scheme: {}, GTK theme: {}, resolved: {}",
-                    desktop.color_scheme,
-                    desktop.gtk_theme,
-                    desktop.resolved_scheme()
-                );
-            }
-            Err(error) => panic!("Portal read failed: {error}"),
-        }
-    }
-}
-
 /// Brief, interruptible fade without moving controls or delaying input.
 pub fn page_fade(ui: &mut egui::Ui, name: &str, page: usize) {
     let duration = ui.style().animation_time as f64;
@@ -1332,5 +1206,131 @@ pub fn activity_indicator(ui: &mut egui::Ui, checking: bool, stopping: bool) {
     if moving {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(16));
+    }
+}
+
+#[cfg(test)]
+mod system_theme_tests {
+    use super::*;
+    fn update(ctx: &egui::Context, state: &SystemThemeWatcher, scheme: u32) {
+        record_system_theme(ctx, state, scheme);
+        let mut input = egui::RawInput::default();
+        state.apply_input(&mut input);
+        ctx.run_ui(input, |_| {}).drop_without_applying_deltas();
+    }
+    #[test]
+    fn live_system_changes_preserve_explicit_preferences() {
+        let ctx = egui::Context::default();
+        setup(&ctx);
+        let state = SystemThemeWatcher {
+            scheme: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(255)),
+        };
+        ctx.set_theme(egui::ThemePreference::System);
+        update(&ctx, &state, 2);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        update(&ctx, &state, 1);
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
+        ctx.set_theme(egui::ThemePreference::Light);
+        update(&ctx, &state, 1);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        ctx.set_theme(egui::ThemePreference::Dark);
+        update(&ctx, &state, 2);
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
+        ctx.set_theme(egui::ThemePreference::System);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        update(&ctx, &state, 0);
+        assert_eq!(ctx.system_theme(), None);
+        update(&ctx, &state, 99);
+        assert_eq!(ctx.system_theme(), None);
+    }
+    #[test]
+    fn no_preference_follows_gtk_theme_and_explicit_scheme_wins() {
+        let mut desktop = DesktopAppearance {
+            gtk_theme: "Yaru-blue".into(),
+            ..Default::default()
+        };
+        assert_eq!(desktop.resolved_scheme(), 2);
+        desktop.gtk_theme = "Yaru-blue-dark".into();
+        assert_eq!(desktop.resolved_scheme(), 1);
+        desktop.gnome_scheme = "prefer-light".into();
+        assert_eq!(desktop.resolved_scheme(), 2);
+        desktop.color_scheme = 1;
+        assert_eq!(desktop.resolved_scheme(), 1);
+        desktop.color_scheme = 2;
+        assert_eq!(desktop.resolved_scheme(), 2);
+    }
+    #[test]
+    fn native_theme_events_follow_system_while_app_runs() {
+        let ctx = egui::Context::default();
+        setup(&ctx);
+        ctx.set_theme(egui::ThemePreference::System);
+        for system in [egui::Theme::Light, egui::Theme::Dark, egui::Theme::Light] {
+            let input = egui::RawInput {
+                system_theme: Some(system),
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| {
+                assert_eq!(ui.visuals().dark_mode, system == egui::Theme::Dark)
+            })
+            .drop_without_applying_deltas();
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod live_portal_test {
+    #[test]
+    #[ignore = "requires a desktop session bus"]
+    fn read_live_desktop_color_scheme() {
+        let connection = zbus::blocking::Connection::session().unwrap();
+        let proxy = zbus::blocking::Proxy::new(
+            &connection,
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings",
+        )
+        .unwrap();
+        let result: Result<
+            std::collections::HashMap<
+                String,
+                std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+            >,
+            _,
+        > = proxy.call(
+            "ReadAll",
+            &(vec![
+                "org.freedesktop.appearance",
+                "org.gnome.desktop.interface",
+            ],),
+        );
+        match result {
+            Ok(settings) => {
+                let values = settings.get("org.gnome.desktop.interface");
+                let desktop = super::DesktopAppearance {
+                    color_scheme: settings
+                        .get("org.freedesktop.appearance")
+                        .and_then(|m| m.get("color-scheme"))
+                        .and_then(|v| u32::try_from(v).ok())
+                        .unwrap_or(0),
+                    gnome_scheme: values
+                        .and_then(|m| m.get("color-scheme"))
+                        .and_then(|v| <&str>::try_from(v).ok())
+                        .unwrap_or_default()
+                        .into(),
+                    gtk_theme: values
+                        .and_then(|m| m.get("gtk-theme"))
+                        .and_then(|v| <&str>::try_from(v).ok())
+                        .unwrap_or_default()
+                        .into(),
+                };
+                eprintln!(
+                    "Desktop scheme: {}, GTK theme: {}, resolved: {}",
+                    desktop.color_scheme,
+                    desktop.gtk_theme,
+                    desktop.resolved_scheme()
+                );
+            }
+            Err(error) => panic!("Portal read failed: {error}"),
+        }
     }
 }
