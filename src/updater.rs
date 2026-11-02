@@ -12,6 +12,7 @@ const MAX_BINARY: u64 = 128 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct Release {
     pub version: semver::Version,
+    pub asset: String,
     pub notes: String,
     pub url: String,
     pub digest: String,
@@ -51,21 +52,38 @@ pub fn check() -> Result<Option<Release>, String> {
         .limit(2 * 1024 * 1024)
         .read_to_string()
         .map_err(|e| e.to_string())?;
-    parse_release(
-        &serde_json::from_str(&json).map_err(|e| e.to_string())?,
-        &asset_name(),
+    let json: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let version = semver::Version::parse(
+        json["tag_name"]
+            .as_str()
+            .unwrap_or("")
+            .trim_start_matches('v'),
     )
+    .map_err(|e| e.to_string())?;
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    let asset = installer_name(&executable, &version).unwrap_or_else(asset_name);
+    parse_release(&json, &asset)
 }
 
 fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, String> {
+    parse_release_after(
+        json,
+        asset_name,
+        &semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
+    )
+}
+
+fn parse_release_after(
+    json: &Value,
+    asset_name: &str,
+    current: &semver::Version,
+) -> Result<Option<Release>, String> {
     if json["draft"].as_bool() != Some(false) || json["prerelease"].as_bool() != Some(false) {
         return Ok(None);
     }
     let tag = json["tag_name"].as_str().ok_or("Missing release version")?;
     let version = semver::Version::parse(tag.trim_start_matches('v')).map_err(|e| e.to_string())?;
-    if !version.pre.is_empty()
-        || version <= semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()
-    {
+    if !version.pre.is_empty() || version <= *current {
         return Ok(None);
     }
     let asset = json["assets"]
@@ -94,6 +112,7 @@ fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, Stri
         .ok_or("Invalid update size")?;
     Ok(Some(Release {
         version,
+        asset: asset_name.into(),
         notes: json["body"].as_str().unwrap_or("No release notes.").into(),
         url: url.into(),
         digest,
@@ -103,9 +122,71 @@ fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, Stri
 
 /// Installed packages must be updated as packages to preserve receipts and uninstall metadata.
 pub fn installer_download(release: &Release) -> Option<String> {
-    let executable = std::env::current_exe().ok()?;
-    let name = installer_name(&executable, &release.version)?;
-    Some(format!("{}/{}", release.url.rsplit_once('/')?.0, name))
+    is_installer(&release.asset).then(|| release.url.clone())
+}
+
+fn is_installer(name: &str) -> bool {
+    name.ends_with("-setup.exe") || name.ends_with(".deb") || name.ends_with(".pkg")
+}
+
+/// Download the actual package asset, verify it, then atomically publish the
+/// selected destination. Failed downloads leave no partial installer behind.
+pub fn download_installer(
+    release: &Release,
+    destination: &std::path::Path,
+    progress: impl Fn(u64, u64),
+) -> Result<(), String> {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    if installer_name(&executable, &release.version).as_deref() != Some(&release.asset) {
+        return Err("Unexpected installer for this installation".into());
+    }
+    validate_url(release)?;
+    let mut response = agent()
+        .get(&release.url)
+        .header("User-Agent", concat!("Reclaim/", env!("CARGO_PKG_VERSION")))
+        .call()
+        .map_err(|e| format!("Could not download update: {e}"))?;
+    publish_download(
+        response.body_mut().as_reader(),
+        release,
+        destination,
+        progress,
+    )
+}
+
+fn publish_download(
+    reader: impl Read,
+    release: &Release,
+    destination: &std::path::Path,
+    progress: impl Fn(u64, u64),
+) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or("Download destination has no parent folder")?;
+    let mut pending = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    verify_download_progress(reader, &mut pending, release, progress)?;
+    pending.as_file().sync_all().map_err(|e| e.to_string())?;
+    pending
+        .persist(destination)
+        .map_err(|e| e.error.to_string())?;
+    Ok(())
+}
+
+fn validate_url(release: &Release) -> Result<(), String> {
+    if release.asset.is_empty() || release.asset.contains(['/', '\\', '?', '#', '%']) {
+        return Err("Unexpected release asset name".into());
+    }
+    for tag in [format!("v{}", release.version), release.version.to_string()] {
+        if release.url
+            == format!(
+                "https://github.com/{REPO}/releases/download/{tag}/{}",
+                release.asset
+            )
+        {
+            return Ok(());
+        }
+    }
+    Err("Unexpected release download URL".into())
 }
 
 fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Option<String> {
@@ -130,24 +211,16 @@ fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Op
 }
 
 pub fn install(release: &Release) -> Result<(), String> {
-    if installer_download(release).is_some() {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    if installer_name(&executable, &release.version).is_some()
+        || installer_download(release).is_some()
+    {
         return Err("This installation must be updated using the matching installer.".into());
     }
-    if release.url
-        != format!(
-            "https://github.com/{REPO}/releases/download/v{}/{}",
-            release.version,
-            asset_name()
-        )
-        && release.url
-            != format!(
-                "https://github.com/{REPO}/releases/download/{}/{}",
-                release.version,
-                asset_name()
-            )
-    {
-        return Err("Unexpected release download URL".into());
+    if release.asset != asset_name() {
+        return Err("Unexpected executable update asset".into());
     }
+    validate_url(release)?;
     if cfg!(windows) {
         return Err("This installation must be updated using the matching installer.".into());
     }
@@ -159,7 +232,6 @@ pub fn install(release: &Release) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     verify_download(response.body_mut().as_reader(), &mut file, release)?;
     file.as_file().sync_all().map_err(|e| e.to_string())?;
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     replace_executable(&executable, file.path()).map_err(|e| {
         format!("Could not install update: {e}. Move Reclaim to a writable folder and retry.")
     })
@@ -188,6 +260,15 @@ fn verify_download(
     mut file: impl Write,
     release: &Release,
 ) -> Result<(), String> {
+    verify_download_progress(reader, &mut file, release, |_, _| {})
+}
+
+fn verify_download_progress(
+    reader: impl Read,
+    mut file: impl Write,
+    release: &Release,
+    progress: impl Fn(u64, u64),
+) -> Result<(), String> {
     // Release is public: enforce bounds here as well as when parsing the API.
     if release.size == 0
         || release.size > MAX_BINARY
@@ -210,11 +291,136 @@ fn verify_download(
             return Err("Update exceeds expected size".into());
         }
         hash.update(&buffer[..count]);
+        progress(size, release.size);
         file.write_all(&buffer[..count])
             .map_err(|e| e.to_string())?;
     }
     if size != release.size || format!("{:x}", hash.finalize()) != release.digest {
         return Err("Update checksum verification failed".into());
+    }
+    Ok(())
+}
+
+/// Hand a verified local package to the operating system without a shell or
+/// command helper. Installation remains visible and controlled by the user.
+pub fn open_installer(path: &std::path::Path) -> Result<(), String> {
+    // ShellExecute expects a shell path, rather than Windows canonicalize's
+    // verbatim \?\ path prefix. Other platforms can resolve symlinks normally.
+    let path = if cfg!(windows) {
+        std::path::absolute(path)
+    } else {
+        path.canonicalize()
+    }
+    .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    {
+        use std::{collections::HashMap, os::fd::AsFd};
+        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let connection = zbus::blocking::Connection::session().map_err(|e| e.to_string())?;
+        let portal = zbus::blocking::Proxy::new(
+            &connection,
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.OpenURI",
+        )
+        .map_err(|e| e.to_string())?;
+        // Subscribe before requesting the launch, and keep the connection alive
+        // until the portal responds (disconnecting early can cancel its dialog).
+        let sender = connection
+            .unique_name()
+            .ok_or("Desktop session has no connection name")?
+            .as_str()
+            .trim_start_matches(':')
+            .replace('.', "_");
+        let token = format!(
+            "reclaim_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos()
+        );
+        let request_path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
+        let request = zbus::blocking::Proxy::new(
+            &connection,
+            "org.freedesktop.portal.Desktop",
+            request_path.as_str(),
+            "org.freedesktop.portal.Request",
+        )
+        .map_err(|e| e.to_string())?;
+        let mut responses = request
+            .receive_signal("Response")
+            .map_err(|e| e.to_string())?;
+        let mut options = HashMap::<&str, zbus::zvariant::Value<'_>>::new();
+        options.insert("handle_token", zbus::zvariant::Value::from(token.as_str()));
+        let handle: zbus::zvariant::OwnedObjectPath = portal.call("OpenFile", &("", zbus::zvariant::Fd::from(file.as_fd()), options)).map_err(|e| format!("Could not open installer: {e}. Open the downloaded file from your file manager."))?;
+        if handle.as_str() != request_path {
+            return Err("The desktop returned an unexpected installer request. Open the saved installer from your file manager.".into());
+        }
+        let response = responses
+            .next()
+            .ok_or("The desktop installer request ended without a response")?;
+        let (status, _): (u32, HashMap<String, zbus::zvariant::OwnedValue>) =
+            response.body().deserialize().map_err(|e| e.to_string())?;
+        if status != 0 {
+            return Err(
+                "The installer was not opened. You can open the saved file from your file manager."
+                    .into(),
+            );
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+        // SAFETY: the terminated strings remain alive until ShellExecuteW returns.
+        let result = unsafe {
+            windows_sys::Win32::UI::Shell::ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        } as isize;
+        if result <= 32 {
+            return Err(format!(
+                "Could not open installer (Windows error {result}). Open the downloaded file from Explorer."
+            ));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use core_foundation_sys::{
+            base::{CFRelease, kCFAllocatorDefault},
+            url::{CFURLCreateFromFileSystemRepresentation, CFURLRef},
+        };
+        use std::os::unix::ffi::OsStrExt;
+        #[link(name = "CoreServices", kind = "framework")]
+        unsafe extern "C" {
+            fn LSOpenCFURLRef(url: CFURLRef, launched: *mut CFURLRef) -> i32;
+        }
+        let bytes = path.as_os_str().as_bytes();
+        // SAFETY: URL is created from a live byte slice; the returned +1 reference
+        // is released after Launch Services has consumed it.
+        unsafe {
+            let url = CFURLCreateFromFileSystemRepresentation(
+                kCFAllocatorDefault,
+                bytes.as_ptr(),
+                bytes.len() as isize,
+                0,
+            );
+            if url.is_null() {
+                return Err("Could not create installer file URL".into());
+            }
+            let status = LSOpenCFURLRef(url, std::ptr::null_mut());
+            CFRelease(url.cast());
+            if status != 0 {
+                return Err(format!("Could not open installer: {status}"));
+            }
+        }
     }
     Ok(())
 }
@@ -309,6 +515,93 @@ mod tests {
                 format!("https://github.com/{REPO}/releases/download/v99.0.0/{suffix}").into();
             assert!(parse_release(&r, "test").is_err());
         }
+    }
+
+    #[test]
+    #[ignore = "downloads a real installer from GitHub over HTTPS"]
+    fn live_https_installer_download() {
+        let json: Value = serde_json::from_str(
+            &agent()
+                .get(&format!(
+                    "https://api.github.com/repos/{REPO}/releases/latest"
+                ))
+                .header("User-Agent", "Reclaim-update-test")
+                .call()
+                .unwrap()
+                .body_mut()
+                .with_config()
+                .limit(2 * 1024 * 1024)
+                .read_to_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let version = json["tag_name"].as_str().unwrap().trim_start_matches('v');
+        let name = if cfg!(windows) {
+            "reclaim-windows-x86_64-setup.exe".into()
+        } else if cfg!(target_os = "macos") {
+            format!("reclaim-macos-{}.pkg", std::env::consts::ARCH)
+        } else {
+            format!("reclaim_{version}_amd64.deb")
+        };
+        let selected = parse_release_after(&json, &name, &semver::Version::new(0, 0, 0))
+            .unwrap()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join(&name);
+        let mut response = agent().get(&selected.url).call().unwrap();
+        publish_download(
+            response.body_mut().as_reader(),
+            &selected,
+            &destination,
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(std::fs::metadata(destination).unwrap().len(), selected.size);
+    }
+
+    #[test]
+    fn packages_use_their_own_download_size_and_checksum() {
+        let mut json = release();
+        let mut package = json["assets"][0].clone();
+        package["name"] = "reclaim_99.0.0_amd64.deb".into();
+        package["browser_download_url"] =
+            format!("https://github.com/{REPO}/releases/download/v99.0.0/reclaim_99.0.0_amd64.deb")
+                .into();
+        package["digest"] = format!("sha256:{}", "b".repeat(64)).into();
+        package["size"] = 456.into();
+        json["assets"].as_array_mut().unwrap().push(package);
+        let selected = parse_release(&json, "reclaim_99.0.0_amd64.deb")
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.size, 456);
+        assert_eq!(selected.digest, "b".repeat(64));
+        assert_eq!(
+            installer_download(&selected).as_deref(),
+            Some(selected.url.as_str())
+        );
+    }
+
+    #[test]
+    fn failed_downloads_never_publish_or_replace_an_installer() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("update.deb");
+        let mut selected = parse_release(&release(), "test").unwrap().unwrap();
+        selected.size = 3;
+        selected.digest = format!("{:x}", Sha256::digest(b"abc"));
+        assert!(publish_download(&b"bad"[..], &selected, &destination, |_, _| {}).is_err());
+        assert!(!destination.exists());
+        std::fs::write(&destination, b"existing").unwrap();
+        assert!(publish_download(&b"ab"[..], &selected, &destination, |_, _| {}).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"existing");
+        let progress = std::cell::Cell::new(0);
+        publish_download(&b"abc"[..], &selected, &destination, |done, total| {
+            assert_eq!(total, 3);
+            progress.set(done);
+        })
+        .unwrap();
+        assert_eq!(progress.get(), 3);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"abc");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]

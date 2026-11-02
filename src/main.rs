@@ -889,7 +889,7 @@ impl Reclaim {
         let modal = egui::Modal::new(egui::Id::new("settings_dialog"))
             .frame(egui::Frame::popup(&ctx.global_style()).inner_margin(20.0).corner_radius(14))
             .show(ctx, |ui| {
-                ui.set_width((ctx.viewport_rect().width() - 80.0).clamp(260.0, 440.0));
+                ui.set_width((ctx.viewport_rect().width() - 80.0).clamp(260.0, 720.0));
                 ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                 ui.with_layout(i18n::column(), |ui| {
                     ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 48.0), i18n::row(), |ui| {
@@ -908,9 +908,10 @@ impl Reclaim {
                         .max_height((ctx.viewport_rect().height() - 184.0).max(160.0))
                         .show(ui, |ui| {
                             ui.with_layout(i18n::column(), |ui| {
-                                theme::card(ui).fill(ui.visuals().extreme_bg_color).inner_margin(16.0).show(ui, |ui| {
+                                ui.t_strong("Appearance & language");
+                                theme::card(ui).fill(ui.visuals().extreme_bg_color).inner_margin(20.0).show(ui, |ui| {
                                     ui.with_layout(i18n::column(), |ui| {
-                                        ui.t_strong("Appearance");
+                                        theme::preference_row(ui, "Appearance", |ui| {
                                         let mut preference = ctx.options(|options| options.theme_preference);
                                         let previous = preference;
                                         theme::setting_choices(ui, "appearance", &mut preference, &[
@@ -919,10 +920,11 @@ impl Reclaim {
                                             (egui::ThemePreference::Dark, "Dark"),
                                         ]);
                                         if preference != previous { ctx.set_theme(preference); }
+                                        });
                                         ui.add_space(4.0);
                                         ui.separator();
                                         ui.add_space(4.0);
-                                        ui.t_strong("Language");
+                                        theme::preference_row(ui, "Language", |ui| {
                                         let previous = i18n::preference();
                                         let mut language = previous;
                                         let width = ui.available_width();
@@ -937,6 +939,7 @@ impl Reclaim {
                                             ctx.send_viewport_cmd(egui::ViewportCommand::Title(i18n::t("Reclaim — File Recovery")));
                                             ctx.request_repaint();
                                         }
+                                        });
                                         ui.add_space(4.0);
                                         ui.separator();
                                         ui.add_space(4.0);
@@ -958,11 +961,15 @@ impl Reclaim {
                                         });
                                     });
                                 });
-                                ui.add_space(4.0);
+                                ui.add_space(16.0);
+                                theme::card(ui).fill(ui.visuals().extreme_bg_color).inner_margin(20.0).show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    self.updates.view(ui, self.busy || self.exporting);
+                                });
+                                ui.add_space(12.0);
                                 theme::disclosure(ui, "Supported files", |ui| {
                                     ui.t_label(egui::RichText::new(reclaim::FORMAT_SUMMARY).small());
                                 });
-                                self.updates.view(ui, self.busy || self.exporting);
                                 if let Some(error) = &self.settings_error { ui.t_label(error); }
                             });
                         });

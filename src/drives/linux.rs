@@ -253,6 +253,20 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             sector_size,
         });
     }
+    // A partition and its parent read the same physical storage. Offer the
+    // entire disk once; retain encrypted / mapped sources with distinct access.
+    let paths: HashSet<_> = drives.iter().map(|d| d.path.clone()).collect();
+    drives.retain(|drive| {
+        let node = nodes.iter().find(|node| dev.join(&node.name) == drive.path);
+        !node.is_some_and(|node| {
+            node.partition
+                && !drive.encrypted
+                && node
+                    .parents
+                    .iter()
+                    .any(|parent| paths.contains(&dev.join(parent)))
+        })
+    });
     Ok(drives)
 }
 
@@ -308,6 +322,29 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn a_usb_disk_and_its_partition_appear_once_with_the_whole_disk_size() {
+        let f = Fixture::new();
+        f.disk("sdb", "8:16", "120000");
+        f.write("devices/sdb/device/model", "SanDisk 3.2Gen1");
+        f.write("udev/b8:16", "E:ID_BUS=usb\n");
+        f.write("devices/sdb/sdb1/size", "119000");
+        f.write("devices/sdb/sdb1/dev", "8:17");
+        f.write("devices/sdb/sdb1/partition", "1");
+        symlink(f.0.join("devices/sdb/sdb1"), f.0.join("sys/sdb1")).unwrap();
+        f.write("dev/sdb1", "");
+        f.write(
+            "mountinfo",
+            "30 1 8:17 / /run/media/user/HBCD_PE_X64 rw - vfat /dev/sdb1 rw\n",
+        );
+        let rows = f.discover().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].path.ends_with("sdb"));
+        assert_eq!(rows[0].size, 120000 * 512);
+        assert_eq!(rows[0].name, "SanDisk 3.2Gen1");
+        assert!(rows[0].mounted);
     }
 
     #[test]

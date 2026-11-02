@@ -222,5 +222,20 @@
   "Recovered container failed validation. The source may have changed since scanning.": "אימות המכל ששוחזר נכשל. ייתכן שהמקור השתנה מאז הסריקה.",
   "Structure checked": "המבנה נבדק",
   "Copy download link": "העתקת קישור להורדה",
-  "Copy the download link into your browser.": "יש להעתיק את קישור ההורדה לדפדפן."
+  "Copy the download link into your browser.": "יש להעתיק את קישור ההורדה לדפדפן.",
+  "Appearance & language": "מראה ושפה",
+  "Available version": "גרסה זמינה",
+  "Close Reclaim before completing the installation.": "סגרו את Reclaim לפני השלמת ההתקנה.",
+  "Could not download update: {e}": "לא ניתן להוריד את העדכון: {e}",
+  "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "לא ניתן לפתוח את המתקין (שגיאת Windows מספר {result}). פתחו את הקובץ שהורד מסייר הקבצים.",
+  "Could not open installer: {e}. Open the downloaded file from your file manager.": "לא ניתן לפתוח את המתקין: {e}. פתחו את הקובץ שהורד ממנהל הקבצים.",
+  "Download cancelled.": "ההורדה בוטלה.",
+  "Download update": "הורדת עדכון",
+  "Installer opened. Close Reclaim to complete the update.": "המתקין נפתח. סגרו את Reclaim להשלמת העדכון.",
+  "Open installer": "פתיחת המתקין",
+  "The drive stopped returning data before its reported size. Reconnect it and scan again.": "הכונן הפסיק להחזיר נתונים לפני סוף הנפח שדווח. חברו אותו מחדש וסרקו שוב.",
+  "Update downloaded and verified. Open the installer to finish updating.": "העדכון הורד ואומת. פתחו את המתקין להשלמת העדכון.",
+  "The desktop returned an unexpected installer request. Open the saved installer from your file manager.": "התקבלה בקשה לא צפויה משולחן העבודה. פתחו את המתקין שנשמר ממנהל הקבצים.",
+  "The desktop installer request ended without a response": "בקשת פתיחת המתקין הסתיימה ללא תשובה",
+  "The installer was not opened. You can open the saved file from your file manager.": "המתקין לא נפתח. אפשר לפתוח את הקובץ שנשמר ממנהל הקבצים."
 }

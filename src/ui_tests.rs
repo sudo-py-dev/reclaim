@@ -515,11 +515,20 @@ fn long_drive_list_keeps_disk_image_action_visible() {
 fn settings_dialog_renders_in_both_languages_and_closes_with_escape() {
     for language in [i18n::Language::English, i18n::Language::Hebrew] {
         i18n::with_language(language, || {
-            for size in [[540.0, 580.0], [1120.0, 780.0]] {
+            for (dark, size) in [false, true]
+                .into_iter()
+                .flat_map(|dark| [[540.0, 580.0], [1120.0, 780.0]].map(move |size| (dark, size)))
+            {
                 let ctx = egui::Context::default();
                 theme::setup(&ctx);
+                ctx.set_theme(if dark {
+                    egui::Theme::Dark
+                } else {
+                    egui::Theme::Light
+                });
                 let mut app = Reclaim::default();
                 app.settings_open = true;
+                app.updates = update_ui::Updates::preview_available();
                 let mut output = None;
                 for step in 0..4 {
                     let mut frame_input = input(size);
@@ -534,7 +543,11 @@ fn settings_dialog_renders_in_both_languages_and_closes_with_escape() {
                         &ctx,
                         output.unwrap(),
                         size,
-                        &format!("{dir}/settings-{language:?}-{}.ppm", size[0]),
+                        &format!(
+                            "{dir}/settings-{language:?}-{}-{}.ppm",
+                            if dark { "dark" } else { "light" },
+                            size[0]
+                        ),
                     );
                 }
                 let mut frame_input = input(size);

@@ -561,6 +561,36 @@ pub fn choice_dropdown<T: Copy + PartialEq>(
     });
 }
 
+/// Keep wide preference controls beside their labels; stack them on small windows.
+pub fn preference_row<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    controls: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    if ui.available_width() < 540.0 {
+        ui.t_strong(label);
+        return controls(ui);
+    }
+    let width = ui.available_width();
+    let controls_width = (width * 0.55).min(360.0);
+    ui.allocate_ui_with_layout(egui::vec2(width, 44.0), i18n::row(), |ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(width - controls_width - 8.0, 44.0),
+            i18n::row(),
+            |ui| {
+                ui.set_min_width(width - controls_width - 8.0);
+                ui.t_strong(label);
+            },
+        );
+        ui.allocate_ui_with_layout(egui::vec2(controls_width, 44.0), i18n::row(), |ui| {
+            ui.set_min_width(controls_width);
+            controls(ui)
+        })
+        .inner
+    })
+    .inner
+}
+
 /// Equal-width choices with stable IDs and standard keyboard activation.
 pub fn setting_choices<T: Copy + PartialEq>(
     ui: &mut egui::Ui,

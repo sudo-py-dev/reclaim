@@ -222,5 +222,20 @@
   "Recovered container failed validation. The source may have changed since scanning.": "Recovered container failed validation. The source may have changed since scanning.",
   "Structure checked": "Structure checked",
   "Copy download link": "Copy download link",
-  "Copy the download link into your browser.": "Copy the download link into your browser."
+  "Copy the download link into your browser.": "Copy the download link into your browser.",
+  "Appearance & language": "Appearance & language",
+  "Available version": "Available version",
+  "Close Reclaim before completing the installation.": "Close Reclaim before completing the installation.",
+  "Could not download update: {e}": "Could not download update: {e}",
+  "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.",
+  "Could not open installer: {e}. Open the downloaded file from your file manager.": "Could not open installer: {e}. Open the downloaded file from your file manager.",
+  "Download cancelled.": "Download cancelled.",
+  "Download update": "Download update",
+  "Installer opened. Close Reclaim to complete the update.": "Installer opened. Close Reclaim to complete the update.",
+  "Open installer": "Open installer",
+  "The drive stopped returning data before its reported size. Reconnect it and scan again.": "The drive stopped returning data before its reported size. Reconnect it and scan again.",
+  "Update downloaded and verified. Open the installer to finish updating.": "Update downloaded and verified. Open the installer to finish updating.",
+  "The desktop returned an unexpected installer request. Open the saved installer from your file manager.": "The desktop returned an unexpected installer request. Open the saved installer from your file manager.",
+  "The desktop installer request ended without a response": "The desktop installer request ended without a response",
+  "The installer was not opened. You can open the saved file from your file manager.": "The installer was not opened. You can open the saved file from your file manager."
 }

@@ -49,6 +49,12 @@ impl<R: Read + Seek> Read for SourceReader<R> {
             }
             self.inner.seek(SeekFrom::Start(self.position))?;
             let count = self.inner.read(&mut bytes[..count])?;
+            if count == 0 && self.size.is_some_and(|size| self.position < size) {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "The drive stopped returning data before its reported size. Reconnect it and scan again.",
+                ));
+            }
             self.position += count as u64;
             self.cached_at = None;
             return Ok(count);
@@ -66,6 +72,12 @@ impl<R: Read + Seek> Read for SourceReader<R> {
                     &mut self.cache
                         [self.cache_start + self.cached_len..self.cache_start + required],
                 ) {
+                    Ok(0) if self.size.is_some() && self.cached_len < required => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "The drive stopped returning data before its reported size. Reconnect it and scan again.",
+                        ));
+                    }
                     Ok(0) => break,
                     Ok(n) => self.cached_len += n,
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -112,6 +124,25 @@ impl<R: Read + Seek> Seek for SourceReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_unreadable_nonempty_device_is_an_error_not_an_empty_scan() {
+        for alignment in [1, 512, 4096] {
+            let mut reader = SourceReader::new(
+                std::io::Cursor::new(Vec::<u8>::new()),
+                alignment,
+                Some(4096),
+            )
+            .unwrap();
+            assert_eq!(
+                reader.read(&mut [0; 128]).unwrap_err().kind(),
+                io::ErrorKind::UnexpectedEof
+            );
+        }
+        let mut empty =
+            SourceReader::new(std::io::Cursor::new(Vec::<u8>::new()), 1, Some(0)).unwrap();
+        assert_eq!(empty.read(&mut [0; 128]).unwrap(), 0);
+    }
+
     struct SectorDevice(std::io::Cursor<Vec<u8>>);
     impl Read for SectorDevice {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {

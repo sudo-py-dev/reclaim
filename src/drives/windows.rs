@@ -208,6 +208,12 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             .and_then(|number| disk_rows.get(&number))
             .map(|&index| rows[index].sector_size)
             .unwrap_or(4096);
+        // Do not list the volume again when its whole physical disk is present.
+        // Locked volumes remain visible so their unlock requirement is clear.
+        if !encrypted && u32_at(&extents, extent_offset).is_some_and(|n| disk_rows.contains_key(&n))
+        {
+            continue;
+        }
         rows.push(Drive {
             path: path.into(),
             name: if label[0] == 0 {
