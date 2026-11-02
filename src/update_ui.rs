@@ -12,6 +12,7 @@ enum Message {
     Checked(Result<Option<Release>, String>),
     Installed(Result<(), String>),
     Progress(u64, u64),
+    Phase(&'static str),
     Opened(Result<(), String>),
     Downloaded(Result<Option<PathBuf>, String>),
 }
@@ -22,6 +23,8 @@ pub struct Updates {
     release: Option<Release>,
     status: String,
     installed: bool,
+    updating: bool,
+    restart_requested: bool,
     downloaded: Option<PathBuf>,
     progress: Option<(u64, u64)>,
 }
@@ -56,8 +59,14 @@ impl Updates {
                 self.progress = Some((done, total));
                 continue;
             }
+            if let Message::Phase(status) = message {
+                self.status = status.into();
+                self.progress = None;
+                continue;
+            }
             self.receiver = None;
             self.progress = None;
+            self.updating = false;
             match message {
                 Message::Checked(Ok(release)) => {
                     self.status = if release.is_some() {
@@ -71,7 +80,13 @@ impl Updates {
                 }
                 Message::Installed(Ok(())) => {
                     self.installed = true;
-                    self.status = "Update installed. Close and reopen Reclaim to use it.".into();
+                    self.restart_requested = crate::update_runtime::supported();
+                    self.status = if self.restart_requested {
+                        "Restarting Reclaim…"
+                    } else {
+                        "Update installed. Close and reopen Reclaim to use it."
+                    }
+                    .into();
                 }
                 Message::Downloaded(Ok(Some(path))) => {
                     self.downloaded = Some(path);
@@ -87,9 +102,24 @@ impl Updates {
                 | Message::Installed(Err(error))
                 | Message::Downloaded(Err(error))
                 | Message::Opened(Err(error)) => self.status = error,
-                Message::Progress(_, _) => unreachable!(),
+                Message::Progress(_, _) | Message::Phase(_) => unreachable!(),
             }
         }
+    }
+    pub fn restart_requested(&self) -> bool {
+        self.restart_requested
+    }
+    pub fn updating(&self) -> bool {
+        self.updating
+    }
+    pub fn progress_view(&self, ui: &mut egui::Ui) {
+        ui.t_label(&self.status);
+        if let Some((done, total)) = self.progress {
+            ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).show_percentage());
+        } else {
+            ui.spinner();
+        }
+        ui.t_label("Reclaim will close and reopen automatically when the update is ready.");
     }
     pub fn available(&self) -> bool {
         self.release.is_some() && !self.installed
@@ -134,7 +164,10 @@ impl Updates {
                 ui.t_label("Finish scanning or recovering before installing an update.");
             }
             let packaged = updater::installer_download(&release).is_some();
-            let label = if packaged {
+            let automatic = crate::update_runtime::supported();
+            let label = if automatic {
+                "Update and restart"
+            } else if packaged {
                 "Download update"
             } else {
                 "Install update"
@@ -150,11 +183,30 @@ impl Updates {
             {
                 let (tx, rx) = mpsc::channel();
                 self.receiver = Some(rx);
-                self.status = "Downloading and verifying update…".into();
+                self.updating = automatic;
+                self.status = if automatic {
+                    "Preparing update…"
+                } else {
+                    "Downloading and verifying update…"
+                }
+                .into();
                 let ctx = ui.ctx().clone();
                 let release = release.clone();
                 std::thread::spawn(move || {
-                    if packaged {
+                    if automatic {
+                        let result = crate::update_runtime::update(
+                            &release,
+                            |done, total| {
+                                let _ = tx.send(Message::Progress(done, total));
+                                ctx.request_repaint();
+                            },
+                            |phase| {
+                                let _ = tx.send(Message::Phase(phase));
+                                ctx.request_repaint();
+                            },
+                        );
+                        let _ = tx.send(Message::Installed(result));
+                    } else if packaged {
                         let result = (|| {
                             let Some(path) = rfd::FileDialog::new()
                                 .set_file_name(&release.asset)
@@ -213,6 +265,29 @@ impl Updates {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn automatic_update_only_closes_the_app_after_a_successful_handoff() {
+        for success in [false, true] {
+            let mut updates = Updates::preview_available();
+            updates.updating = true;
+            let (tx, rx) = mpsc::channel();
+            updates.receiver = Some(rx);
+            tx.send(Message::Installed(if success {
+                Ok(())
+            } else {
+                Err("Authentication cancelled".into())
+            }))
+            .unwrap();
+            updates.poll(&egui::Context::default());
+            assert!(!updates.updating());
+            assert_eq!(
+                updates.restart_requested(),
+                success && crate::update_runtime::supported()
+            );
+            assert_eq!(updates.installed, success);
+        }
+    }
+
     #[test]
     fn progress_keeps_the_worker_and_verified_download_is_not_marked_installed() {
         let mut updates = Updates::preview_available();

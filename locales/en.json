@@ -238,5 +238,12 @@
   "The desktop returned an unexpected installer request. Open the saved installer from your file manager.": "The desktop returned an unexpected installer request. Open the saved installer from your file manager.",
   "The desktop installer request ended without a response": "The desktop installer request ended without a response",
   "The installer was not opened. You can open the saved file from your file manager.": "The installer was not opened. You can open the saved file from your file manager.",
-  "Could not scan this drive": "Could not scan this drive"
+  "Could not scan this drive": "Could not scan this drive",
+  "Update and restart": "Update and restart",
+  "Updating Reclaim…": "Updating Reclaim…",
+  "Preparing update…": "Preparing update…",
+  "Installing update…": "Installing update…",
+  "Preparing automatic restart…": "Preparing automatic restart…",
+  "Restarting Reclaim…": "Restarting Reclaim…",
+  "Reclaim will close and reopen automatically when the update is ready.": "Reclaim will close and reopen automatically when the update is ready."
 }

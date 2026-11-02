@@ -5,7 +5,10 @@
 mod diagnostics;
 mod drives;
 mod installer;
+#[cfg(any(target_os = "linux", windows))]
+mod native_process;
 mod theme;
+mod update_runtime;
 mod update_ui;
 mod window;
 use eframe::egui;
@@ -1362,6 +1365,16 @@ impl eframe::App for Reclaim {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.updates.poll(ui.ctx());
         self.render(ui);
+        if self.updates.restart_requested() && !self.busy && !self.exporting {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if self.updates.updating() || self.updates.restart_requested() {
+            egui::Modal::new(egui::Id::new("automatic_update_progress")).show(ui.ctx(), |ui| {
+                ui.set_width(320.0);
+                ui.t_heading("Updating Reclaim…");
+                self.updates.progress_view(ui);
+            });
+        }
         static FIRST_FRAME: std::sync::Once = std::sync::Once::new();
         FIRST_FRAME.call_once(|| diagnostics::write("First application frame completed"));
     }
@@ -1415,6 +1428,14 @@ fn native_bus_transport_rejects_external_programs() {
 
 fn main() {
     diagnostics::install();
+    if let Some(result) = update_runtime::run_helper_if_requested() {
+        if let Err(error) = result {
+            diagnostics::report("Reclaim could not complete the update.", &error);
+            std::process::exit(1);
+        }
+        return;
+    }
+    update_runtime::cleanup_completed_updates();
     if let Err(error) = run() {
         diagnostics::report("Reclaim could not open its window.", &format!("{error:?}"));
         std::process::exit(1);

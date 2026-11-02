@@ -92,6 +92,10 @@ jobs:
       - name: Build native installer
         shell: bash
         run: python scripts/package-release.py "${{ matrix.platform }}" --binary "dist/${{ matrix.asset }}" --arch "${{ matrix.arch }}"
+      - name: Verify silent Windows update and relaunch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-windows-update.ps1 -Installer "dist/reclaim-windows-x86_64-setup.exe"
       - name: Checksum all downloads
         shell: bash
         run: |

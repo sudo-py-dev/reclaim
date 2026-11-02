@@ -211,6 +211,10 @@ fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Op
 }
 
 pub fn install(release: &Release) -> Result<(), String> {
+    install_with_progress(release, |_, _| {})
+}
+
+pub fn install_with_progress(release: &Release, progress: impl Fn(u64, u64)) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     if installer_name(&executable, &release.version).is_some()
         || installer_download(release).is_some()
@@ -230,7 +234,12 @@ pub fn install(release: &Release) -> Result<(), String> {
         .get(&release.url)
         .call()
         .map_err(|e| e.to_string())?;
-    verify_download(response.body_mut().as_reader(), &mut file, release)?;
+    verify_download_progress(
+        response.body_mut().as_reader(),
+        &mut file,
+        release,
+        progress,
+    )?;
     file.as_file().sync_all().map_err(|e| e.to_string())?;
     replace_executable(&executable, file.path()).map_err(|e| {
         format!("Could not install update: {e}. Move Reclaim to a writable folder and retry.")
@@ -255,6 +264,22 @@ fn replace_executable(
     Ok(())
 }
 
+/// Recheck a staged package immediately before handing it to the native installer.
+pub fn verify_installer_file(release: &Release, path: &std::path::Path) -> Result<(), String> {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    if installer_name(&executable, &release.version).as_deref() != Some(&release.asset) {
+        return Err("Unexpected installer for this installation".into());
+    }
+    validate_url(release)?;
+    verify_download_progress(
+        std::fs::File::open(path).map_err(|e| e.to_string())?,
+        std::io::sink(),
+        release,
+        |_, _| {},
+    )
+}
+
+#[cfg(test)]
 fn verify_download(
     reader: impl Read,
     mut file: impl Write,
