@@ -145,3 +145,33 @@ fn corrupted_images_are_rejected_at_scan_and_export() {
         assert!(scan(bytes).is_empty());
     }
 }
+
+#[test]
+fn reports_candidate_location_before_validation_and_allows_cancellation() {
+    use std::sync::atomic::Ordering;
+    let png = include_bytes!("fixtures/real.png");
+    let offset = 512;
+    let mut disk = vec![0; offset];
+    disk.extend_from_slice(png);
+    let cancel = AtomicBool::new(false);
+    let mut checking = false;
+    let mut found = false;
+    scan_reader(&mut Cursor::new(disk), &cancel, |event| match event {
+        Event::Checking {
+            offset: at,
+            kind,
+            bytes,
+        } => {
+            assert_eq!(at, offset as u64);
+            assert_eq!(kind, "png");
+            assert_eq!(bytes, png.len());
+            checking = true;
+            cancel.store(true, Ordering::Relaxed);
+        }
+        Event::Found(_) => found = true,
+        Event::Progress(_) | Event::UnusedSpace { .. } => {}
+    })
+    .unwrap();
+    assert!(checking);
+    assert!(!found);
+}

@@ -184,3 +184,32 @@ fn missing_or_invalid_dates_do_not_invalidate_recoverable_content() {
     assert_eq!(metadata.record_changed, None);
     assert_eq!(rows[0].resident_data.as_deref(), Some(&b"hello"[..]));
 }
+
+#[test]
+fn new_resident_formats_keep_their_names_and_export_after_rechecking() {
+    for (name, contents, kind, expected) in [
+        (
+            "installer.deb",
+            include_bytes!("fixtures/formats/sample.deb").as_slice(),
+            "deb",
+            Validation::StructureChecked,
+        ),
+        (
+            "classes.dex",
+            include_bytes!("fixtures/formats/sample.dex").as_slice(),
+            "dex",
+            Validation::MetadataChecked,
+        ),
+    ] {
+        let raw = record(name, contents, 0, false);
+        let found = scan(&raw);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].kind, kind);
+        assert_eq!(found[0].validation, expected);
+        assert_eq!(found[0].recovery_name(1), name);
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join(name);
+        recover_reader(&mut Unreadable, &output, &found[0]).unwrap();
+        assert_eq!(std::fs::read(output).unwrap(), contents);
+    }
+}

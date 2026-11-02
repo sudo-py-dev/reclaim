@@ -4,7 +4,7 @@
 
 Reclaim helps you look for recoverable photos, documents, and other files on a drive or a saved copy of a drive. A simple interface guides you from choosing a drive to saving the files you want to keep.
 
-**Version 0.1.1 · Early preview · English & Hebrew**
+**Version 0.1.8 · Early preview · English & Hebrew**
 
 ![Reclaim 0.1.0 — choose a drive to scan](docs/screenshots/reclaim-drives.png)
 
@@ -12,13 +12,15 @@ Reclaim helps you look for recoverable photos, documents, and other files on a d
 
 ## What you can do
 
-- **Scan a drive** — look for recoverable files on an internal drive, USB drive, or connected storage device.
+- **Scan unused space** — look for recoverable files in clusters marked free on NTFS, FAT12/16/32, and exFAT volumes. Existing allocated files are skipped.
 - **Watch files appear** — review results while the scan runs, or stop early and work with what it has found.
 - **Understand each result** — recognize file types by their icons and open file details for size, recovery checks, and original dates when available.
 - **Find the files you want** — search by name or file type, and narrow the list to photos, documents, archives, and more.
 - **Recover only your selection** — save the checked files that match your current filters.
-- **Work from a drive copy** — open a disk image, a file containing a copy of a drive, instead of scanning the original.
+- **Work from a volume copy** — open an image of a supported formatted volume instead of scanning the original. Whole-disk images containing partition tables are not yet supported for unused-space scans.
 - **Make it comfortable** — choose light, dark, or System mode, switch between English and Hebrew, and turn animations on or off. System mode follows your desktop’s appearance changes without restarting the app.
+
+Reclaim reads the filesystem allocation map first, then searches only its free clusters. The map describes allocation when read; a mounted volume can change during scanning. For repeatable recovery, stop using the source and scan a saved volume image.
 
 Reclaim scans your source in **read-only mode**. When saving recovered files, it gives duplicate names a new number rather than replacing existing files.
 
@@ -39,14 +41,15 @@ Reclaim scans your source in **read-only mode**. When saving recovered files, it
 
 | File type | Examples |
 | --- | --- |
-| Photos and pictures | JPG, PNG, GIF, BMP, WebP |
+| Photos and pictures | JPG, PNG, GIF, BMP, WebP, QOI |
 | Documents | PDF, Word, Excel, PowerPoint, OpenDocument, EPUB |
-| Archives and app packages | ZIP, JAR, APK |
+| Archives and app packages | ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK |
+| Programs and installers | EXE/DLL, ELF, MSI/MSP/MST, DEB, RPM, DEX, flat XAR-based PKG |
 | Audio and video | WAV, AIFF, AU, AVI, Ogg Vorbis, Opus, Theora |
 | Databases | SQLite |
 | Icons | ICO |
 
-Some smaller files on Windows-formatted NTFS drives can also be recovered with their original names. Their details may include original creation, modification, and access dates, shown in UTC. Other files receive names such as `Image 0001.png`.
+Unused-space results usually receive generated names such as `Image 0001.png`. This mode does not search the allocated NTFS master file table for small resident deleted files or their original names. Unsupported or damaged allocation maps produce an error; Reclaim never silently switches to searching occupied space.
 
 Use the information icon beside a result to inspect its details. **Deletion dates are not recovered**; file dates are never presented as the time of deletion.
 
@@ -108,3 +111,5 @@ Windows builds statically link the Microsoft C++ runtime and verify the executab
 The workflow publishes a stable GitHub release with generated release notes after all four builds pass, making the downloads and in-app update available immediately. Rerunning it for the same tag replaces the release assets and publishes any existing draft. Prereleases and drafts are ignored by the updater. Release asset names form the updater contract and must stay consistent with `src/updater.rs`. Forks should change the repository constant there. Every release also includes a compressed Inno Setup installer, an xz-compressed Debian package, and architecture-specific macOS `.pkg` installers. Installer assets receive SHA-256 sidecars too. The macOS packages are unsigned until Developer ID signing and notarization credentials are configured; the workflow currently uses ad-hoc app signing.
 
 To build a native installer locally after compiling the release executable, run `python3 scripts/package-release.py linux --binary target/release/reclaim` (or use `windows` / `macos` with the matching executable and `--arch aarch64` for Apple Silicon). The script requires `dpkg-deb` on Linux, Inno Setup 6 on Windows, or Apple command-line tools on macOS. Output goes to `dist/`.
+
+File signatures and format-specific recovery limits are documented in [the format research report](docs/FILE_FORMAT_RESEARCH.md). New candidates generally retain the 64 MiB limit; executable overlays and installer payloads may be incomplete.

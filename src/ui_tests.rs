@@ -515,9 +515,10 @@ fn long_drive_list_keeps_disk_image_action_visible() {
 fn settings_dialog_renders_in_both_languages_and_closes_with_escape() {
     for language in [i18n::Language::English, i18n::Language::Hebrew] {
         i18n::with_language(language, || {
-            for (dark, size) in [false, true]
+            for (dark, size, category) in [false, true]
                 .into_iter()
                 .flat_map(|dark| [[540.0, 580.0], [1120.0, 780.0]].map(move |size| (dark, size)))
+                .flat_map(|(dark, size)| (0..3).map(move |category| (dark, size, category)))
             {
                 let ctx = egui::Context::default();
                 theme::setup(&ctx);
@@ -528,6 +529,7 @@ fn settings_dialog_renders_in_both_languages_and_closes_with_escape() {
                 });
                 let mut app = Reclaim::default();
                 app.settings_open = true;
+                app.settings_page = category;
                 app.updates = update_ui::Updates::preview_available();
                 let mut output = None;
                 for step in 0..4 {
@@ -538,13 +540,42 @@ fn settings_dialog_renders_in_both_languages_and_closes_with_escape() {
                     output = Some(frame);
                 }
                 assert!(app.settings_open);
+                if category == 2 {
+                    let position = |label: &str| {
+                        output
+                            .as_ref()
+                            .unwrap()
+                            .shapes
+                            .iter()
+                            .find_map(|shape| {
+                                if let egui::Shape::Text(text) = &shape.shape {
+                                    (text.galley.job.text == label).then_some(text.pos.y)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_else(|| panic!("Missing About text: {label}"))
+                    };
+                    let version_y = position(env!("CARGO_PKG_VERSION"));
+                    let license_y = position("MIT");
+                    assert!(
+                        license_y - version_y < 140.0,
+                        "License row must stay near the description"
+                    );
+                    if language == i18n::Language::English {
+                        assert!(
+                            position("Project website") - license_y < 60.0,
+                            "Website must follow the license without a large gap"
+                        );
+                    }
+                }
                 if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
                     rasterize(
                         &ctx,
                         output.unwrap(),
                         size,
                         &format!(
-                            "{dir}/settings-{language:?}-{}-{}.ppm",
+                            "{dir}/settings-{language:?}-{}-{}-{category}.ppm",
                             if dark { "dark" } else { "light" },
                             size[0]
                         ),
@@ -1313,4 +1344,123 @@ fn a_failed_scan_displays_its_error_instead_of_no_files_found() {
         );
         assert!(!labels.iter().any(|label| label == "No files found"));
     });
+}
+
+#[test]
+fn scan_feedback_tracks_checks_and_preserves_the_stop_request() {
+    let mut app = Reclaim::default();
+    app.busy = true;
+    let (tx, rx) = mpsc::sync_channel(8);
+    app.receiver = Some(rx);
+    tx.send(Message::Scan(Event::Checking {
+        offset: 4096,
+        kind: "png",
+        bytes: 8192,
+    }))
+    .unwrap();
+    app.poll();
+    assert_eq!(app.scanned, 4096);
+    let (_, kind, bytes, _) = app.scan_activity.unwrap();
+    assert_eq!((kind, bytes), ("png", 8192));
+    assert!(app.last_scan_update.is_some());
+    tx.send(Message::Scan(Event::Progress(8192))).unwrap();
+    app.poll();
+    assert!(app.scan_activity.is_none());
+    app.stop_operation();
+    let stopping = app.status.clone();
+    tx.send(Message::Scan(Event::Checking {
+        offset: 8192,
+        kind: "jpg",
+        bytes: 16384,
+    }))
+    .unwrap();
+    app.poll();
+    assert_eq!(app.status, stopping);
+    tx.send(Message::Done(Ok(()))).unwrap();
+    app.poll();
+    assert!(!app.busy);
+    assert!(app.scan_activity.is_none());
+    assert!(app.scan_stopped);
+}
+
+#[test]
+fn scan_note_stays_visible_between_file_checks() {
+    i18n::with_language(i18n::Language::English, || {
+        let ctx = egui::Context::default();
+        theme::setup(&ctx);
+        let mut app = Reclaim::default();
+        app.page = 1;
+        app.busy = true;
+        app.total = 1024;
+        app.scan_activity = Some((
+            0,
+            "zip",
+            512,
+            std::time::Instant::now() - Duration::from_secs(2),
+        ));
+        for _ in 0..3 {
+            ctx.run_ui(input([920.0, 740.0]), |ui| app.render(ui))
+                .drop_without_applying_deltas();
+        }
+        for checking in [true, false, true, false] {
+            if !checking {
+                app.scan_activity = None;
+            }
+            let mut output = ctx.run_ui(input([920.0, 740.0]), |ui| app.render(ui));
+            output.textures_delta.clear();
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        Some(text.galley.job.text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert!(
+                labels
+                    .iter()
+                    .any(|text| text.contains("Found files appear above."))
+            );
+            assert!(labels.iter().any(|text| text.contains("Latest file check")));
+            assert_eq!(app.scan_check_summary, Some(("zip", 512)));
+            output.drop_without_applying_deltas();
+        }
+    });
+}
+
+#[test]
+fn unused_space_progress_does_not_jump_to_the_physical_disk_offset() {
+    let mut app = Reclaim::default();
+    app.busy = true;
+    let (tx, rx) = mpsc::sync_channel(8);
+    app.receiver = Some(rx);
+    tx.send(Message::Scan(Event::UnusedSpace {
+        bytes: 4096,
+        filesystem: "NTFS",
+    }))
+    .unwrap();
+    tx.send(Message::Scan(Event::Progress(512))).unwrap();
+    tx.send(Message::Scan(Event::Checking {
+        offset: 50 * 1024 * 1024,
+        kind: "zip",
+        bytes: 1024,
+    }))
+    .unwrap();
+    app.poll();
+    assert!(app.unused_scan && app.allocation_ready);
+    assert_eq!(app.total, 4096);
+    assert_eq!(app.scanned, 512);
+    let since = app.scan_activity.unwrap().3;
+    tx.send(Message::Scan(Event::Progress(512))).unwrap();
+    tx.send(Message::Scan(Event::Checking {
+        offset: 50 * 1024 * 1024,
+        kind: "zip",
+        bytes: 2048,
+    }))
+    .unwrap();
+    app.poll();
+    assert_eq!(app.scan_activity.unwrap().3, since);
 }

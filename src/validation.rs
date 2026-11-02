@@ -9,6 +9,9 @@ pub fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Validat
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
+    if crate::formats::supported(kind) {
+        return crate::formats::validate(kind, bytes, cancel);
+    }
     if kind == "sqlite" {
         return matches!(crate::detection::sqlite_end(bytes), CandidateEnd::Complete(n) if n == bytes.len())
             .then_some(Validation::StructureChecked);

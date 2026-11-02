@@ -8,8 +8,10 @@ fn blend(a: Color32, b: Color32, amount: f32) -> Color32 {
     egui::lerp(egui::Rgba::from(a)..=egui::Rgba::from(b), amount).into()
 }
 fn transition(ui: &egui::Ui, id: egui::Id, on: bool) -> f32 {
-    ui.ctx()
-        .animate_bool_with_time(id, on, ui.style().animation_time)
+    let amount = ui
+        .ctx()
+        .animate_bool_with_time(id, on, ui.style().animation_time);
+    amount * amount * (3.0 - 2.0 * amount)
 }
 
 /// Compact identity mark; motion runs only while work is active.
@@ -49,7 +51,7 @@ pub fn setup(ctx: &egui::Context) {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let mut s = (*ctx.style_of(theme)).clone();
         let dark = theme == egui::Theme::Dark;
-        s.animation_time = 0.18;
+        s.animation_time = 0.22;
         s.spacing.item_spacing = egui::vec2(8.0, 8.0);
         s.spacing.button_padding = egui::vec2(14.0, 9.0);
         s.spacing.interact_size.y = 36.0;
@@ -607,25 +609,10 @@ pub fn setting_choices<T: Copy + PartialEq>(
                 / choices.len() as f32;
             for (alternative, label) in choices {
                 let text = i18n::widget(ui, *label, false);
-                let response = if id == "appearance" {
-                    let icon = match *label {
-                        "Light" => Icon::Sun,
-                        "Dark" => Icon::Moon,
-                        _ => Icon::System,
-                    };
-                    icon_button(
-                        ui,
-                        icon,
-                        label,
-                        *value == *alternative,
-                        egui::vec2(width, 40.0),
-                    )
-                } else {
-                    ui.add_sized(
-                        [width, 40.0],
-                        egui::Button::new(text).selected(*value == *alternative),
-                    )
-                };
+                let response = ui.add_sized(
+                    [width, 40.0],
+                    egui::Button::new(text).selected(*value == *alternative),
+                );
                 response.widget_info(|| {
                     egui::WidgetInfo::selected(
                         egui::WidgetType::RadioButton,
@@ -650,9 +637,6 @@ pub enum Icon {
     Check,
     SelectAll,
     DeselectAll,
-    System,
-    Sun,
-    Moon,
     Drive,
     Minimize,
     Maximize,
@@ -689,9 +673,6 @@ impl Icon {
             Self::Check => '\u{f00c}',
             Self::SelectAll => '\u{f14a}',
             Self::DeselectAll => '\u{f146}',
-            Self::System => '\u{f390}',
-            Self::Sun => '\u{f185}',
-            Self::Moon => '\u{f186}',
             Self::Drive => '\u{f0a0}',
             Self::Minimize => '\u{f2d1}',
             Self::Maximize => '\u{f2d0}',
@@ -1210,5 +1191,146 @@ mod live_portal_test {
             }
             Err(error) => panic!("Portal read failed: {error}"),
         }
+    }
+}
+
+/// Brief, interruptible fade without moving controls or delaying input.
+pub fn page_fade(ui: &mut egui::Ui, name: &str, page: usize) {
+    let duration = ui.style().animation_time as f64;
+    if duration <= 0.0 {
+        return;
+    }
+    let now = ui.input(|input| input.time);
+    let id = egui::Id::new(name);
+    let started = ui.ctx().data_mut(|data| {
+        let state = data.get_temp::<(usize, f64)>(id);
+        let started = match state {
+            Some((previous, started)) if previous == page => started,
+            _ => now,
+        };
+        data.insert_temp(id, (page, started));
+        started
+    });
+    let progress = ((now - started) / duration).clamp(0.0, 1.0) as f32;
+    let eased = 1.0 - (1.0 - progress).powi(3);
+    ui.multiply_opacity(0.82 + 0.18 * eased);
+    if progress < 1.0 {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
+    }
+}
+
+pub fn settings_category(
+    ui: &mut egui::Ui,
+    index: usize,
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    let response = ui
+        .push_id(index, |ui| {
+            ui.add_sized(
+                [ui.available_width(), 44.0],
+                egui::Button::new("").frame(false),
+            )
+        })
+        .inner;
+    let amount = transition(ui, response.id.with("selected"), selected);
+    let hover = transition(ui, response.id.with("hover"), response.hovered());
+    let fill = blend(
+        ui.visuals().window_fill,
+        ui.visuals().widgets.inactive.bg_fill,
+        (amount * 0.9).max(hover * 0.45),
+    );
+    ui.painter().rect_filled(response.rect, 8, fill);
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect.shrink(1.0),
+            8,
+            Stroke::new(2.0, ui.visuals().selection.stroke.color),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let icon = match index {
+        0 => Icon::Settings,
+        1 => Icon::Refresh,
+        _ => Icon::Info,
+    };
+    let x = if i18n::is_rtl() {
+        response.rect.right() - 22.0
+    } else {
+        response.rect.left() + 22.0
+    };
+    paint_symbol(
+        ui,
+        egui::Rect::from_center_size(
+            egui::pos2(x, response.rect.center().y),
+            egui::vec2(20.0, 20.0),
+        ),
+        icon,
+        15.0,
+        ui.visuals().text_color(),
+    );
+    let text = i18n::widget(ui, label, false).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        response.rect.width() - 52.0,
+        egui::TextStyle::Button,
+    );
+    let x = if i18n::is_rtl() {
+        response.rect.right() - 42.0 - text.size().x
+    } else {
+        response.rect.left() + 42.0
+    };
+    ui.painter().galley(
+        egui::pos2(x, response.rect.center().y - text.size().y / 2.0),
+        text,
+        ui.visuals().text_color(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::RadioButton,
+            ui.is_enabled(),
+            selected,
+            i18n::t(label),
+        )
+    });
+    response
+}
+
+/// Compact activity cue: motion indicates work, never a percentage completed.
+pub fn activity_indicator(ui: &mut egui::Ui, checking: bool, stopping: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+    let center = rect.center();
+    let moving = ui.style().animation_time > 0.0 && !stopping;
+    let color = if checking { TEAL } else { ACCENT };
+    let phase = if moving {
+        ui.input(|i| i.time as f32) * 2.6
+    } else {
+        0.0
+    };
+    if stopping {
+        ui.painter().rect_filled(
+            egui::Rect::from_center_size(center, egui::vec2(8.0, 8.0)),
+            2,
+            ui.visuals().weak_text_color(),
+        );
+    } else {
+        ui.painter()
+            .circle_stroke(center, 6.5, Stroke::new(2.0, color.gamma_multiply(0.18)));
+        let points = (0..24)
+            .map(|i| {
+                let angle = phase + i as f32 / 23.0 * std::f32::consts::PI * 1.35;
+                center + egui::vec2(angle.cos(), angle.sin()) * 6.5
+            })
+            .collect();
+        ui.painter()
+            .add(egui::Shape::line(points, Stroke::new(2.0, color)));
+        if checking {
+            ui.painter().circle_filled(center, 1.8, color);
+        }
+    }
+    if moving {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
     }
 }

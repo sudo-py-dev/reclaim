@@ -8,9 +8,9 @@ corpus = root / "corpus" / "scan"
 corpus.mkdir(parents=True, exist_ok=True)
 containers = root / "containers" / "corpus" / "containers"
 containers.mkdir(parents=True, exist_ok=True)
-for fixture in (root.parent / "tests" / "fixtures").iterdir():
+for fixture in (root.parent / "tests" / "fixtures").rglob("*"):
     if fixture.is_file() and fixture.suffix != ".md" and fixture.stat().st_size <= 64 * 1024:
-        shutil.copyfile(fixture, corpus / fixture.name)
+        shutil.copyfile(fixture, corpus / "-".join(fixture.relative_to(root.parent / "tests" / "fixtures").parts))
         if fixture.suffix in {".sqlite", ".ogg", ".opus", ".ogv"}:
             shutil.copyfile(fixture, containers / fixture.name)
 

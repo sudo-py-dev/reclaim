@@ -171,6 +171,7 @@ mod tests {
             |event| match event {
                 reclaim::Event::Progress(bytes) => scanned = bytes,
                 reclaim::Event::Found(_) => candidates += 1,
+                reclaim::Event::Checking { .. } | reclaim::Event::UnusedSpace { .. } => {}
             },
         )
         .unwrap();

@@ -1,12 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod allocation;
 mod detection;
+mod formats;
 use detection::{CandidateEnd, LIMIT};
 pub mod i18n;
 mod ntfs;
 mod source;
 pub mod updater;
 mod validation;
+mod zip;
 pub use source::SourceReader;
 use std::{
     fs::File,
@@ -16,7 +19,7 @@ use std::{
 };
 
 /// Formats currently recognized by the scanner, grouped for the interface.
-pub const FORMAT_SUMMARY: &str = "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · ICO · PDF · Office · OpenDocument · EPUB · ZIP · JAR · APK · WAV · AIFF · AU · AVI · Ogg · SQLite";
+pub const FORMAT_SUMMARY: &str = "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · QOI · ICO · PDF · Office · OpenDocument · EPUB · ZIP · 7z · RAR5 · CAB · TAR · GZIP · XAR/PKG · JAR · APK · EXE/DLL · ELF · MSI/MSP/MST · DEB · RPM · DEX · OLE · WAV · AIFF · AU · AVI · Ogg · SQLite";
 pub const FILE_CATEGORIES: &[&str] = &[
     "All files",
     "Pictures",
@@ -29,14 +32,15 @@ pub const FILE_CATEGORIES: &[&str] = &[
 ];
 pub fn category_index(kind: &str) -> usize {
     match kind {
-        "jpg" | "png" | "gif" | "bmp" | "webp" => 1,
+        "jpg" | "png" | "gif" | "bmp" | "webp" | "qoi" => 1,
         "ico" => 7,
         "pdf" | "docx" | "xlsx" | "pptx" | "docm" | "xlsm" | "pptm" | "odt" | "ods" | "odp"
-        | "epub" | "txt" | "csv" | "json" | "xml" | "md" | "html" | "log" | "sqlite" => 2,
-        "zip" => 3,
+        | "epub" | "ole" | "txt" | "csv" | "json" | "xml" | "md" | "html" | "log" | "sqlite" => 2,
+        "zip" | "7z" | "cab" | "rar" | "tar" | "gz" | "xar" => 3,
         "wav" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" => 4,
         "avi" | "mp4" | "ogv" => 5,
-        "jar" | "apk" | "exe" => 6,
+        "jar" | "apk" | "exe" | "dll" | "elf" | "msi" | "msp" | "mst" | "deb" | "rpm" | "dex"
+        | "pkg" => 6,
         _ => 0,
     }
 }
@@ -144,7 +148,17 @@ fn portable_name(name: &str) -> String {
 }
 
 pub enum Event {
+    /// Total unallocated bytes from the selected volume's filesystem map.
+    UnusedSpace {
+        bytes: u64,
+        filesystem: &'static str,
+    },
     Progress(u64),
+    Checking {
+        offset: u64,
+        kind: &'static str,
+        bytes: usize,
+    },
     Found(Found),
 }
 struct Format {
@@ -153,6 +167,66 @@ struct Format {
     ext: &'static str,
 }
 static FORMATS: &[Format] = &[
+    Format {
+        head: b"\x1f\x8b\x08",
+        tail: b"",
+        ext: "gz",
+    },
+    Format {
+        head: b"xar!",
+        tail: b"",
+        ext: "xar",
+    },
+    Format {
+        head: b"MZ",
+        tail: b"",
+        ext: "pe",
+    },
+    Format {
+        head: b"\x7fELF",
+        tail: b"",
+        ext: "elf",
+    },
+    Format {
+        head: b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
+        tail: b"",
+        ext: "cfb",
+    },
+    Format {
+        head: b"!<arch>\n",
+        tail: b"",
+        ext: "deb",
+    },
+    Format {
+        head: b"\xed\xab\xee\xdb",
+        tail: b"",
+        ext: "rpm",
+    },
+    Format {
+        head: b"7z\xbc\xaf\x27\x1c",
+        tail: b"",
+        ext: "7z",
+    },
+    Format {
+        head: b"MSCF",
+        tail: b"",
+        ext: "cab",
+    },
+    Format {
+        head: b"Rar!\x1a\x07\x01\0",
+        tail: b"",
+        ext: "rar",
+    },
+    Format {
+        head: b"qoif",
+        tail: b"",
+        ext: "qoi",
+    },
+    Format {
+        head: b"dex\n",
+        tail: b"",
+        ext: "dex",
+    },
     Format {
         head: b"FORM",
         tail: b"",
@@ -220,28 +294,43 @@ static FORMATS: &[Format] = &[
     },
 ];
 
-// Dispatch only to signatures sharing the first byte instead of comparing
-// every format at every disk byte. The unit test covers every table entry.
+// Constant-time first-byte dispatch; adding formats cannot stale manual ranges.
+const fn signature_buckets() -> [u64; 256] {
+    let mut buckets = [0u64; 256];
+    let mut i = 0;
+    while i < FORMATS.len() {
+        buckets[FORMATS[i].head[0] as usize] |= 1u64 << i;
+        i += 1;
+    }
+    buckets
+}
+const SIGNATURE_BUCKETS: [u64; 256] = signature_buckets();
+static TAR_FORMAT: Format = Format {
+    head: b"ustar",
+    tail: b"",
+    ext: "tar",
+};
 fn detect_format(bytes: &[u8]) -> Option<&'static Format> {
-    let range = match bytes.first()? {
-        b'F' => 0..1,
-        b'.' => 1..2,
-        0 => 2..3,
-        b'R' => 3..4,
-        b'B' => 4..5,
-        b'P' => 5..6,
-        0xff => 6..7,
-        0x89 => 7..8,
-        b'%' => 8..9,
-        b'G' => 9..11,
-        b'O' => 11..12,
-        b'S' => 12..13,
-        _ => return None,
-    };
-    FORMATS[range].iter().find(|f| bytes.starts_with(f.head))
+    let mut bucket = SIGNATURE_BUCKETS[*bytes.first()? as usize];
+    while bucket != 0 {
+        let index = bucket.trailing_zeros() as usize;
+        bucket &= bucket - 1;
+        let format = &FORMATS[index];
+        if bytes.starts_with(format.head) && formats::plausible(format.ext, bytes) {
+            return Some(format);
+        }
+    }
+    if bytes.get(257..262) == Some(b"ustar".as_slice()) {
+        Some(&TAR_FORMAT)
+    } else {
+        None
+    }
 }
 
 fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -> CandidateEnd {
+    if let Some(end) = formats::end(fmt.ext, bytes, cancel) {
+        return end;
+    }
     match fmt.ext {
         "sqlite" => return detection::sqlite_end(bytes),
         "ico" => return validation::ico_end(bytes, cancel),
@@ -416,7 +505,7 @@ fn candidate_kind(fmt: &Format, bytes: &[u8]) -> &'static str {
         },
         "aiff" if &bytes[8..12] == b"AIFC" => "aifc",
         "zip" => zip_kind(bytes),
-        _ => fmt.ext,
+        _ => formats::kind(fmt.ext, bytes),
     }
 }
 
@@ -534,20 +623,46 @@ pub fn scan(path: &Path, cancel: &AtomicBool, event: impl FnMut(Event)) -> io::R
     scan_reader(&mut File::open(path)?, cancel, event)
 }
 
-/// Scan an already-authorized, read-only source without reopening its path.
+/// Search only free allocation clusters in a supported formatted volume.
+/// Filesystem metadata is read to establish the map. Unsupported maps fail
+/// without falling back to occupied-space carving.
+pub fn scan_unused_reader(
+    input: &mut (impl Read + Seek),
+    total: u64,
+    cancel: &AtomicBool,
+    event: impl FnMut(Event),
+) -> io::Result<()> {
+    allocation::scan(input, total, cancel, event)
+}
+
 pub fn scan_reader(
     file: &mut (impl Read + Seek),
     cancel: &AtomicBool,
+    event: impl FnMut(Event),
+) -> io::Result<()> {
+    scan_reader_with_buffer(file, cancel, event, 1024 * 1024)
+}
+
+pub(crate) fn scan_reader_with_buffer(
+    file: &mut (impl Read + Seek),
+    cancel: &AtomicBool,
     mut event: impl FnMut(Event),
+    buffer_size: usize,
 ) -> io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
-    let mut buffer = vec![0; 1024 * 1024];
+    let mut buffer = vec![0; buffer_size.clamp(262, 1024 * 1024)];
     let mut carry = Vec::new();
-    let signature_length = FORMATS.iter().map(|f| f.head.len()).max().unwrap_or(1);
+    let signature_length = FORMATS
+        .iter()
+        .map(|f| f.head.len())
+        .max()
+        .unwrap_or(1)
+        .max(262);
     let mut base = 0u64;
     let mut found_count = 0usize;
     let mut skip_until = 0u64;
     let mut resident_bytes = 0usize;
+    let mut last_progress = std::time::Instant::now();
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Ok(());
@@ -574,6 +689,12 @@ pub fn scan_reader(
                 continue;
             }
             let offset = base + i as u64;
+            if i.is_multiple_of(64 * 1024)
+                && last_progress.elapsed() >= std::time::Duration::from_millis(250)
+            {
+                event(Event::Progress(offset));
+                last_progress = std::time::Instant::now();
+            }
             if offset.is_multiple_of(512) && carry[i..].starts_with(b"FILE") {
                 let position = file.stream_position()?;
                 file.seek(SeekFrom::Start(offset))?;
@@ -598,12 +719,44 @@ pub fn scan_reader(
                 file.seek(SeekFrom::Start(offset))?;
                 let mut candidate = Vec::new();
                 let mut ogg = detection::Ogg::default();
+                let mut gzip = formats::Gzip::default();
                 let mut end = None;
                 let mut kind = fmt.ext;
                 let mut checked = Validation::Unverified;
                 let mut chunk = vec![0u8; 8192];
-                while candidate.len() < LIMIT && !cancel.load(Ordering::Relaxed) {
-                    let remaining = (LIMIT - candidate.len()).min(chunk.len());
+                let mut rejected_zip = false;
+                let mut candidate_limit = LIMIT;
+                if fmt.ext == "zip" {
+                    event(Event::Checking {
+                        offset,
+                        kind: "zip",
+                        bytes: 0,
+                    });
+                    match zip::inspect(file, offset, cancel)? {
+                        zip::Inspection::Complete(size) if size > LIMIT as u64 => {
+                            end = Some(size as usize);
+                            checked = Validation::StructureChecked;
+                        }
+                        zip::Inspection::Complete(size) => candidate_limit = size as usize,
+                        zip::Inspection::Invalid => rejected_zip = true,
+                        zip::Inspection::Unsupported => {}
+                    }
+                    file.seek(SeekFrom::Start(offset))?;
+                }
+                while !rejected_zip
+                    && end.is_none()
+                    && candidate.len() < candidate_limit
+                    && !cancel.load(Ordering::Relaxed)
+                {
+                    if last_progress.elapsed() >= std::time::Duration::from_millis(250) {
+                        event(Event::Checking {
+                            offset,
+                            kind: fmt.ext,
+                            bytes: candidate.len(),
+                        });
+                        last_progress = std::time::Instant::now();
+                    }
+                    let remaining = (candidate_limit - candidate.len()).min(chunk.len());
                     let count = read_chunk(file, &mut chunk[..remaining], cancel)?;
                     if count == 0 {
                         break;
@@ -612,6 +765,8 @@ pub fn scan_reader(
                     candidate.extend_from_slice(&chunk[..count]);
                     let boundary = if fmt.ext == "ogg" {
                         ogg.push(&candidate, cancel)
+                    } else if fmt.ext == "gz" {
+                        gzip.push(&candidate, cancel)
                     } else {
                         candidate_end(fmt, &candidate, from, cancel)
                     };
@@ -622,6 +777,11 @@ pub fn scan_reader(
                             } else {
                                 candidate_kind(fmt, &candidate[..size])
                             };
+                            event(Event::Checking {
+                                offset,
+                                kind,
+                                bytes: size,
+                            });
                             if let Some(validation) =
                                 validation::validate(kind, &candidate[..size], cancel)
                             {
@@ -728,7 +888,8 @@ pub fn recover_reader(
     found: &Found,
 ) -> io::Result<()> {
     if (found.size == 0 && found.resident_data.is_none())
-        || found.size > LIMIT as u64
+        || (found.size > LIMIT as u64
+            && !(found.kind == "zip" && found.size <= u32::MAX as u64 + 65557))
         || found
             .resident_data
             .as_ref()
@@ -761,22 +922,32 @@ pub fn recover_reader(
             "Source changed or candidate is truncated",
         ));
     }
-    if matches!(
+    if found.kind == "zip" && found.size > LIMIT as u64 {
+        if zip::large_end(output.as_file_mut(), 0, &AtomicBool::new(false))? != Some(found.size) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Recovered ZIP failed directory validation",
+            ));
+        }
+    } else if matches!(
         found.validation,
         Validation::ImageDecoded | Validation::StructureChecked
-    ) {
+    ) || formats::supported(found.kind)
+    {
         output.seek(SeekFrom::Start(0))?;
         let mut bytes = Vec::new();
         output.read_to_end(&mut bytes)?;
-        if validation::validate(found.kind, &bytes, &AtomicBool::new(false))
-            != Some(found.validation)
-        {
+        let checked = validation::validate(found.kind, &bytes, &AtomicBool::new(false));
+        let resident_metadata = found.validation == Validation::MetadataChecked
+            && found.resident_data.is_some()
+            && found.ntfs.is_some();
+        if checked.is_none() || (!resident_metadata && checked != Some(found.validation)) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 if found.validation == Validation::ImageDecoded {
                     "Recovered image failed validation. The source may have changed since scanning."
                 } else {
-                    "Recovered container failed validation. The source may have changed since scanning."
+                    "Recovered file failed format checks. The source may have changed since scanning."
                 },
             ));
         }
