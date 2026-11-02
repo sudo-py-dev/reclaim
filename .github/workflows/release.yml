@@ -52,6 +52,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
       - run: cargo test --locked
       - run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Verify Windows runtime is bundled
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-windows-runtime.ps1 -Binary "target/${{ matrix.target }}/release/reclaim.exe"
       - name: Package portable executable and licenses
         shell: bash
         env:

@@ -54,7 +54,7 @@ Use the information icon beside a result to inspect its details. **Deletion date
 
 Download an installer from [GitHub Releases](https://github.com/sudo-py-dev/reclaim/releases):
 
-- **Windows:** run `reclaim-windows-x86_64-setup.exe`. Inno Setup installs for your user, adds a Start menu shortcut, and provides an uninstaller. A desktop shortcut is optional.
+- **Windows:** run `reclaim-windows-x86_64-setup.exe`. Inno Setup installs for your user, adds a Start menu shortcut, and provides an uninstaller. A desktop shortcut is optional. The Microsoft C++ runtime is bundled into the executable; no Visual C++ Redistributable installation is required.
 - **Debian / Ubuntu:** download `reclaim_X.Y.Z_amd64.deb` and run `sudo apt install ./reclaim_X.Y.Z_amd64.deb`. This installs the app launcher and required libraries. Remove it with `sudo apt remove reclaim`. Ubuntu 22.04 / Debian 12 or newer are recommended.
 - **macOS:** open `reclaim-macos-aarch64.pkg` for Apple Silicon or `reclaim-macos-x86_64.pkg` for Intel. The installer places **Reclaim.app** in Applications. These installers are unsigned and the app is ad-hoc signed, not notarized; macOS may require explicit approval in Privacy & Security. Quit Reclaim before upgrading; move the app to Trash to remove it.
 
