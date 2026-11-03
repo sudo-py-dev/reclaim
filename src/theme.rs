@@ -14,37 +14,13 @@ fn transition(ui: &egui::Ui, id: egui::Id, on: bool) -> f32 {
     amount * amount * (3.0 - 2.0 * amount)
 }
 
-/// Compact identity mark; motion runs only while work is active.
-pub fn recovery_emblem(ui: &mut egui::Ui, busy: bool) {
+/// Static identity mark: activity belongs beside the scan status.
+pub fn recovery_emblem(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());
     let center = rect.center();
     let painter = ui.painter();
     painter.circle_filled(center, 23.0, blend(ui.visuals().window_fill, ACCENT, 0.16));
-    let moving = busy && ui.style().animation_time > 0.0;
-    let phase = if moving {
-        ui.input(|i| i.time as f32) * 1.8
-    } else {
-        -std::f32::consts::FRAC_PI_2
-    };
-    let points = (0..32)
-        .map(|i| {
-            let angle = phase + i as f32 / 31.0 * std::f32::consts::PI * 1.5;
-            center + egui::vec2(angle.cos(), angle.sin()) * 18.0
-        })
-        .collect();
-    painter.add(egui::Shape::line(points, Stroke::new(2.0, ACCENT)));
-    let disk = egui::Rect::from_center_size(center, egui::vec2(18.0, 15.0));
-    painter.rect_stroke(
-        disk,
-        3,
-        Stroke::new(1.7, ui.visuals().strong_text_color()),
-        egui::StrokeKind::Inside,
-    );
-    painter.circle_filled(center + egui::vec2(4.0, 3.0), 2.0, TEAL);
-    if moving {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(16));
-    }
+    paint_symbol(ui, rect.shrink(12.0), Icon::Drive, 24.0, ACCENT);
 }
 pub fn setup(ctx: &egui::Context) {
     i18n::setup_fonts(ctx);
@@ -464,17 +440,17 @@ pub fn empty_state(
         .size()
         .y;
     let spacing = ui.spacing().item_spacing.y;
-    let radar_size = if scanning {
+    let activity_size = if scanning {
         (height - title_height - body_height - spacing * 3.0).clamp(0.0, 96.0)
     } else {
         0.0
     };
-    let radar_height = if radar_size >= 32.0 {
-        radar_size + spacing + 4.0
+    let activity_height = if activity_size >= 32.0 {
+        activity_size + spacing + 4.0
     } else {
         0.0
     };
-    let content_height = radar_height
+    let content_height = activity_height
         + title_height
         + spacing
         + body_height
@@ -487,8 +463,8 @@ pub fn empty_state(
     let mut clear = false;
     ui.vertical_centered(|ui| {
         ui.add_space(((height - content_height) / 2.0).max(0.0));
-        if radar_height > 0.0 {
-            scan_radar(ui, radar_size);
+        if activity_height > 0.0 {
+            scan_activity(ui, activity_size);
             ui.add_space(4.0);
         }
         ui.add_sized(
@@ -919,6 +895,9 @@ pub fn operation_progress(
 ) {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 7.0), egui::Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
     response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator));
     ui.painter()
         .rect_filled(rect, 4, ui.visuals().widgets.inactive.bg_fill);
@@ -938,7 +917,7 @@ pub fn operation_progress(
     } else {
         let moving = ui.style().animation_time > 0.0 && !stopping;
         let phase = if moving {
-            (ui.input(|input| input.time) as f32 * 0.65) % 1.0
+            (ui.input(|input| input.time).rem_euclid(2.4) / 2.4) as f32
         } else {
             0.5
         };
@@ -952,68 +931,64 @@ pub fn operation_progress(
         ui.painter().rect_filled(fill, 4, ACCENT);
         if moving {
             ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(16));
+                .request_repaint_after(std::time::Duration::from_millis(33));
         }
     }
 }
 
-/// A purely visual sweep: actual scan progress is always reported separately.
-/// Static when animations are disabled, with no idle repaint loop.
-pub fn scan_radar(ui: &mut egui::Ui, diameter: f32) {
+/// Restrained scan illustration; only three small dots change between frames.
+/// Actual progress is reported separately by the progress bar and scan status.
+pub fn scan_activity(ui: &mut egui::Ui, diameter: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(diameter, diameter), egui::Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
     }
-    let center = rect.center();
-    let radius = diameter * 0.43;
-    let p = ui.painter();
-    let surface = ui.visuals().window_fill;
-    let moving = ui.style().animation_time > 0.0;
+    let icon_size = diameter * 0.52;
+    let icon = egui::Rect::from_center_size(
+        rect.center() - egui::vec2(0.0, diameter * 0.12),
+        egui::vec2(icon_size, icon_size),
+    );
+    paint_symbol(
+        ui,
+        icon,
+        Icon::Document,
+        icon_size,
+        ui.visuals().weak_text_color(),
+    );
+    activity_dots(
+        ui,
+        rect.center() + egui::vec2(0.0, diameter * 0.30),
+        8.0,
+        ACCENT,
+        false,
+    );
+}
+
+/// No geometry allocation or rotating paths; bounded time retains precision
+/// even after long sessions. Invisible and reduced-motion views never animate.
+fn activity_dots(ui: &egui::Ui, center: egui::Pos2, spacing: f32, color: Color32, stopping: bool) {
+    let moving = ui.style().animation_time > 0.0 && !stopping;
     let phase = if moving {
-        (ui.input(|i| i.time) % 3.6) as f32 / 3.6 * std::f32::consts::TAU
+        ui.input(|i| i.time).rem_euclid(1.8) / 1.8
     } else {
-        -0.8
+        0.0
     };
-    p.circle_filled(center, radius, blend(surface, ACCENT, 0.06));
-    let grid = Stroke::new(1.0, blend(surface, ACCENT, 0.25));
-    for scale in [0.33, 0.66, 1.0] {
-        p.circle_stroke(center, radius * scale, grid);
-    }
-    for direction in [egui::vec2(1.0, 0.0), egui::vec2(0.0, 1.0)] {
-        p.line_segment(
-            [center - direction * radius, center + direction * radius],
-            grid,
+    for index in 0..3 {
+        let strength = if moving {
+            let wave = ((phase - index as f64 / 3.0) * std::f64::consts::TAU).cos();
+            0.35 + 0.65 * ((wave + 1.0) * 0.5) as f32
+        } else {
+            0.65
+        };
+        ui.painter().circle_filled(
+            center + egui::vec2((index as f32 - 1.0) * spacing, 0.0),
+            spacing * 0.25,
+            blend(ui.visuals().window_fill, color, strength),
         );
     }
-    for segment in 0..24 {
-        let angle = phase - (24 - segment) as f32 * 0.05;
-        let a = center + egui::vec2(angle.cos(), angle.sin()) * radius;
-        let b = center + egui::vec2((angle + 0.05).cos(), (angle + 0.05).sin()) * radius;
-        let color = blend(surface, TEAL, 0.04 + segment as f32 / 24.0 * 0.22);
-        p.add(egui::Shape::convex_polygon(
-            vec![center, a, b],
-            color,
-            Stroke::NONE,
-        ));
-    }
-    for (angle, distance) in [(0.6, 0.72), (2.8, 0.5), (4.9, 0.78)] {
-        let age = (phase - angle).rem_euclid(std::f32::consts::TAU);
-        let intensity = if moving { (-age * 1.5).exp() } else { 0.6 };
-        let dot = center + egui::vec2(angle.cos(), angle.sin()) * radius * distance;
-        p.circle_filled(dot, 5.0, blend(surface, TEAL, intensity * 0.14));
-        p.circle_filled(dot, 2.2, blend(surface, TEAL, 0.3 + intensity * 0.7));
-    }
-    p.line_segment(
-        [
-            center,
-            center + egui::vec2(phase.cos(), phase.sin()) * radius,
-        ],
-        Stroke::new(1.8, TEAL),
-    );
-    p.circle_filled(center, 2.5, ACCENT);
     if moving {
         ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(16));
+            .request_repaint_after(std::time::Duration::from_millis(33));
     }
 }
 
@@ -1397,38 +1372,23 @@ pub fn settings_category(
 /// Compact activity cue: motion indicates work, never a percentage completed.
 pub fn activity_indicator(ui: &mut egui::Ui, checking: bool, stopping: bool) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-    let center = rect.center();
-    let moving = ui.style().animation_time > 0.0 && !stopping;
-    let color = if checking { TEAL } else { ACCENT };
-    let phase = if moving {
-        ui.input(|i| i.time as f32) * 2.6
-    } else {
-        0.0
-    };
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
     if stopping {
         ui.painter().rect_filled(
-            egui::Rect::from_center_size(center, egui::vec2(8.0, 8.0)),
+            egui::Rect::from_center_size(rect.center(), egui::vec2(8.0, 8.0)),
             2,
             ui.visuals().weak_text_color(),
         );
     } else {
-        ui.painter()
-            .circle_stroke(center, 6.5, Stroke::new(2.0, color.gamma_multiply(0.18)));
-        let points = (0..24)
-            .map(|i| {
-                let angle = phase + i as f32 / 23.0 * std::f32::consts::PI * 1.35;
-                center + egui::vec2(angle.cos(), angle.sin()) * 6.5
-            })
-            .collect();
-        ui.painter()
-            .add(egui::Shape::line(points, Stroke::new(2.0, color)));
-        if checking {
-            ui.painter().circle_filled(center, 1.8, color);
-        }
-    }
-    if moving {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(16));
+        activity_dots(
+            ui,
+            rect.center(),
+            6.0,
+            if checking { TEAL } else { ACCENT },
+            false,
+        );
     }
 }
 

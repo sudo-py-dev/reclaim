@@ -458,7 +458,7 @@ impl Reclaim {
     }
     fn source_view(&mut self, ui: &mut egui::Ui) {
         ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 60.0), i18n::row(), |ui| {
-            theme::recovery_emblem(ui, self.busy || self.drives_loading);
+            theme::recovery_emblem(ui);
             let width = (ui.available_width() - 8.0).max(80.0);
             ui.allocate_ui_with_layout(egui::vec2(width, 56.0), i18n::column(), |ui| {
                 ui.t_heading(egui::RichText::new("Recover Files").strong());
