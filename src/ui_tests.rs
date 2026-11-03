@@ -272,7 +272,15 @@ fn drive_rows_activate_from_the_whole_row_and_keyboard() {
         let mut frame_input = input([600.0, 400.0]);
         frame_input.events = events;
         let output = ctx.run_ui(frame_input, |ui| {
-            let response = theme::drive_row(ui, "USB Drive", "Not mounted", "64 GiB", false, true);
+            let response = theme::drive_row(
+                ui,
+                "USB Drive",
+                "Not mounted",
+                "USB drive",
+                "64 GiB",
+                false,
+                true,
+            );
             center = response.rect.right_center() - egui::vec2(10.0, 0.0);
             clicked = response.clicked();
         });
@@ -1201,7 +1209,7 @@ fn expanded_guide_keeps_step_buttons_and_navigation_fixed() {
             }
             let output = output.unwrap();
             let nav = position(&output, &i18n::t("Next step"));
-            let step = position(&output, "03");
+            let step = position(&output, "3");
             let more = position(&output, &i18n::t("More details"));
             for pressed in [true, false] {
                 let mut frame_input = input(size);
@@ -1227,7 +1235,7 @@ fn expanded_guide_keeps_step_buttons_and_navigation_fixed() {
             }
             let expanded = output.unwrap();
             assert_eq!(position(&expanded, &i18n::t("Next step")), nav);
-            assert_eq!(position(&expanded, "03"), step);
+            assert_eq!(position(&expanded, "3"), step);
             assert!(nav.y > 510.0 && nav.y < 580.0);
             let mut frame_input = input(size);
             frame_input.events = vec![
@@ -1244,7 +1252,7 @@ fn expanded_guide_keeps_step_buttons_and_navigation_fixed() {
             let mut frame = ctx.run_ui(input(size), |ui| app.render(ui));
             frame.textures_delta.clear();
             assert_eq!(position(&frame, &i18n::t("Next step")), nav);
-            assert_eq!(position(&frame, "03"), step);
+            assert_eq!(position(&frame, "3"), step);
             if let Ok(dir) = std::env::var("RECLAIM_PREVIEW_DIR") {
                 rasterize(
                     &ctx,
@@ -1343,6 +1351,37 @@ fn a_failed_scan_displays_its_error_instead_of_no_files_found() {
                 .any(|label| label.contains("Read-only access was denied"))
         );
         assert!(!labels.iter().any(|label| label == "No files found"));
+    });
+}
+
+#[test]
+fn allocation_error_is_translated_and_footer_stays_short_in_hebrew() {
+    i18n::with_language(i18n::Language::Hebrew, || {
+        let ctx = egui::Context::default();
+        theme::setup(&ctx);
+        let mut app = Reclaim::default();
+        app.page = 1;
+        app.busy = true;
+        let (tx, rx) = mpsc::channel();
+        app.receiver = Some(rx);
+        let error = "Unused-space scanning needs a supported formatted volume (NTFS, FAT12/16/32, or exFAT). Select the volume/partition rather than a whole-disk image. Occupied space was not scanned.";
+        tx.send(Message::Done(Err(error.into()))).unwrap();
+        app.poll();
+        assert_eq!(app.status, "Scan failed. See the message above.");
+
+        let mut output = ctx.run_ui(input([920.0, 740.0]), |ui| app.render(ui));
+        output.textures_delta.clear();
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.iter().any(|label| label.contains("אמצעי אחסון")));
+        assert!(labels.iter().any(|label| label.contains("פרטים מופיעים")));
+        assert!(!labels.iter().any(|label| label.contains("Unused-space")));
     });
 }
 

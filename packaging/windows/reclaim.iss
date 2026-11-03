@@ -33,7 +33,7 @@ SetupIconFile=..\..\assets\icons\reclaim.ico
 LicenseFile=..\..\LICENSE
 UninstallDisplayIcon={app}\reclaim.exe
 CloseApplications=yes
-RestartApplications=no
+RestartApplications=yes
 SetupMutex=ReclaimSetup
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
@@ -48,3 +48,5 @@ Name: "{group}\Reclaim"; Filename: "{app}\reclaim.exe"
 Name: "{autodesktop}\Reclaim"; Filename: "{app}\reclaim.exe"; Tasks: desktopicon
 [Run]
 Filename: "{app}\reclaim.exe"; Description: "Launch Reclaim"; Flags: nowait postinstall skipifsilent
+; A silent update closes the old process, then starts the installed version.
+Filename: "{app}\reclaim.exe"; Flags: nowait runasoriginaluser; Check: WizardSilent

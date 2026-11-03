@@ -92,6 +92,7 @@
   "Recovered {count} files before error: {e}": "Recovered {count} files before error: {e}",
   "Recovering selected files…": "Recovering selected files…",
   "Recovery guide": "Recovery guide",
+  "Recovery steps": "Recovery steps",
   "Recovery result limit reached. Available results can still be exported.": "Recovery result limit reached. Available results can still be exported.",
   "Recovery stopped. {count} file saved.": "Recovery stopped. {count} file saved.",
   "Recovery stopped. {count} files saved.": "Recovery stopped. {count} files saved.",
@@ -107,6 +108,7 @@
   "Scan complete. {} file candidate found.": "Scan complete. {} file candidate found.",
   "Scan complete. {} file candidates found.": "Scan complete. {} file candidates found.",
   "Scan failed: {e}": "Scan failed: {e}",
+  "Scan failed. See the message above.": "Scan failed. See the message above.",
   "Scan results": "Scan results",
   "Scan stopped. You can recover partial results.": "Scan stopped. You can recover partial results.",
   "Scan the selected source before recovering files.": "Scan the selected source before recovering files.",
@@ -123,6 +125,7 @@
   "Source changed or candidate is truncated": "Source changed or candidate is truncated",
   "Source changed since scanning. Scan it again before recovering.": "Source changed since scanning. Scan it again before recovering.",
   "Stop after this file": "Stop after this file",
+  "Step {} of {}": "Step {} of {}",
   "Stop scan": "Stop scan",
   "Supported files": "Supported files",
   "System": "System",
@@ -140,7 +143,6 @@
   "Volume": "Volume",
   "Volume {device}": "Volume {device}",
   "Window closed": "Window closed",
-  "Windows could not list drives. Check PowerShell/CIM availability, or open a disk image.": "Windows could not list drives. Check PowerShell/CIM availability, or open a disk image.",
   "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.": "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.",
   "Windows drive": "Windows drive",
   "Windows drive list was not an array": "Windows drive list was not an array",
@@ -274,5 +276,10 @@
   "Reading the filesystem map. Occupied files will be skipped.": "Reading the filesystem map. Occupied files will be skipped.",
   "Only unused space is searched. You can stop and keep your results.": "Only unused space is searched. You can stop and keep your results.",
   "unused total": "unused total",
-  "No unused space is available on this volume.": "No unused space is available on this volume."
+  "No unused space is available on this volume.": "No unused space is available on this volume.",
+  "Unused-space scanning needs a supported formatted volume (NTFS, FAT12/16/32, or exFAT). Select the volume/partition rather than a whole-disk image. Occupied space was not scanned.": "Unused-space scanning needs a supported formatted volume (NTFS, FAT12/16/32, or exFAT). Select the volume/partition rather than a whole-disk image. Occupied space was not scanned.",
+  "Protect your recoverable data": "Protect your recoverable data",
+  "Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive.": "Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive.",
+  "Save files": "Save files",
+  "Cancel": "Cancel"
 }

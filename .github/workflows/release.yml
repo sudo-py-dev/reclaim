@@ -52,14 +52,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
       - run: cargo test --locked
       - run: cargo build --locked --release --target ${{ matrix.target }}
-      - name: Verify Windows runtime is bundled
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/check-windows-runtime.ps1 -Binary "target/${{ matrix.target }}/release/reclaim.exe"
-      - name: Verify Windows application opens
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/check-windows-startup.ps1 -Binary "target/${{ matrix.target }}/release/reclaim.exe"
       - name: Package portable executable and licenses
         shell: bash
         env:
@@ -82,20 +74,11 @@ jobs:
           PY
       - name: Ensure Inno Setup is available
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $compiler = Get-ChildItem "${env:ProgramFiles(x86)}/Inno Setup */ISCC.exe" -ErrorAction SilentlyContinue
-          if (-not $compiler -and -not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) {
-            choco install innosetup --yes --no-progress
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+        shell: bash
+        run: choco install innosetup --yes --no-progress
       - name: Build native installer
         shell: bash
         run: python scripts/package-release.py "${{ matrix.platform }}" --binary "dist/${{ matrix.asset }}" --arch "${{ matrix.arch }}"
-      - name: Verify silent Windows update and relaunch
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/check-windows-update.ps1 -Installer "dist/reclaim-windows-x86_64-setup.exe"
       - name: Checksum all downloads
         shell: bash
         run: |

@@ -178,6 +178,7 @@ pub fn drive_row(
     ui: &mut egui::Ui,
     title: &str,
     subtitle: &str,
+    kind: &str,
     size: &str,
     selected: bool,
     enabled: bool,
@@ -259,7 +260,17 @@ pub fn drive_row(
         muted
     };
     painter.rect_filled(icon.expand(6.0), 7, blend(surface, icon_color, 0.14));
-    paint_symbol(ui, icon, Icon::Drive, 20.0, icon_color);
+    paint_symbol(
+        ui,
+        icon,
+        match kind {
+            "USB drive" => Icon::Usb,
+            "Volume" => Icon::Volume,
+            _ => Icon::Drive,
+        },
+        20.0,
+        icon_color,
+    );
     let text_x = rect.left() + if i18n::is_rtl() { 126.0 } else { 52.0 };
     let width = (rect.width() - 178.0).max(40.0);
     for (text, y, font, color) in [
@@ -497,6 +508,91 @@ pub fn empty_state(
     clear
 }
 
+/// Connected, keyboard-accessible steps for the recovery guide.
+pub fn guide_steps(ui: &mut egui::Ui, titles: &[&str], current: usize) -> Option<usize> {
+    let width = ui.available_width();
+    let height = 40.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let count = titles.len();
+    if count < 2 {
+        return None;
+    }
+
+    let edge = 20.0;
+    let span = (width - edge * 2.0).max(1.0);
+    let point = |index: usize| {
+        let logical = index as f32 / (count - 1) as f32;
+        let logical = if i18n::is_rtl() {
+            1.0 - logical
+        } else {
+            logical
+        };
+        egui::pos2(rect.left() + edge + span * logical, rect.center().y)
+    };
+    let first = point(0);
+    let last = point(count - 1);
+    let current_point = point(current);
+    let rail = ui.visuals().widgets.inactive.bg_fill;
+    ui.painter()
+        .line_segment([first, last], Stroke::new(4.0, rail));
+    ui.painter()
+        .line_segment([first, current_point], Stroke::new(4.0, ACCENT));
+
+    let mut selected = None;
+    for (index, title) in titles.iter().enumerate() {
+        let center = point(index);
+        let hit = egui::Rect::from_center_size(center, egui::vec2(40.0, 40.0));
+        let response = ui.interact(
+            hit,
+            ui.id().with(("guide_step", index)),
+            egui::Sense::click(),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::RadioButton,
+                true,
+                current == index,
+                format!(
+                    "{}: {}",
+                    i18n::t(&format!("Step {} of {}", index + 1, count)),
+                    i18n::t(title)
+                ),
+            )
+        });
+        let reached = index <= current;
+        let fill = if reached {
+            ACCENT
+        } else if response.hovered() {
+            blend(rail, ACCENT, 0.18)
+        } else {
+            rail
+        };
+        ui.painter().circle_filled(center, 15.0, fill);
+        if response.has_focus() {
+            ui.painter().circle_stroke(
+                center,
+                18.0,
+                Stroke::new(2.0, ui.visuals().selection.stroke.color),
+            );
+        }
+        ui.painter().text(
+            center,
+            egui::Align2::CENTER_CENTER,
+            (index + 1).to_string(),
+            egui::TextStyle::Button.resolve(ui.style()),
+            if reached {
+                Color32::WHITE
+            } else {
+                ui.visuals().text_color()
+            },
+        );
+        if response.on_hover_text(i18n::t(title)).clicked() {
+            selected = Some(index);
+        }
+    }
+    selected
+}
+
 /// Direction-aware dropdown, using egui's popup dismissal and keyboard handling.
 pub fn category_dropdown(ui: &mut egui::Ui, category: &mut usize, width: f32) {
     let choices: Vec<_> = reclaim::FILE_CATEGORIES
@@ -638,6 +734,12 @@ pub enum Icon {
     SelectAll,
     DeselectAll,
     Drive,
+    Usb,
+    Volume,
+    DiskImage,
+    Search,
+    Recover,
+    Stop,
     Minimize,
     Maximize,
     Restore,
@@ -646,7 +748,6 @@ pub enum Icon {
     ChevronDown,
     Guide,
     Results,
-    DiskImage,
     Shield,
     Warning,
     Info,
@@ -674,6 +775,12 @@ impl Icon {
             Self::SelectAll => '\u{f14a}',
             Self::DeselectAll => '\u{f146}',
             Self::Drive => '\u{f0a0}',
+            Self::Usb => '\u{f1e6}',
+            Self::Volume => '\u{f07b}',
+            Self::DiskImage => '\u{f56d}',
+            Self::Search => '\u{f002}',
+            Self::Recover => '\u{f019}',
+            Self::Stop => '\u{f04d}',
             Self::Minimize => '\u{f2d1}',
             Self::Maximize => '\u{f2d0}',
             Self::Restore => '\u{f2d2}',
@@ -683,7 +790,6 @@ impl Icon {
             Self::ChevronDown => '\u{f078}',
             Self::Guide => '\u{f02d}',
             Self::Results => '\u{f03a}',
-            Self::DiskImage => '\u{f56d}',
             Self::Shield => '\u{f3ed}',
             Self::Warning => '\u{f071}',
             Self::Info => '\u{f05a}',
@@ -732,6 +838,123 @@ pub fn icon_button(
     });
     paint_icon(ui, &response, icon);
     response.t_on_hover_text(label)
+}
+
+/// A labeled action with a symbolic icon. The label remains visible so the
+/// action is understandable without relying on a tooltip.
+pub fn icon_text_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    primary_action: bool,
+    size: egui::Vec2,
+) -> egui::Response {
+    let button = egui::Button::new("").min_size(size);
+    let response = ui.add(if primary_action {
+        button.fill(ACCENT)
+    } else {
+        button
+    });
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), i18n::t(label))
+    });
+    let color = if primary_action {
+        Color32::WHITE
+    } else {
+        ui.style().interact(&response).text_color()
+    };
+    let icon_x = if i18n::is_rtl() {
+        response.rect.right() - 20.0
+    } else {
+        response.rect.left() + 20.0
+    };
+    paint_symbol(
+        ui,
+        egui::Rect::from_center_size(
+            egui::pos2(icon_x, response.rect.center().y),
+            egui::vec2(18.0, 18.0),
+        ),
+        icon,
+        14.0,
+        color,
+    );
+    let text_width = (response.rect.width() - 48.0).max(1.0);
+    let text = i18n::widget_width(
+        ui,
+        label,
+        false,
+        text_width,
+        if i18n::is_rtl() {
+            egui::Align::Max
+        } else {
+            egui::Align::Min
+        },
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        text_width,
+        egui::TextStyle::Button,
+    );
+    let text_x = if i18n::is_rtl() {
+        response.rect.left() + 12.0
+    } else {
+        response.rect.left() + 38.0
+    };
+    ui.painter().galley(
+        egui::pos2(text_x, response.rect.center().y - text.size().y / 2.0),
+        text,
+        color,
+    );
+    response
+}
+
+/// Smooth determinate progress and a restrained moving segment while the
+/// amount of work is still unknown. Motion follows the animation preference.
+pub fn operation_progress(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    fraction: Option<f32>,
+    stopping: bool,
+) {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 7.0), egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator));
+    ui.painter()
+        .rect_filled(rect, 4, ui.visuals().widgets.inactive.bg_fill);
+    if let Some(fraction) = fraction {
+        let value = ui.ctx().animate_value_with_time(
+            ui.id().with(id),
+            fraction.clamp(0.0, 1.0),
+            ui.style().animation_time,
+        );
+        let width = rect.width() * value;
+        let fill = if i18n::is_rtl() {
+            egui::Rect::from_min_max(egui::pos2(rect.right() - width, rect.top()), rect.max)
+        } else {
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.left() + width, rect.bottom()))
+        };
+        ui.painter().rect_filled(fill, 4, ACCENT);
+    } else {
+        let moving = ui.style().animation_time > 0.0 && !stopping;
+        let phase = if moving {
+            (ui.input(|input| input.time) as f32 * 0.65) % 1.0
+        } else {
+            0.5
+        };
+        let center = if i18n::is_rtl() { 1.0 - phase } else { phase };
+        let segment = rect.width() * 0.28;
+        let left = rect.left() + rect.width() * center - segment / 2.0;
+        let fill = egui::Rect::from_min_max(
+            egui::pos2(left.max(rect.left()), rect.top()),
+            egui::pos2((left + segment).min(rect.right()), rect.bottom()),
+        );
+        ui.painter().rect_filled(fill, 4, ACCENT);
+        if moving {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(16));
+        }
+    }
 }
 
 /// A purely visual sweep: actual scan progress is always reported separately.

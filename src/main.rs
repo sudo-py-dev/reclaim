@@ -408,7 +408,7 @@ impl Reclaim {
                             }
                             Err(e) => {
                                 self.scan_error = Some(e.clone());
-                                format!("Scan failed: {e}")
+                                "Scan failed. See the message above.".into()
                             }
                         };
                     }
@@ -458,6 +458,21 @@ impl Reclaim {
                     "Disk Image"
                 });
                 ui.with_layout(i18n::trailing_row(), |ui| {
+                    if ui
+                        .add_enabled_ui(!self.busy, |ui| {
+                            theme::icon_text_button(
+                                ui,
+                                theme::Icon::DiskImage,
+                                "Open a Disk Image…",
+                                false,
+                                egui::vec2(176.0, 36.0),
+                            )
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        self.choose_source();
+                    }
                     if drives::AVAILABLE
                         && ui
                             .add_enabled_ui(!self.busy && !self.drives_loading, |ui| {
@@ -497,7 +512,7 @@ impl Reclaim {
                         for drive in &self.drives {
                             ui.push_id(&drive.path, |ui| {
                                 let subtitle = format!("{} · {}", i18n::t(&drive.kind), i18n::t(&drive.location));
-                                if theme::drive_row(ui, &drive.display_name(), &subtitle, &theme::bytes(drive.size), self.source.as_ref() == Some(&drive.path), !self.busy && !drive.encrypted).raw_on_hover_text(format!("{}\n{}\n{} · {}", drive.display_name(), subtitle, theme::bytes(drive.size), drive.path.display())).clicked() {
+                                if theme::drive_row(ui, &drive.display_name(), &subtitle, &drive.kind, &theme::bytes(drive.size), self.source.as_ref() == Some(&drive.path), !self.busy && !drive.encrypted).raw_on_hover_text(format!("{}\n{}\n{} · {}", drive.display_name(), subtitle, theme::bytes(drive.size), drive.path.display())).clicked() {
                                     self.source = Some(drive.path.clone());
                                 }
                             });
@@ -512,49 +527,36 @@ impl Reclaim {
             .as_ref()
             .and_then(|path| self.drives.iter().find(|drive| drive.path == *path))
             .is_some_and(|drive| drive.mounted);
-        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 36.0), i18n::row(), |ui| {
-            if ui
-                .add_enabled_ui(!self.busy, |ui| {
-                    theme::icon_button(
-                        ui,
-                        theme::Icon::DiskImage,
-                        "Open a Disk Image…",
-                        false,
-                        egui::vec2(36.0, 36.0),
-                    )
-                })
-                .inner
-                .clicked()
-            {
-                self.choose_source();
-            }
-            ui.with_layout(i18n::trailing_row(), |ui| {
-                let message = if mounted {
-                    "For best results, stop using this drive or scan it from another computer."
-                } else {
-                    "Read-only access may require permission from your operating system."
-                };
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
-                theme::paint_symbol(
-                    ui,
-                    rect,
-                    if mounted {
-                        theme::Icon::Warning
-                    } else {
-                        theme::Icon::Shield
-                    },
-                    15.0,
-                    ui.visuals().weak_text_color(),
-                );
-                response.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Label, true, i18n::t(message))
-                });
-                response.t_on_hover_text(message);
+        let message = if mounted {
+            "For best results, stop using this drive or scan it from another computer."
+        } else {
+            "Read-only access may require permission from your operating system."
+        };
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 40.0), i18n::row(), |ui| {
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+            theme::paint_symbol(
+                ui,
+                rect,
                 if mounted {
-                    ui.t_label(egui::RichText::new("Drive in Use").small());
-                }
+                    theme::Icon::Warning
+                } else {
+                    theme::Icon::Shield
+                },
+                15.0,
+                ui.visuals().weak_text_color(),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, i18n::t(message))
             });
+            ui.add(
+                egui::Label::new(i18n::widget(
+                    ui,
+                    egui::RichText::new(message).small().weak(),
+                    true,
+                ))
+                .wrap(),
+            );
         });
     }
     fn stop_operation(&mut self) {
@@ -901,38 +903,24 @@ impl Reclaim {
                 "Select candidates and save them to another physical drive. Existing files are never replaced. Open recovered files and check their contents.",
             ),
         ];
-        ui.vertical_centered(|ui| {
-            ui.t_weak("A few careful steps can preserve more of your data.");
-        });
-        ui.add_space(12.0);
-        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 40.0), i18n::row(), |ui| {
-            let width = (ui.available_width() - 3.0 * ui.spacing().item_spacing.x) / 4.0;
-            for (index, (title, _, _, _)) in steps.iter().enumerate() {
-                let response = ui.add_sized(
-                    [width, 36.0],
-                    egui::Button::new(format!("{:02}", index + 1))
-                        .selected(self.guide_step == index),
-                );
-                response.widget_info(|| {
-                    egui::WidgetInfo::selected(
-                        egui::WidgetType::RadioButton,
-                        true,
-                        self.guide_step == index,
-                        i18n::t(title),
-                    )
-                });
-                if response.t_on_hover_text(*title).clicked() {
-                    self.guide_step = index;
-                }
-            }
-        });
+        ui.t_strong("Recovery steps");
+        ui.t_weak("A few careful steps can preserve more of your data.");
+        ui.add_space(8.0);
+        let titles = steps.map(|(title, _, _, _)| title);
+        if let Some(step) = theme::guide_steps(ui, &titles, self.guide_step) {
+            self.guide_step = step;
+        }
         ui.add_space(12.0);
         let (title, summary, body, details) = steps[self.guide_step];
         theme::card(ui).inner_margin(24.0).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.with_layout(i18n::column(), |ui| {
                 ui.t_label(
-                    egui::RichText::new(format!("{} / 4", self.guide_step + 1))
+                    egui::RichText::new(i18n::t(&format!(
+                        "Step {} of {}",
+                        self.guide_step + 1,
+                        steps.len()
+                    )))
                         .small()
                         .color(theme::ACCENT),
                 );
@@ -1497,11 +1485,24 @@ impl Reclaim {
                                     "Scan Image"
                                 };
                                 if ui
-                                    .add_enabled(
+                                    .add_enabled_ui(
                                         (self.busy || self.source.is_some())
                                             && !(self.busy && self.cancel.load(Ordering::Relaxed)),
-                                        theme::primary(ui, label).min_size(egui::vec2(164.0, 38.0)),
+                                        |ui| {
+                                            theme::icon_text_button(
+                                                ui,
+                                                if self.busy {
+                                                    theme::Icon::Stop
+                                                } else {
+                                                    theme::Icon::Search
+                                                },
+                                                label,
+                                                true,
+                                                egui::vec2(164.0, 38.0),
+                                            )
+                                        },
                                     )
+                                    .inner
                                     .clicked()
                                 {
                                     if self.busy {
@@ -1653,11 +1654,23 @@ impl Reclaim {
                                     "Scan again"
                                 };
                                 if ui
-                                    .add_enabled(
+                                    .add_enabled_ui(
                                         !stopping && (self.busy || self.scanned_source.is_some()),
-                                        egui::Button::new(i18n::widget(ui, label, false))
-                                            .min_size(egui::vec2(112.0, 38.0)),
+                                        |ui| {
+                                            theme::icon_text_button(
+                                                ui,
+                                                if self.busy {
+                                                    theme::Icon::Stop
+                                                } else {
+                                                    theme::Icon::Refresh
+                                                },
+                                                label,
+                                                false,
+                                                egui::vec2(120.0, 38.0),
+                                            )
+                                        },
                                     )
+                                    .inner
                                     .clicked()
                                 {
                                     if self.busy {
@@ -1668,38 +1681,45 @@ impl Reclaim {
                                     }
                                 }
                                 if recovering
-                                    && ui
-                                        .add(
-                                            theme::primary(ui, "Recover files…")
-                                                .min_size(egui::vec2(144.0, 38.0)),
-                                        )
-                                        .clicked()
+                                    && theme::icon_text_button(
+                                        ui,
+                                        theme::Icon::Recover,
+                                        "Recover files…",
+                                        true,
+                                        egui::vec2(152.0, 38.0),
+                                    )
+                                    .clicked()
                                     && let Some(directory) = rfd::FileDialog::new()
                                         .set_title(i18n::t("Save to a different physical drive"))
                                         .pick_folder()
                                 {
-                                    self.export(directory);
+                                    let confirmed = rfd::MessageDialog::new()
+                                        .set_title(i18n::t("Protect your recoverable data"))
+                                        .set_description(i18n::t("Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive."))
+                                        .set_level(rfd::MessageLevel::Warning)
+                                        .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                                            i18n::t("Save files"),
+                                            i18n::t("Cancel"),
+                                        ))
+                                        .show();
+                                    if confirmed == rfd::MessageDialogResult::Custom(i18n::t("Save files")) {
+                                        self.export(directory);
+                                    }
                                 }
                             });
                         },
                     );
-                    if self.busy
-                        && !self.exporting
-                        && self.total > 0
-                        && self.source_handle.is_some()
-                        && self.allocation_ready
-                    {
-                        let progress = ui.ctx().animate_value_with_time(
-                            egui::Id::new(("scan_progress", self.started)),
-                            fraction as f32,
-                            ui.style().animation_time,
-                        );
-                        ui.add(
-                            egui::ProgressBar::new(progress)
-                                .desired_width(ui.available_width())
-                                .desired_height(4.0)
-                                .corner_radius(2)
-                                .animate(false),
+                    if self.busy {
+                        let known = (!self.exporting
+                            && self.total > 0
+                            && self.source_handle.is_some()
+                            && self.allocation_ready)
+                            .then_some(fraction as f32);
+                        theme::operation_progress(
+                            ui,
+                            ("operation_progress", self.started),
+                            known,
+                            stopping,
                         );
                     }
                 });
@@ -1823,14 +1843,7 @@ fn native_bus_transport_rejects_external_programs() {
 
 fn main() {
     diagnostics::install();
-    if let Some(result) = update_runtime::run_helper_if_requested() {
-        if let Err(error) = result {
-            diagnostics::report("Reclaim could not complete the update.", &error);
-            std::process::exit(1);
-        }
-        return;
-    }
-    update_runtime::cleanup_completed_updates();
+    update_runtime::cleanup_staged_updates();
     if let Err(error) = run() {
         diagnostics::report("Reclaim could not open its window.", &format!("{error:?}"));
         std::process::exit(1);

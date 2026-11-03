@@ -1,108 +1,119 @@
-# Reclaim
+<div align="center">
+  <img src="assets/icons/reclaim.png" alt="Reclaim app icon" width="88">
+  <h1>Reclaim</h1>
+  <p><strong>Find lost files. Review what’s found. Save what matters.</strong></p>
+  <p>A desktop app for recovering photos, documents, and other files from unused space on drives and volume images.</p>
 
-**Find lost files. Review what’s found. Save what matters.**
+[Download Reclaim](https://github.com/sudo-py-dev/reclaim/releases/latest) · [Recovery guide](#recover-in-four-steps) · [Developer docs](docs/DEVELOPMENT.md)
 
-Reclaim helps you look for recoverable photos, documents, and other files on a drive or a saved copy of a drive. A simple interface guides you from choosing a drive to saving the files you want to keep.
+[![Desktop builds](https://github.com/sudo-py-dev/reclaim/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/sudo-py-dev/reclaim/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/sudo-py-dev/reclaim?color=3584e4)](https://github.com/sudo-py-dev/reclaim/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-9141ac)](LICENSE)
 
-**Version 0.1.9 · Early preview · English & Hebrew**
+Linux · Windows · macOS &nbsp; / &nbsp; English & Hebrew &nbsp; / &nbsp; Early preview
 
-![Reclaim 0.1.0 — choose a drive to scan](docs/screenshots/reclaim-drives.png)
+</div>
 
-*Current interface, shown with example drives. Dark mode and English are selected.*
+![Reclaim’s drive selection screen in dark mode, with example drives](docs/screenshots/reclaim-drives.png)
 
-## What you can do
+## Start here
 
-- **Scan unused space** — look for recoverable files in clusters marked free on NTFS, FAT12/16/32, and exFAT volumes. Existing allocated files are skipped.
-- **Watch files appear** — review results while the scan runs, or stop early and work with what it has found.
-- **Understand each result** — recognize file types by their icons and open file details for size, recovery checks, and original dates when available.
-- **Find the files you want** — search by name or file type, and narrow the list to photos, documents, archives, and more.
-- **Recover only your selection** — save the checked files that match your current filters.
-- **Work from a volume copy** — open an image of a supported formatted volume instead of scanning the original. Whole-disk images containing partition tables are not yet supported for unused-space scans.
-- **Make it comfortable** — choose light, dark, or System mode, switch between English and Hebrew, and turn animations on or off. System mode follows your desktop’s appearance changes without restarting the app.
+Get an installer from the **[latest release](https://github.com/sudo-py-dev/reclaim/releases/latest)**. Portable ZIP downloads are available too.
 
-Reclaim reads the filesystem allocation map first, then searches only its free clusters. The map describes allocation when read; a mounted volume can change during scanning. For repeatable recovery, stop using the source and scan a saved volume image.
+| Platform | Download | Install |
+| --- | --- | --- |
+| Windows · x86_64 | [Windows installer](https://github.com/sudo-py-dev/reclaim/releases/latest/download/reclaim-windows-x86_64-setup.exe) | Run the installer. Installs for your user with a Start menu shortcut and uninstaller. |
+| Debian / Ubuntu · x86_64 | `.deb` from the [release downloads](https://github.com/sudo-py-dev/reclaim/releases/latest) | Run `sudo apt install ./reclaim_X.Y.Z_amd64.deb`, replacing `X.Y.Z` with the downloaded version. |
+| macOS · Apple Silicon | [Apple Silicon installer](https://github.com/sudo-py-dev/reclaim/releases/latest/download/reclaim-macos-aarch64.pkg) | Open the package to install Reclaim in Applications. |
+| macOS · Intel | [Intel installer](https://github.com/sudo-py-dev/reclaim/releases/latest/download/reclaim-macos-x86_64.pkg) | Open the package to install Reclaim in Applications. |
 
-Reclaim scans your source in **read-only mode**. When saving recovered files, it gives duplicate names a new number rather than replacing existing files.
+Ubuntu 22.04 / Debian 12 or newer are recommended. Windows includes the Microsoft C++ runtime. macOS packages are unsigned and the app is ad-hoc signed, not notarized; you may need to approve it in **Privacy & Security**. Windows and macOS still need further testing on real devices.
 
-## Recover files in four steps
+> **Protect the source.** Stop using the affected drive as soon as possible. Install Reclaim and save recovered files on a different physical drive to avoid overwriting data you want to recover.
 
-1. **Choose your drive.** Select the drive that held your files. Newly connected or removed drives update automatically within about two seconds. Refresh is also available.
-2. **Start scanning.** Choose **Scan Drive**. You may be asked for permission to read the drive.
-3. **Review the results.** Use search and file-type filters, then check the files you want to recover.
-4. **Save somewhere else.** Choose **Recover files…** and pick a folder on a **different physical drive**. Open the saved files to check them.
+## Recover in four steps
 
-> Stop using the affected drive as soon as possible. Saving or installing things on it can overwrite files you are trying to recover.
+1. **Choose a drive or volume image.** Connected drives refresh automatically. Unlock encrypted volumes first; reading a drive may require administrator access.
+2. **Start scanning.** Results appear as they are found. You can stop early and keep working with the results already collected.
+3. **Review and select.** Search by name or file type, use category filters, and open file details to inspect size and recovery checks.
+4. **Save somewhere else.** Choose **Recover files…** and a folder on another physical drive. Only checked files matching the current filters are saved. Open them to check their contents.
 
-![Reclaim 0.1.0 — search, filter, and select files to recover](docs/screenshots/reclaim-results.png)
+![Reclaim’s results screen with search, category filters, and selected files](docs/screenshots/reclaim-results.png)
 
-*Example results with file-type icons. Finding a file does not guarantee that it can be recovered successfully.*
+*Screenshots are rendered from the app with sample data. They illustrate the interface, not recovery success.*
 
-## Files Reclaim looks for
+## Built for a careful recovery
 
-| File type | Examples |
+**Read-only scanning.** Reclaim reads the allocation map for NTFS, FAT12/16/32, or exFAT, then searches free clusters. Allocated files are skipped. Unsupported or damaged maps produce an error rather than a scan of occupied space. Recovered files receive numbered names when needed to avoid replacing existing output files.
+
+**Results you can inspect.** File-type icons, search, category filters, image previews for supported formats, and a details dialog help you review candidates before saving. A match is a possible recovery candidate; it does not prove that a file was deleted or is complete.
+
+**A comfortable desktop interface.** Choose light, dark, or System appearance, switch between English and Hebrew with right-to-left layouts, and turn animations on or off. System appearance follows desktop changes while the app runs. A built-in recovery guide is available from the book icon in Settings.
+
+### What it looks for
+
+| Category | Formats and examples |
 | --- | --- |
-| Photos and pictures | JPG, PNG, GIF, BMP, WebP, QOI |
-| Documents | PDF, Word, Excel, PowerPoint, OpenDocument, EPUB |
+| Pictures and icons | JPEG, PNG, GIF, BMP, WebP, QOI, ICO |
+| Documents and ebooks | PDF, Word, Excel, PowerPoint, OpenDocument, EPUB |
 | Archives and app packages | ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK |
 | Programs and installers | EXE/DLL, ELF, MSI/MSP/MST, DEB, RPM, DEX, flat XAR-based PKG |
 | Audio and video | WAV, AIFF, AU, AVI, Ogg Vorbis, Opus, Theora |
 | Databases | SQLite |
-| Icons | ICO |
 
-Unused-space results usually receive generated names such as `Image 0001.png`. This mode does not search the allocated NTFS master file table for small resident deleted files or their original names. Unsupported or damaged allocation maps produce an error; Reclaim never silently switches to searching occupied space.
+See the [format coverage report](docs/FILE_FORMAT_RESEARCH.md) for validation checks and unsupported variants.
 
-Use the information icon beside a result to inspect its details. **Deletion dates are not recovered**; file dates are never presented as the time of deletion.
+### Know the limits
 
-## Getting started
+Reclaim is an **early preview**, and recovery is not guaranteed. Overwritten or TRIM-erased data cannot be reconstructed by the scanner. Files may be incomplete or damaged even when they appear in the results.
 
-Download an installer from [GitHub Releases](https://github.com/sudo-py-dev/reclaim/releases):
+- **Use a formatted volume.** Whole-disk images containing MBR/GPT partition tables and APFS/ext4 allocation maps are not supported. For repeatable work, scan a saved volume image; a mounted source can change during scanning.
+- **Expect generated filenames.** Original folders are not restored. The desktop unused-space scan does not search allocated NTFS MFT clusters for small resident deleted files or their original names.
+- **Most files are limited to 64 MiB.** Some classic ZIP archives can be larger. Fragmented-file reconstruction and some format variants are unsupported; see the [detailed limits](docs/DEVELOPMENT.md#limits).
+- **Deletion dates are unavailable.** File dates, when available, are never presented as deletion dates.
+- **Save before closing.** Scan results are not kept after you quit.
 
-- **Windows:** run `reclaim-windows-x86_64-setup.exe`. Inno Setup installs for your user, adds a Start menu shortcut, and provides an uninstaller. A desktop shortcut is optional. The Microsoft C++ runtime is bundled into the executable; no Visual C++ Redistributable installation is required.
-- **Debian / Ubuntu:** download `reclaim_X.Y.Z_amd64.deb` and run `sudo apt install ./reclaim_X.Y.Z_amd64.deb`. This installs the app launcher and required libraries. Remove it with `sudo apt remove reclaim`. Ubuntu 22.04 / Debian 12 or newer are recommended.
-- **macOS:** open `reclaim-macos-aarch64.pkg` for Apple Silicon or `reclaim-macos-x86_64.pkg` for Intel. The installer places **Reclaim.app** in Applications. These installers are unsigned and the app is ad-hoc signed, not notarized; macOS may require explicit approval in Privacy & Security. Quit Reclaim before upgrading; move the app to Trash to remove it.
+## Updates and troubleshooting
 
-Portable ZIPs remain available. Extract one to a writable folder and run Reclaim. On Linux and macOS, you may need `chmod +x reclaim-*` before the first launch. Linux portable builds require glibc 2.35 or newer and X11/Wayland desktop libraries.
+Reclaim checks for stable updates on startup. Open **Settings → What’s new** for release notes. On Linux and Windows, **Update and restart** verifies the download’s SHA-256 checksum, installs the update, and reopens the app. Finish scanning and recovery first. Update checks contact GitHub and do not send scan data.
 
-Reclaim checks for stable updates on startup. In Settings, **What’s new** shows the release notes. On Linux and Windows, **Update and restart** downloads to a private app-managed cache, verifies the release SHA-256 checksum, installs, and reopens Reclaim automatically. No Save dialog or manual installer launch is required. Scanning and recovery must finish before updating. System-installed Debian copies use PackageKit and may require the normal administrator authentication prompt; the package service must be available. Portable Linux copies update in their writable folder. Installed Windows copies use a verified private helper and the per-user Inno Setup installer in silent mode, preserving the install location and uninstaller metadata. If downloading or installation fails, the error is shown; Windows attempts to reopen the existing app after an installer failure. macOS retains the verified installer download and **Open installer** flow. Checks require access to GitHub and do not send scan data.
+<details>
+<summary>Installation, updates, and drive access</summary>
 
-You can also [build from source](docs/DEVELOPMENT.md#build-and-run).
+- **Portable builds:** extract the ZIP to a writable folder. On Linux and macOS, the executable may need `chmod +x reclaim-*`. Linux portable builds require glibc 2.35 or newer and X11/Wayland desktop libraries.
+- **Linux updates:** installed Debian packages use PackageKit and may show the normal administrator authentication prompt. The package service must be available. Portable copies update in their writable folder.
+- **Windows updates:** the verified per-user installer closes Reclaim, preserves the install location and uninstaller metadata, then starts the installed version.
+- **macOS updates:** download verification is followed by **Open installer**. Quit Reclaim before upgrading.
+- **Uninstall:** use the Windows uninstaller, run `sudo apt remove reclaim` on Debian/Ubuntu, or move Reclaim.app to Trash on macOS. The Windows desktop shortcut is optional.
+- **Drive access:** Linux can request read-only access through UDisks2 and polkit. Windows raw drives may require **Run as administrator**. macOS may require Full Disk Access and administrator privileges. Unlock encrypted volumes before scanning.
 
-The project targets **Linux, Windows, and macOS**. Windows and macOS still need further testing on real devices. Your computer may ask for administrator access or permission to read a drive. Encrypted drives must be unlocked before scanning.
+See [platform permissions](docs/DEVELOPMENT.md#drive-permissions) for details.
 
-## A few things to know
+</details>
 
-- **Recovery is not guaranteed.** Files may be incomplete, damaged, or already overwritten. Always check the recovered files.
-- **Some files may still exist on the drive.** Reclaim’s results are possible recovery candidates, not a list of confirmed deleted files.
-- **Files up to about 64 MB each are supported.** Some file variants are unsupported; the [detailed limits](docs/DEVELOPMENT.md#limits) explain more.
-- **Original folders are not restored.** Many recovered files will have new names.
-- **Save your results before closing.** Scan results are not kept after you quit the app.
+<details>
+<summary>Windows startup errors and crash reports</summary>
 
-The built-in **Recovery guide** explains the process. Open Settings with the gear button, then select the book icon. Settings also contains the language dropdown, appearance choices, and animation switch.
+Windows uses DirectX 12, including the Microsoft software adapter when available, so a VM does not need an OpenGL driver just to open Reclaim. Startup errors, Rust panics, and unhandled Windows exceptions display a native error message.
 
-## For developers
+Diagnostics stay on your computer at `%LOCALAPPDATA%\Reclaim\logs\reclaim.log`, with a fallback under `%TEMP%` if that location cannot be written. The previous log is retained when a log exceeds 1 MiB at startup. The crash guard cannot catch failures before Windows loads the executable or every fatal system failure.
 
-Build instructions, platform permissions, supported formats, tests, and technical limits are in the [developer guide](docs/DEVELOPMENT.md). [Desktop builds](.github/workflows/build.yml) are configured for Linux, Windows, and macOS.
+</details>
 
-The screenshots above are rendered from the current application with sample data. Instructions for refreshing them are in the [screenshot notes](docs/screenshots/README.md).
+## Build and contribute
 
-## License
+Reclaim is written in Rust with [egui](https://github.com/emilk/egui). Install stable Rust and your platform’s native build tools. Linux also needs the [GUI development libraries](docs/DEVELOPMENT.md#build-and-run).
 
-Reclaim is free and open source under the [MIT license](LICENSE).
+```sh
+git clone https://github.com/sudo-py-dev/reclaim.git
+cd reclaim
+cargo run --release --locked
+```
 
-Built with [egui](https://github.com/emilk/egui). Bundled fonts and icons include their [DejaVu](assets/fonts/DejaVu-LICENSE.txt) and [Font Awesome](assets/fonts/FontAwesome-LICENSE.txt) licenses.
+The [developer guide](docs/DEVELOPMENT.md) covers tests, native permissions, architecture details, and recovery limits. For focused reference, see the [code and UI audit](docs/CODE_UI_AUDIT.md), [format research](docs/FILE_FORMAT_RESEARCH.md), [translation notes](locales/README.md), and [screenshot instructions](docs/screenshots/README.md).
 
-## Startup errors and crash reports
-
-Windows uses DirectX 12 rendering, including the Microsoft software adapter when
-available, so a VM does not need an OpenGL driver just to open Reclaim. Startup
-errors, Rust panics, and unhandled Windows exceptions display a native error
-message. Diagnostics are saved to `%LOCALAPPDATA%\Reclaim\logs\reclaim.log`
-(with a fallback under `%TEMP%` if the user-data folder cannot be written).
-The previous log is retained when a log exceeds 1 MiB at startup. Reports stay
-on your computer. A crash guard cannot intercept errors before Windows loads
-the executable or every fatal system failure.
-
-## Publishing a release
+<details>
+<summary>Publishing a release</summary>
 
 Set the package version in `Cargo.toml`, refresh `Cargo.lock`, commit, and push a matching `vX.Y.Z` tag. The [release workflow](.github/workflows/release.yml) tests and builds Linux x86_64, Windows x86_64, and separate Apple Silicon/Intel macOS executables. Size-focused release settings enable full LTO, symbol stripping, and a single code generation unit. ZIP downloads include license notices; raw executables are also published for the updater, with SHA-256 sidecars for manual verification.
 
@@ -113,3 +124,9 @@ The workflow publishes a stable GitHub release with generated release notes afte
 To build a native installer locally after compiling the release executable, run `python3 scripts/package-release.py linux --binary target/release/reclaim` (or use `windows` / `macos` with the matching executable and `--arch aarch64` for Apple Silicon). The script requires `dpkg-deb` on Linux, Inno Setup 6 on Windows, or Apple command-line tools on macOS. Output goes to `dist/`.
 
 File signatures and format-specific recovery limits are documented in [the format research report](docs/FILE_FORMAT_RESEARCH.md). New candidates generally retain the 64 MiB limit; executable overlays and installer payloads may be incomplete.
+
+</details>
+
+## License
+
+[MIT](LICENSE). Bundled fonts and icons include their [DejaVu](assets/fonts/DejaVu-LICENSE.txt) and [Font Awesome](assets/fonts/FontAwesome-LICENSE.txt) license notices.

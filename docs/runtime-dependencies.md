@@ -10,9 +10,10 @@ use OS libraries and desktop services. Those services are allowed API providers;
 this policy does not require the operating system to run in one process.
 
 The updater uses HTTPS through Rust libraries and SHA-256 verification. Unix
-executable replacement uses Rust filesystem operations. Windows updates use a
-manually run installer: the app never launches cmd.exe or a cleanup executable.
-Download links are copied to the clipboard rather than opening a browser helper.
+executable replacement uses Rust filesystem operations. On Windows, Rust code
+starts the verified Inno Setup package directly through the Win32 process API;
+the app never launches cmd.exe, PowerShell, or a cleanup executable. Native OS
+APIs open browser links and installer files without command helpers.
 
 On Linux a native D-Bus session address is required. Process-backed transports,
 autolaunch, and fallback address lists are rejected before starting the GUI.
