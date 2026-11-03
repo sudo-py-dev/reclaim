@@ -10,7 +10,7 @@
 [![Latest release](https://img.shields.io/github/v/release/sudo-py-dev/reclaim?color=3584e4)](https://github.com/sudo-py-dev/reclaim/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-9141ac)](LICENSE)
 
-Linux · Windows · macOS &nbsp; / &nbsp; English & Hebrew &nbsp; / &nbsp; Early preview
+Linux · Windows · macOS &nbsp; / &nbsp; 7 languages &nbsp; / &nbsp; Early preview
 
 </div>
 
@@ -48,7 +48,7 @@ Ubuntu 22.04 / Debian 12 or newer are recommended. Windows includes the Microsof
 
 **Results you can inspect.** File-type icons, search, category filters, image previews for supported formats, and a details dialog help you review candidates before saving. A match is a possible recovery candidate; it does not prove that a file was deleted or is complete.
 
-**A comfortable desktop interface.** Choose light, dark, or System appearance, switch between English and Hebrew with right-to-left layouts, and turn animations on or off. System appearance follows desktop changes while the app runs. A built-in recovery guide is available from the book icon in Settings.
+**A comfortable desktop interface.** Choose light, dark, or System appearance, choose English, Hebrew, Spanish, French, German, Arabic, or Russian, with right-to-left layouts for Hebrew and Arabic, and turn animations on or off. System appearance follows desktop changes while the app runs. A built-in recovery guide is available from the book icon in Settings.
 
 ### What it looks for
 

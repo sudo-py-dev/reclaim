@@ -1193,7 +1193,12 @@ impl Reclaim {
                             &[
                                 (i18n::Preference::System, "System"),
                                 (i18n::Preference::English, "English"),
-                                (i18n::Preference::Hebrew, "Hebrew"),
+                                (i18n::Preference::Hebrew, "עברית"),
+                                (i18n::Preference::Spanish, "Español"),
+                                (i18n::Preference::French, "Français"),
+                                (i18n::Preference::German, "Deutsch"),
+                                (i18n::Preference::Arabic, "العربية"),
+                                (i18n::Preference::Russian, "Русский"),
                             ],
                             width,
                         );

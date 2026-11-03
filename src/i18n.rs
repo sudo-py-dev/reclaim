@@ -1,4 +1,4 @@
-//! English message IDs with Hebrew translations. Business state and filenames
+//! English message IDs with bundled translations. Business state and filenames
 //! remain language-neutral; translate only at presentation boundaries.
 use eframe::egui::{self, Color32, FontFamily, FontId, TextFormat, WidgetText};
 use std::{
@@ -16,12 +16,22 @@ use std::{
 pub enum Language {
     English,
     Hebrew,
+    Spanish,
+    French,
+    German,
+    Arabic,
+    Russian,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preference {
     System,
     English,
     Hebrew,
+    Spanish,
+    French,
+    German,
+    Arabic,
+    Russian,
 }
 static PREFERENCE: AtomicU8 = AtomicU8::new(0);
 thread_local! { static OVERRIDE: Cell<Option<Language>> = const { Cell::new(None) }; }
@@ -37,10 +47,35 @@ fn he() -> &'static BTreeMap<String, String> {
         serde_json::from_str(include_str!("../locales/he.json")).expect("valid Hebrew catalog")
     })
 }
+fn catalog(language: Language) -> &'static BTreeMap<String, String> {
+    macro_rules! bundled {
+        ($file:literal) => {{
+            static C: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+            C.get_or_init(|| {
+                serde_json::from_str(include_str!($file)).expect("valid translation catalog")
+            })
+        }};
+    }
+    match language {
+        Language::English => en(),
+        Language::Hebrew => he(),
+        Language::Spanish => bundled!("../locales/es.json"),
+        Language::French => bundled!("../locales/fr.json"),
+        Language::German => bundled!("../locales/de.json"),
+        Language::Arabic => bundled!("../locales/ar.json"),
+        Language::Russian => bundled!("../locales/ru.json"),
+    }
+}
 pub fn preference() -> Preference {
     match PREFERENCE.load(Ordering::Relaxed) {
         1 => Preference::English,
         2 => Preference::Hebrew,
+        3 => Preference::Spanish,
+        4 => Preference::French,
+        5 => Preference::German,
+        6 => Preference::Arabic,
+        7 => Preference::Russian,
+
         _ => Preference::System,
     }
 }
@@ -51,6 +86,11 @@ pub fn language() -> Language {
     match preference() {
         Preference::English => Language::English,
         Preference::Hebrew => Language::Hebrew,
+        Preference::Spanish => Language::Spanish,
+        Preference::French => Language::French,
+        Preference::German => Language::German,
+        Preference::Arabic => Language::Arabic,
+        Preference::Russian => Language::Russian,
         Preference::System => {
             static SYSTEM: OnceLock<Language> = OnceLock::new();
             *SYSTEM
@@ -59,7 +99,7 @@ pub fn language() -> Language {
     }
 }
 pub fn is_rtl() -> bool {
-    language() == Language::Hebrew
+    matches!(language(), Language::Hebrew | Language::Arabic)
 }
 /// Logical layouts shared by pages, popups, and compound controls.
 pub fn start_align() -> egui::Align {
@@ -88,7 +128,7 @@ pub fn trailing_row() -> egui::Layout {
 }
 
 // egui's compound widgets place their indicator on the physical left. Keep
-// standard button interaction/focus while placing Hebrew indicators at start.
+// standard button interaction/focus while placing RTL indicators at start.
 fn rtl_choice(ui: &mut egui::Ui, selected: bool, text: WidgetText, radio: bool) -> egui::Response {
     let label = text.text().to_owned();
     let response = ui.add(egui::Button::new(text).right_text("      ").frame(false));
@@ -143,18 +183,20 @@ pub fn checkbox(ui: &mut egui::Ui, value: &mut bool, text: WidgetText) -> egui::
     response
 }
 fn language_for_locale(locale: &str) -> Language {
-    if matches!(
-        locale
-            .split(['_', '-', '.'])
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str(),
-        "he" | "iw"
-    ) {
-        Language::Hebrew
-    } else {
-        Language::English
+    match locale
+        .split(['_', '-', '.'])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "he" | "iw" => Language::Hebrew,
+        "es" => Language::Spanish,
+        "fr" => Language::French,
+        "de" => Language::German,
+        "ar" => Language::Arabic,
+        "ru" => Language::Russian,
+        _ => Language::English,
     }
 }
 fn settings_path() -> Option<PathBuf> {
@@ -181,6 +223,12 @@ pub fn init() {
                 match value.as_str() {
                     "en" => 1,
                     "he" => 2,
+                    "es" => 3,
+                    "fr" => 4,
+                    "de" => 5,
+                    "ar" => 6,
+                    "ru" => 7,
+
                     _ => 0,
                 },
                 Ordering::Relaxed,
@@ -193,6 +241,11 @@ pub fn set_preference(value: Preference) -> io::Result<()> {
         Preference::System => 0,
         Preference::English => 1,
         Preference::Hebrew => 2,
+        Preference::Spanish => 3,
+        Preference::French => 4,
+        Preference::German => 5,
+        Preference::Arabic => 6,
+        Preference::Russian => 7,
     };
     PREFERENCE.store(number, Ordering::Relaxed);
     if let Some(path) = settings_path() {
@@ -202,6 +255,11 @@ pub fn set_preference(value: Preference) -> io::Result<()> {
             Preference::System => "\"system\"",
             Preference::English => "\"en\"",
             Preference::Hebrew => "\"he\"",
+            Preference::Spanish => "\"es\"",
+            Preference::French => "\"fr\"",
+            Preference::German => "\"de\"",
+            Preference::Arabic => "\"ar\"",
+            Preference::Russian => "\"ru\"",
         };
         temporary.write_all(text.as_bytes())?;
         temporary.as_file().sync_all()?;
@@ -264,7 +322,8 @@ fn translate(text: &str, language: Language, depth: usize) -> String {
     if language == Language::English || depth > 5 {
         return text.into();
     }
-    if let Some(value) = he().get(text) {
+    let translations = catalog(language);
+    if let Some(value) = translations.get(text) {
         return value.clone();
     }
     // Longer patterns take precedence over generic count labels.
@@ -289,9 +348,11 @@ fn translate(text: &str, language: Language, depth: usize) -> String {
                 .replace("candidates", "candidate")
         };
         let translated = if single {
-            he().get(&singular).or_else(|| he().get(key))
+            translations
+                .get(&singular)
+                .or_else(|| translations.get(key))
         } else {
-            he().get(key)
+            translations.get(key)
         };
         let Some(translated) = translated else {
             continue;
@@ -356,8 +417,8 @@ pub fn setup_fonts(ctx: &egui::Context) {
     }
     ctx.set_fonts(fonts);
 }
-fn hebrew(text: &str) -> bool {
-    text.chars().any(|c| ('\u{0590}'..='\u{05ff}').contains(&c))
+fn contains_rtl(text: &str) -> bool {
+    text.chars().any(|c| ('\u{0590}'..='\u{08ff}').contains(&c))
 }
 fn bidi_job(
     ui: &egui::Ui,
@@ -458,11 +519,17 @@ fn formatted_widget(
         egui::FontSelection::Default,
         egui::Align::Center,
     );
-    if !hebrew(&logical) {
+    if !contains_rtl(&logical) {
         if logical == text.text() {
             return text;
         }
-        return logical.into();
+        let mut job = (*original).clone();
+        job.text = logical;
+        job.sections.truncate(1);
+        if let Some(section) = job.sections.first_mut() {
+            section.byte_range = egui::text::ByteIndex(0)..egui::text::ByteIndex(job.text.len());
+        }
+        return WidgetText::LayoutJob(std::sync::Arc::new(job));
     }
     let format = original
         .sections
@@ -487,7 +554,7 @@ pub fn raw_widget(
     color: Color32,
     width: f32,
 ) -> WidgetText {
-    if !hebrew(text) {
+    if !contains_rtl(text) {
         return egui::RichText::new(text).font(font).color(color).into();
     }
     let mut job = bidi_job(
@@ -636,22 +703,63 @@ pub fn with_language<R>(language: Language, f: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const LANGUAGES: [Language; 7] = [
+        Language::English,
+        Language::Hebrew,
+        Language::Spanish,
+        Language::French,
+        Language::German,
+        Language::Arabic,
+        Language::Russian,
+    ];
+
     #[test]
     fn catalogs_cover_all_keys_and_keep_format_arguments() {
-        assert_eq!(
-            en().keys().collect::<Vec<_>>(),
-            he().keys().collect::<Vec<_>>()
-        );
-        for (key, translation) in he() {
-            assert!(!translation.trim().is_empty());
-            let mut source: Vec<_> = fields(key).into_iter().map(|(_, _, key)| key).collect();
-            let mut target: Vec<_> = fields(translation)
-                .into_iter()
-                .map(|(_, _, key)| key)
-                .collect();
-            source.sort();
-            target.sort();
-            assert_eq!(source, target, "Placeholder mismatch: {key}");
+        for language in LANGUAGES {
+            let translations = catalog(language);
+            assert_eq!(
+                en().keys().collect::<Vec<_>>(),
+                translations.keys().collect::<Vec<_>>(),
+                "{language:?}"
+            );
+            for (key, translation) in translations {
+                assert!(!translation.trim().is_empty());
+                let mut source: Vec<_> = fields(key).into_iter().map(|(_, _, key)| key).collect();
+                let mut target: Vec<_> = fields(translation)
+                    .into_iter()
+                    .map(|(_, _, key)| key)
+                    .collect();
+                source.sort();
+                target.sort();
+                assert_eq!(
+                    source, target,
+                    "Placeholder mismatch in {language:?}: {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn new_locales_translate_nested_messages_and_preserve_paths() {
+        for (locale, language) in [
+            ("es_MX.UTF-8", Language::Spanish),
+            ("fr-CA", Language::French),
+            ("de_DE", Language::German),
+            ("ar-SA", Language::Arabic),
+            ("ru_RU", Language::Russian),
+        ] {
+            assert_eq!(language_for_locale(locale), language);
+            assert_eq!(
+                translate("/media/user/Photos", language, 0),
+                "/media/user/Photos"
+            );
+            let error = translate("Scan failed: Invalid source offset", language, 0);
+            assert!(!error.contains("Scan failed"));
+            assert!(error.contains(&translate("Invalid source offset", language, 0)));
+            assert!(translate("2 files", language, 0).contains('2'));
+            with_language(language, || {
+                assert_eq!(is_rtl(), language == Language::Arabic)
+            });
         }
     }
     #[test]
@@ -675,8 +783,8 @@ mod tests {
         );
     }
     #[test]
-    fn tooltip_width_follows_content_in_english_and_hebrew() {
-        for language in [Language::English, Language::Hebrew] {
+    fn tooltip_width_follows_content_in_all_languages() {
+        for language in LANGUAGES {
             with_language(language, || {
                 for (text, short) in [
                     ("Deselect all".to_owned(), true),

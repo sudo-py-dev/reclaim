@@ -520,8 +520,16 @@ fn long_drive_list_keeps_disk_image_action_visible() {
 }
 
 #[test]
-fn settings_dialog_renders_in_both_languages_and_closes_with_escape() {
-    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+fn settings_dialog_renders_in_all_languages_and_closes_with_escape() {
+    for language in [
+        i18n::Language::English,
+        i18n::Language::Hebrew,
+        i18n::Language::Spanish,
+        i18n::Language::French,
+        i18n::Language::German,
+        i18n::Language::Arabic,
+        i18n::Language::Russian,
+    ] {
         i18n::with_language(language, || {
             for (dark, size, category) in [false, true]
                 .into_iter()
@@ -736,7 +744,15 @@ fn guide_next_steps_finish_at_source_selection() {
 
 #[test]
 fn animation_switch_supports_keyboard_activation_in_both_directions() {
-    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+    for language in [
+        i18n::Language::English,
+        i18n::Language::Hebrew,
+        i18n::Language::Spanish,
+        i18n::Language::French,
+        i18n::Language::German,
+        i18n::Language::Arabic,
+        i18n::Language::Russian,
+    ] {
         i18n::with_language(language, || {
             let ctx = egui::Context::default();
             theme::setup(&ctx);
@@ -953,7 +969,15 @@ fn scan_footer_has_one_stop_control_then_enables_recovery() {
 
 #[test]
 fn file_type_icons_open_details_with_dates_and_unknown_deletion_time() {
-    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+    for language in [
+        i18n::Language::English,
+        i18n::Language::Hebrew,
+        i18n::Language::Spanish,
+        i18n::Language::French,
+        i18n::Language::German,
+        i18n::Language::Arabic,
+        i18n::Language::Russian,
+    ] {
         i18n::with_language(language, || {
             let ctx = egui::Context::default();
             theme::setup(&ctx);
@@ -1067,8 +1091,16 @@ fn file_type_icons_open_details_with_dates_and_unknown_deletion_time() {
 }
 
 #[test]
-fn short_hover_hints_use_compact_popups_in_both_languages() {
-    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+fn short_hover_hints_use_compact_popups_in_all_languages() {
+    for language in [
+        i18n::Language::English,
+        i18n::Language::Hebrew,
+        i18n::Language::Spanish,
+        i18n::Language::French,
+        i18n::Language::German,
+        i18n::Language::Arabic,
+        i18n::Language::Russian,
+    ] {
         i18n::with_language(language, || {
             let ctx = egui::Context::default();
             theme::setup(&ctx);
@@ -1179,7 +1211,15 @@ fn short_hover_hints_use_compact_popups_in_both_languages() {
 
 #[test]
 fn expanded_guide_keeps_step_buttons_and_navigation_fixed() {
-    for language in [i18n::Language::English, i18n::Language::Hebrew] {
+    for language in [
+        i18n::Language::English,
+        i18n::Language::Hebrew,
+        i18n::Language::Spanish,
+        i18n::Language::French,
+        i18n::Language::German,
+        i18n::Language::Arabic,
+        i18n::Language::Russian,
+    ] {
         i18n::with_language(language, || {
             let ctx = egui::Context::default();
             theme::setup(&ctx);
