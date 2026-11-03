@@ -1,4 +1,4 @@
 disallowed-methods = [
     { path = "std::process::Command::new", reason = "Runtime functionality must use Rust implementations or native APIs, not external commands." },
-    { path = "std::os::unix::process::CommandExt::exec", reason = "Do not replace the app with an external command." },
+    { path = "std::os::unix::process::CommandExt::exec", allow-invalid = true, reason = "Do not replace the app with an external command." },
 ]

@@ -111,7 +111,7 @@ impl Drop for Child {
 }
 
 impl Child {
-    #[cfg(any(windows, test))]
+    #[cfg(test)]
     pub fn wait(self) -> Result<u32, String> {
         #[cfg(target_os = "linux")]
         {
