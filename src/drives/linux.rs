@@ -1,6 +1,6 @@
 //! Native Linux discovery. Sizes/topology come from sysfs, mounts from the
 //! current namespace, and optional udev data supplies labels/filesystem types.
-use super::Drive;
+use super::{Destination, Drive};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -267,6 +267,96 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
     Ok(drives)
 }
 
+/// Compares device numbers rather than paths, so symlinks, bind mounts and
+/// dm-crypt/LVM/RAID layers all resolve to the physical disks underneath.
+pub fn destination(source: &Path, folder: &Path) -> Destination {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let Ok(source) = fs::metadata(source) else {
+        return Destination::Unknown;
+    };
+    // Writing next to a disk image never changes the image's own bytes.
+    if !source.file_type().is_block_device() {
+        return Destination::Separate;
+    }
+    let Ok(folder) = fs::metadata(folder) else {
+        return Destination::Unknown;
+    };
+    let number = |dev| format!("{}:{}", libc::major(dev), libc::minor(dev));
+    destination_at(
+        Path::new("/sys/class/block"),
+        Path::new("/sys/dev/block"),
+        Path::new("/proc/self/mountinfo"),
+        &number(source.rdev()),
+        &number(folder.dev()),
+    )
+}
+
+fn destination_at(
+    class: &Path,
+    numbers: &Path,
+    mounts: &Path,
+    source: &str,
+    folder: &str,
+) -> Destination {
+    let source = whole_disks(&numbers.join(source));
+    let mut folder_node = numbers.join(folder);
+    if !folder_node.exists() {
+        // Btrfs and similar filesystems report an anonymous device number;
+        // their mount entry still names the block device that backs them.
+        let Some(device) = fs::read_to_string(mounts).ok().and_then(|text| {
+            text.lines().find_map(|line| {
+                let fields: Vec<_> = line.split_whitespace().collect();
+                let separator = fields.iter().position(|f| *f == "-")?;
+                (fields.get(2) == Some(&folder))
+                    .then(|| fields.get(separator + 2).map(|s| unescape(s, true)))?
+            })
+        }) else {
+            return Destination::Unknown;
+        };
+        let device = fs::canonicalize(&device).unwrap_or_else(|_| device.into());
+        let Some(name) = device.file_name() else {
+            return Destination::Unknown;
+        };
+        folder_node = class.join(name);
+    }
+    let folder = whole_disks(&folder_node);
+    if source.is_empty() || folder.is_empty() {
+        Destination::Unknown
+    } else if source.is_disjoint(&folder) {
+        Destination::Separate
+    } else {
+        Destination::SameDrive
+    }
+}
+
+/// The physical disks a sysfs block node is stored on.
+fn whole_disks(node: &Path) -> HashSet<PathBuf> {
+    fn visit(node: &Path, disks: &mut HashSet<PathBuf>, depth: usize) {
+        let Ok(mut real) = fs::canonicalize(node) else {
+            return;
+        };
+        if real.join("partition").exists() {
+            let Some(parent) = real.parent() else {
+                return;
+            };
+            real = parent.to_path_buf();
+        }
+        let layers: Vec<_> = fs::read_dir(real.join("slaves"))
+            .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+            .unwrap_or_default();
+        if layers.is_empty() || depth > 16 {
+            disks.insert(real);
+        } else {
+            for layer in layers {
+                visit(&layer, disks, depth + 1);
+            }
+        }
+    }
+    let mut disks = HashSet::new();
+    visit(node, &mut disks, 0);
+    disks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +409,76 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn recovery_folders_on_the_scanned_physical_disk_are_detected() {
+        let f = Fixture::new();
+        fs::create_dir_all(f.0.join("numbers")).unwrap();
+        let node = |name: &str, number: &str| {
+            f.write(&format!("devices/{name}/dev"), number);
+            if name.contains('/') {
+                f.write(&format!("devices/{name}/partition"), "1");
+            }
+            let short = name.rsplit('/').next().unwrap();
+            symlink(
+                f.0.join(format!("devices/{name}")),
+                f.0.join(format!("sys/{short}")),
+            )
+            .unwrap();
+            symlink(
+                f.0.join(format!("devices/{name}")),
+                f.0.join(format!("numbers/{number}")),
+            )
+            .unwrap();
+        };
+        node("sda", "8:0");
+        node("sda/sda1", "8:1");
+        node("sda/sda2", "8:2");
+        node("sdb", "8:16");
+        node("sdb/sdb1", "8:17");
+        // An encrypted volume opened from the second partition of sda.
+        node("dm-90", "253:90");
+        fs::create_dir_all(f.0.join("devices/dm-90/slaves")).unwrap();
+        symlink(
+            f.0.join("devices/sda/sda2"),
+            f.0.join("devices/dm-90/slaves/sda2"),
+        )
+        .unwrap();
+        f.write(
+            "mountinfo",
+            "40 1 0:42 / /home rw - btrfs /dev/dm-90 rw\n41 1 0:43 / /mnt/sdb rw - btrfs /dev/sdb1 rw\n",
+        );
+        let check = |source, folder| {
+            destination_at(
+                &f.0.join("sys"),
+                &f.0.join("numbers"),
+                &f.0.join("mountinfo"),
+                source,
+                folder,
+            )
+        };
+        assert_eq!(check("8:0", "8:1"), Destination::SameDrive);
+        assert_eq!(check("8:1", "8:2"), Destination::SameDrive);
+        assert_eq!(check("8:1", "253:90"), Destination::SameDrive);
+        assert_eq!(check("8:17", "0:42"), Destination::Separate);
+        assert_eq!(check("8:2", "0:42"), Destination::SameDrive);
+        assert_eq!(check("8:16", "0:43"), Destination::SameDrive);
+        assert_eq!(check("8:17", "8:1"), Destination::Separate);
+        assert_eq!(check("8:1", "0:99"), Destination::Unknown);
+    }
+
+    #[test]
+    fn disk_images_are_never_overwritten_by_recovery() {
+        let image = std::env::temp_dir().join(format!("reclaim-image-{}", std::process::id()));
+        fs::write(&image, b"image").unwrap();
+        let result = destination(&image, image.parent().unwrap());
+        let _ = fs::remove_file(&image);
+        assert_eq!(result, Destination::Separate);
+        assert_eq!(
+            destination(Path::new("/nonexistent/reclaim-source"), Path::new("/")),
+            Destination::Unknown
+        );
     }
 
     #[test]

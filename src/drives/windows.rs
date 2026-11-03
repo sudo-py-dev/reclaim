@@ -1,8 +1,13 @@
 //! Win32 discovery without PowerShell, WMI, or helper executables.
-use super::Drive;
+use super::{Destination, Drive};
 use std::{
+    collections::HashSet,
     fs::File,
-    os::windows::io::{AsRawHandle, FromRawHandle},
+    os::windows::{
+        ffi::OsStrExt,
+        io::{AsRawHandle, FromRawHandle},
+    },
+    path::Path,
     ptr,
 };
 use windows_sys::Win32::{
@@ -242,4 +247,54 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         .collect();
     rows.retain(|row| !hidden.contains(&row.path));
     Ok(rows)
+}
+/// Physical disk numbers behind a volume device such as `\\.\C:`.
+fn volume_disks(path: &str) -> Option<HashSet<u32>> {
+    let extents = query(&open(path)?, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, &[])?;
+    let first = std::mem::offset_of!(VOLUME_DISK_EXTENTS, Extents);
+    let count = u32_at(&extents, 0)? as usize;
+    let disks: HashSet<_> = (0..count)
+        .filter_map(|i| u32_at(&extents, first + i * std::mem::size_of::<DISK_EXTENT>()))
+        .collect();
+    (!disks.is_empty()).then_some(disks)
+}
+/// Physical disk numbers behind the volume a folder is stored on, including
+/// volumes mounted into folders rather than drive letters.
+fn folder_disks(folder: &Path) -> Option<HashSet<u32>> {
+    let name: Vec<u16> = folder.as_os_str().encode_wide().chain([0]).collect();
+    let mut mount = vec![0u16; 32768];
+    let mut volume = vec![0u16; 64];
+    // SAFETY: name is NUL-terminated; output buffers match the given lengths.
+    let ok = unsafe {
+        GetVolumePathNameW(name.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) != 0
+            && GetVolumeNameForVolumeMountPointW(
+                mount.as_ptr(),
+                volume.as_mut_ptr(),
+                volume.len() as u32,
+            ) != 0
+    };
+    if !ok {
+        return None;
+    }
+    // The volume GUID path names the volume device once its slash is removed.
+    volume_disks(text(&volume).trim_end_matches('\\'))
+}
+pub fn destination(source: &Path, folder: &Path) -> Destination {
+    let source = source.to_string_lossy();
+    // Writing next to a disk image never changes the image's own bytes.
+    let Some(device) = source.strip_prefix(r"\\.\") else {
+        return Destination::Separate;
+    };
+    let source = match device
+        .strip_prefix("PhysicalDrive")
+        .and_then(|n| n.parse().ok())
+    {
+        Some(number) => Some(HashSet::from([number])),
+        None => volume_disks(&source),
+    };
+    match (source, folder_disks(folder)) {
+        (Some(source), Some(folder)) if source.is_disjoint(&folder) => Destination::Separate,
+        (Some(_), Some(_)) => Destination::SameDrive,
+        _ => Destination::Unknown,
+    }
 }

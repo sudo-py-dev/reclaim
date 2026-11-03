@@ -281,5 +281,9 @@
   "Protect your recoverable data": "הגנה על הנתונים שניתן לשחזר",
   "Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive.": "שמירת קבצים משוחזרים באותו כונן פיזי שנסרק עלולה לדרוס נתונים שמנסים לשחזר ולפגוע בהם לצמיתות. יש לבחור תיקייה בכונן פיזי אחר. יש להמשיך רק אם היעד נמצא בכונן אחר.",
   "Save files": "שמירת קבצים",
-  "Cancel": "ביטול"
+  "Cancel": "ביטול",
+  "This folder is on the drive you scanned": "התיקייה הזו נמצאת בכונן שנסרק",
+  "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.": "שמירה כאן עלולה לדרוס את הקבצים המחוקים שמנסים לשחזר ולפגוע בהם לצמיתות. יש לבחור תיקייה בכונן פיזי אחר, כמו כונן USB.",
+  "Destination": "יעד",
+  "Choose another folder": "בחירת תיקייה אחרת"
 }

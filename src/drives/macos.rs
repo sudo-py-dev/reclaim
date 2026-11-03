@@ -1,5 +1,5 @@
 //! IOKit/Disk Arbitration discovery; no diskutil or plist conversion process.
-use super::Drive;
+use super::{Destination, Drive};
 use core_foundation_sys::{base::*, dictionary::*, number::*, string::*, url::*};
 use std::{
     collections::{HashMap, HashSet},
@@ -306,6 +306,48 @@ pub fn discover() -> Result<Vec<Drive>, String> {
     Ok(rows)
 }
 
+/// The whole-disk identifier (`disk3`) of a device path such as `/dev/rdisk3s1`.
+fn whole_disk(device: &str) -> Option<&str> {
+    let id = device.strip_prefix("/dev/")?;
+    let id = id.strip_prefix('r').unwrap_or(id);
+    if !valid_id(id) {
+        return None;
+    }
+    let digits = id["disk".len()..]
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .count();
+    Some(&id[.."disk".len() + digits])
+}
+
+pub fn destination(source: &std::path::Path, folder: &std::path::Path) -> Destination {
+    use std::os::unix::ffi::OsStrExt;
+    let source = source.to_string_lossy();
+    // Writing next to a disk image never changes the image's own bytes.
+    if !source.starts_with("/dev/") {
+        return Destination::Separate;
+    }
+    let (Some(source), Ok(folder)) = (
+        whole_disk(&source),
+        CString::new(folder.as_os_str().as_bytes()),
+    ) else {
+        return Destination::Unknown;
+    };
+    let mut mount: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: folder is NUL-terminated and mount is a writable statfs.
+    if unsafe { libc::statfs(folder.as_ptr(), &mut mount) } != 0 {
+        return Destination::Unknown;
+    }
+    let from = unsafe { CStr::from_ptr(mount.f_mntfromname.as_ptr()) }.to_string_lossy();
+    // APFS volumes sit in a synthesized container whose physical store has a
+    // different number, so differing identifiers do not prove separation.
+    if whole_disk(&from) == Some(source) {
+        Destination::SameDrive
+    } else {
+        Destination::Unknown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +359,13 @@ mod tests {
         for id in ["../../disk0", "disks1", "disk1ss2", "disk1s"] {
             assert!(!valid_id(id));
         }
+    }
+    #[test]
+    fn slices_and_raw_devices_resolve_to_their_whole_disk() {
+        assert_eq!(whole_disk("/dev/disk12"), Some("disk12"));
+        assert_eq!(whole_disk("/dev/rdisk3s1"), Some("disk3"));
+        assert_eq!(whole_disk("/dev/disk3s1s1"), Some("disk3"));
+        assert_eq!(whole_disk("/dev/sda"), None);
+        assert_eq!(whole_disk("disk3"), None);
     }
 }

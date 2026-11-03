@@ -1550,3 +1550,64 @@ fn recovery_reads_offsets_beyond_the_unused_byte_total() {
         b"data"
     );
 }
+
+#[test]
+fn recovery_folder_dialog_blocks_saving_onto_the_scanned_drive() {
+    let size = [920.0, 740.0];
+    let ctx = egui::Context::default();
+    theme::setup(&ctx);
+    let mut app = Reclaim::default();
+    app.scanned_source = Some("/dev/example".into());
+    let labels = |app: &mut Reclaim| {
+        let mut output = ctx.run_ui(input(size), |ui| app.render(ui));
+        output.textures_delta.clear();
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        texts
+    };
+
+    app.recovery_folder = Some(("/media/scanned".into(), drives::Destination::SameDrive));
+    // Modals measure themselves on their first frame.
+    labels(&mut app);
+    let texts = labels(&mut app);
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == "This folder is on the drive you scanned")
+    );
+    assert!(texts.iter().any(|t| t == "Choose another folder"));
+    assert!(!texts.iter().any(|t| t == "Save files"));
+
+    app.recovery_folder = Some(("/media/other".into(), drives::Destination::Unknown));
+    let texts = labels(&mut app);
+    assert!(texts.iter().any(|t| t == "Protect your recoverable data"));
+    assert!(texts.iter().any(|t| t == "Save files"));
+
+    // Escape dismisses without saving.
+    let mut escape = input(size);
+    escape.events = vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    }];
+    ctx.run_ui(escape, |ui| app.render(ui))
+        .drop_without_applying_deltas();
+    assert!(app.recovery_folder.is_none());
+    assert!(!app.exporting);
+
+    // A disk image cannot be overwritten by saving beside it, so no dialog.
+    let image = std::env::temp_dir().join(format!("reclaim-dialog-{}.img", std::process::id()));
+    std::fs::write(&image, b"image").unwrap();
+    app.scanned_source = Some(image.clone());
+    app.review_recovery_folder(std::env::temp_dir());
+    let _ = std::fs::remove_file(&image);
+    assert!(app.recovery_folder.is_none());
+}

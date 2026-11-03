@@ -72,6 +72,7 @@ struct Reclaim {
     exporting: bool,
     started: Option<std::time::Instant>,
     source_stamp: Option<(u64, Option<std::time::SystemTime>)>,
+    recovery_folder: Option<(PathBuf, drives::Destination)>,
 }
 impl Default for Reclaim {
     fn default() -> Self {
@@ -117,6 +118,7 @@ impl Default for Reclaim {
             exporting: false,
             started: None,
             source_stamp: None,
+            recovery_folder: None,
         }
     }
 }
@@ -226,6 +228,26 @@ impl Reclaim {
             .filter(|&index| self.results[index].selected)
             .map(|index| (self.results[index].clone(), index + 1))
             .collect()
+    }
+    fn choose_recovery_folder(&mut self) {
+        let Some(directory) = rfd::FileDialog::new()
+            .set_title(i18n::t("Save to a different physical drive"))
+            .pick_folder()
+        else {
+            return;
+        };
+        self.review_recovery_folder(directory);
+    }
+    /// Saves straight away only when the folder provably cannot overwrite the
+    /// scanned data; otherwise the destination dialog explains the risk.
+    fn review_recovery_folder(&mut self, directory: PathBuf) {
+        let Some(source) = &self.scanned_source else {
+            return;
+        };
+        match drives::destination(source, &directory) {
+            drives::Destination::Separate => self.export(directory),
+            destination => self.recovery_folder = Some((directory, destination)),
+        }
     }
     fn export(&mut self, directory: PathBuf) {
         let Some(source) = self.scanned_source.clone() else {
@@ -1042,6 +1064,84 @@ impl Reclaim {
             self.details_file = None;
         }
     }
+    fn recovery_folder_view(&mut self, ctx: &egui::Context) {
+        enum Choice {
+            Save,
+            Another,
+            Cancel,
+        }
+        let Some((directory, destination)) = self.recovery_folder.clone() else {
+            return;
+        };
+        // A proven match leaves nothing for the user to confirm, so saving is
+        // offered only when the drive could not be identified.
+        let same = destination == drives::Destination::SameDrive;
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("recovery_folder"))
+            .frame(
+                egui::Frame::popup(&ctx.global_style())
+                    .inner_margin(20.0)
+                    .corner_radius(14),
+            )
+            .show(ctx, |ui| {
+                ui.set_width((ctx.viewport_rect().width() - 80.0).clamp(260.0, 440.0));
+                ui.with_layout(i18n::column(), |ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 40.0),
+                        i18n::row(),
+                        |ui| {
+                            let (rect, _) =
+                                ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::hover());
+                            theme::paint_symbol(
+                                ui,
+                                rect,
+                                theme::Icon::Warning,
+                                20.0,
+                                ui.visuals().warn_fg_color,
+                            );
+                            ui.t_heading(if same {
+                                "This folder is on the drive you scanned"
+                            } else {
+                                "Protect your recoverable data"
+                            });
+                        },
+                    );
+                    ui.t_label(if same {
+                        "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive."
+                    } else {
+                        "Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive."
+                    });
+                    theme::detail_row(ui, "Destination", &directory.display().to_string());
+                    ui.add_space(8.0);
+                    ui.with_layout(i18n::trailing_row(), |ui| {
+                        if ui
+                            .add(theme::primary(ui, "Choose another folder").min_size(egui::vec2(0.0, 36.0)))
+                            .clicked()
+                        {
+                            choice = Some(Choice::Another);
+                        }
+                        if !same && ui.t_button("Save files").clicked() {
+                            choice = Some(Choice::Save);
+                        }
+                        if ui.t_button("Cancel").clicked() {
+                            choice = Some(Choice::Cancel);
+                        }
+                    });
+                });
+            });
+        if choice.is_none() && modal.should_close() {
+            choice = Some(Choice::Cancel);
+        }
+        let Some(choice) = choice else {
+            return;
+        };
+        self.recovery_folder = None;
+        match choice {
+            Choice::Save => self.export(directory),
+            Choice::Another => self.choose_recovery_folder(),
+            Choice::Cancel => {}
+        }
+    }
     fn open_link(&mut self, ctx: &egui::Context, url: &'static str) {
         if self.link_receiver.is_some() {
             return;
@@ -1689,22 +1789,8 @@ impl Reclaim {
                                         egui::vec2(152.0, 38.0),
                                     )
                                     .clicked()
-                                    && let Some(directory) = rfd::FileDialog::new()
-                                        .set_title(i18n::t("Save to a different physical drive"))
-                                        .pick_folder()
                                 {
-                                    let confirmed = rfd::MessageDialog::new()
-                                        .set_title(i18n::t("Protect your recoverable data"))
-                                        .set_description(i18n::t("Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive."))
-                                        .set_level(rfd::MessageLevel::Warning)
-                                        .set_buttons(rfd::MessageButtons::OkCancelCustom(
-                                            i18n::t("Save files"),
-                                            i18n::t("Cancel"),
-                                        ))
-                                        .show();
-                                    if confirmed == rfd::MessageDialogResult::Custom(i18n::t("Save files")) {
-                                        self.export(directory);
-                                    }
+                                    self.choose_recovery_folder();
                                 }
                             });
                         },
@@ -1769,6 +1855,7 @@ impl Reclaim {
         window::resize(ui);
         self.settings_view(ui.ctx());
         self.file_details_view(ui.ctx());
+        self.recovery_folder_view(ui.ctx());
     }
 }
 impl eframe::App for Reclaim {

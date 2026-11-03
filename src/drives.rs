@@ -33,6 +33,27 @@ impl Drive {
     }
 }
 
+/// Whether saving into a folder could overwrite the scanned source's data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Destination {
+    /// The folder is stored on a physical drive the source lives on.
+    SameDrive,
+    /// The folder cannot share storage with the source: another drive, or the
+    /// source is a disk image whose contents ordinary writes never change.
+    Separate,
+    /// The backing drives could not be determined; the user must decide.
+    Unknown,
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+pub fn destination(source: &Path, _folder: &Path) -> Destination {
+    if source.is_file() {
+        Destination::Separate
+    } else {
+        Destination::Unknown
+    }
+}
+
 mod monitor;
 pub use monitor::{DriveMonitor, watch};
 
@@ -43,11 +64,11 @@ mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "linux")]
-pub use linux::discover;
+pub use linux::{destination, discover};
 #[cfg(target_os = "macos")]
-pub use macos::discover;
+pub use macos::{destination, discover};
 #[cfg(target_os = "windows")]
-pub use windows::discover;
+pub use windows::{destination, discover};
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 pub fn discover() -> Result<Vec<Drive>, String> {
     Ok(Vec::new())
