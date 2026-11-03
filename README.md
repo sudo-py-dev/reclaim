@@ -1,8 +1,8 @@
 <div align="center">
   <img src="assets/icons/reclaim.png" alt="Reclaim app icon" width="88">
   <h1>Reclaim</h1>
-  <p><strong>Find lost files. Review what’s found. Save what matters.</strong></p>
-  <p>A desktop app for recovering photos, documents, and other files from unused space on drives and volume images.</p>
+  <p><strong>Deleted file recovery, just a few clicks away.</strong></p>
+  <p>Accidentally deleted something important? Reclaim helps you recover photos, documents, and other files through a simple desktop interface. Choose your drive, scan for files, and save what you find to another drive.</p>
 
 [Download Reclaim](https://github.com/sudo-py-dev/reclaim/releases/latest) · [Recovery guide](#recover-in-four-steps) · [Developer docs](docs/DEVELOPMENT.md)
 
