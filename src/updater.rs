@@ -37,6 +37,20 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
+fn check_error(error: ureq::Error) -> String {
+    log::warn!("Could not check GitHub releases: {error}");
+    match error {
+        ureq::Error::Io(_)
+        | ureq::Error::HostNotFound
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::Timeout(_) => {
+            "Could not connect to the update server. Check your internet connection and try again."
+        }
+        _ => "Could not check for updates. Please try again later.",
+    }
+    .into()
+}
+
 pub fn check() -> Result<Option<Release>, String> {
     let mut response = agent()
         .get(&format!(
@@ -45,13 +59,13 @@ pub fn check() -> Result<Option<Release>, String> {
         .header("User-Agent", concat!("Reclaim/", env!("CARGO_PKG_VERSION")))
         .header("Accept", "application/vnd.github+json")
         .call()
-        .map_err(|e| format!("Could not check GitHub releases: {e}"))?;
+        .map_err(check_error)?;
     let json = response
         .body_mut()
         .with_config()
         .limit(2 * 1024 * 1024)
         .read_to_string()
-        .map_err(|e| e.to_string())?;
+        .map_err(check_error)?;
     let json: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
     let version = semver::Version::parse(
         json["tag_name"]
@@ -527,5 +541,33 @@ mod tests {
         r = release();
         r["assets"][0]["size"] = (MAX_BINARY + 1).into();
         assert!(parse_release(&r, "test").is_err());
+    }
+}
+
+#[cfg(test)]
+mod connection_message_tests {
+    use super::check_error;
+
+    #[test]
+    fn connection_errors_give_actionable_messages_without_system_details() {
+        let expected =
+            "Could not connect to the update server. Check your internet connection and try again.";
+        for error in [
+            ureq::Error::Io(std::io::Error::other(
+                "failed to lookup address information: Temporary failure in name resolution",
+            )),
+            ureq::Error::HostNotFound,
+            ureq::Error::ConnectionFailed,
+        ] {
+            assert_eq!(check_error(error), expected);
+        }
+    }
+
+    #[test]
+    fn server_errors_do_not_claim_the_user_is_offline() {
+        assert_eq!(
+            check_error(ureq::Error::StatusCode(503)),
+            "Could not check for updates. Please try again later."
+        );
     }
 }

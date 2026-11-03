@@ -285,5 +285,7 @@
   "This folder is on the drive you scanned": "התיקייה הזו נמצאת בכונן שנסרק",
   "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.": "שמירה כאן עלולה לדרוס את הקבצים המחוקים שמנסים לשחזר ולפגוע בהם לצמיתות. יש לבחור תיקייה בכונן פיזי אחר, כמו כונן USB.",
   "Destination": "יעד",
-  "Choose another folder": "בחירת תיקייה אחרת"
+  "Choose another folder": "בחירת תיקייה אחרת",
+  "Could not connect to the update server. Check your internet connection and try again.": "לא ניתן להתחבר לשרת העדכונים. יש לבדוק את החיבור לאינטרנט ולנסות שוב.",
+  "Could not check for updates. Please try again later.": "לא ניתן לבדוק אם קיימים עדכונים. יש לנסות שוב מאוחר יותר."
 }
