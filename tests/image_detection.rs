@@ -169,7 +169,7 @@ fn reports_candidate_location_before_validation_and_allows_cancellation() {
             cancel.store(true, Ordering::Relaxed);
         }
         Event::Found(_) => found = true,
-        Event::Progress(_) | Event::UnusedSpace { .. } => {}
+        Event::Progress(_) | Event::UnusedSpace { .. } | Event::Unreadable { .. } => {}
     })
     .unwrap();
     assert!(checking);

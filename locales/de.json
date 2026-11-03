@@ -287,5 +287,10 @@
   "Destination": "Ziel",
   "Choose another folder": "Anderen Ordner auswählen",
   "Could not connect to the update server. Check your internet connection and try again.": "Keine Verbindung zum Update-Server. Prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
-  "Could not check for updates. Please try again later.": "Updates konnten nicht geprüft werden. Versuchen Sie es später erneut."
+  "Could not check for updates. Please try again later.": "Updates konnten nicht geprüft werden. Versuchen Sie es später erneut.",
+  "The scan ended unexpectedly. You can recover the files already found or scan again.": "Der Scan wurde unerwartet beendet. Sie können die bereits gefundenen Dateien wiederherstellen oder erneut scannen.",
+  "Recovery ended unexpectedly. Check the destination folder before trying again.": "Die Wiederherstellung wurde unerwartet beendet. Prüfen Sie den Zielordner, bevor Sie es erneut versuchen.",
+  "Scan finished with unreadable areas. Some files could not be checked.": "Der Scan wurde mit unlesbaren Bereichen beendet. Einige Dateien konnten nicht geprüft werden.",
+  "Unreadable areas were skipped. Files overlapping these areas are excluded.": "Unlesbare Bereiche wurden übersprungen. Dateien, die diese Bereiche überlappen, werden ausgeschlossen.",
+  "Unreadable source ranges": "Unlesbare Quellbereiche"
 }

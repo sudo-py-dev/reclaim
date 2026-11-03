@@ -287,5 +287,10 @@
   "Destination": "Назначение",
   "Choose another folder": "Выбрать другую папку",
   "Could not connect to the update server. Check your internet connection and try again.": "Не удалось подключиться к серверу обновлений. Проверьте подключение к интернету и повторите попытку.",
-  "Could not check for updates. Please try again later.": "Не удалось проверить обновления. Повторите попытку позже."
+  "Could not check for updates. Please try again later.": "Не удалось проверить обновления. Повторите попытку позже.",
+  "The scan ended unexpectedly. You can recover the files already found or scan again.": "Сканирование неожиданно завершилось. Можно восстановить уже найденные файлы или повторить сканирование.",
+  "Recovery ended unexpectedly. Check the destination folder before trying again.": "Восстановление неожиданно завершилось. Проверьте папку назначения перед повторной попыткой.",
+  "Scan finished with unreadable areas. Some files could not be checked.": "Сканирование завершено с нечитаемыми областями. Некоторые файлы не удалось проверить.",
+  "Unreadable areas were skipped. Files overlapping these areas are excluded.": "Нечитаемые области пропущены. Файлы, пересекающие эти области, исключены.",
+  "Unreadable source ranges": "Нечитаемые диапазоны источника"
 }

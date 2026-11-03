@@ -287,5 +287,10 @@
   "Destination": "Destination",
   "Choose another folder": "Choisir un autre dossier",
   "Could not connect to the update server. Check your internet connection and try again.": "Impossible de se connecter au serveur de mises à jour. Vérifiez votre connexion Internet et réessayez.",
-  "Could not check for updates. Please try again later.": "Impossible de rechercher des mises à jour. Réessayez plus tard."
+  "Could not check for updates. Please try again later.": "Impossible de rechercher des mises à jour. Réessayez plus tard.",
+  "The scan ended unexpectedly. You can recover the files already found or scan again.": "L’analyse s’est terminée de façon inattendue. Vous pouvez récupérer les fichiers déjà trouvés ou relancer l’analyse.",
+  "Recovery ended unexpectedly. Check the destination folder before trying again.": "La récupération s’est terminée de façon inattendue. Vérifiez le dossier de destination avant de réessayer.",
+  "Scan finished with unreadable areas. Some files could not be checked.": "L’analyse s’est terminée avec des zones illisibles. Certains fichiers n’ont pas pu être vérifiés.",
+  "Unreadable areas were skipped. Files overlapping these areas are excluded.": "Les zones illisibles ont été ignorées. Les fichiers qui les chevauchent sont exclus.",
+  "Unreadable source ranges": "Plages illisibles de la source"
 }

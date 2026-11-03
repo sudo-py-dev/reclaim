@@ -6,6 +6,7 @@ mod formats;
 use detection::{CandidateEnd, LIMIT};
 pub mod i18n;
 mod ntfs;
+mod resilient;
 mod source;
 pub mod updater;
 mod validation;
@@ -148,6 +149,11 @@ fn portable_name(name: &str) -> String {
 }
 
 pub enum Event {
+    /// Absolute source byte range that could not be read (offset, length).
+    Unreadable {
+        offset: u64,
+        bytes: u64,
+    },
     /// Total unallocated bytes from the selected volume's filesystem map.
     UnusedSpace {
         bytes: u64,
@@ -651,8 +657,18 @@ pub fn scan_reader(
 pub(crate) fn scan_reader_with_buffer(
     file: &mut (impl Read + Seek),
     cancel: &AtomicBool,
+    event: impl FnMut(Event),
+    buffer_size: usize,
+) -> io::Result<()> {
+    scan_reader_with_filter(file, cancel, event, buffer_size, |_, _| true)
+}
+
+pub(crate) fn scan_reader_with_filter(
+    file: &mut (impl Read + Seek),
+    cancel: &AtomicBool,
     mut event: impl FnMut(Event),
     buffer_size: usize,
+    mut readable: impl FnMut(u64, u64) -> bool,
 ) -> io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
     let mut buffer = vec![0; buffer_size.clamp(262, 1024 * 1024)];
@@ -705,7 +721,9 @@ pub(crate) fn scan_reader_with_buffer(
                 file.seek(SeekFrom::Start(offset))?;
                 let result = ntfs::read_record(file, offset, cancel);
                 file.seek(SeekFrom::Start(position))?;
-                if let Some((found, record_size)) = result? {
+                if let Some((found, record_size)) = result?
+                    && readable(offset, record_size as u64)
+                {
                     skip_until = offset + record_size as u64;
                     resident_bytes += found.size as usize;
                     found_count += 1;
@@ -807,7 +825,9 @@ pub(crate) fn scan_reader_with_buffer(
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(());
                 }
-                if let Some(size) = end {
+                if let Some(size) = end
+                    && readable(offset, size as u64)
+                {
                     if matches!(
                         checked,
                         Validation::ImageDecoded | Validation::StructureChecked

@@ -1651,3 +1651,101 @@ fn recovery_folder_dialog_blocks_saving_onto_the_scanned_drive() {
     let _ = std::fs::remove_file(&image);
     assert!(app.recovery_folder.is_none());
 }
+
+#[test]
+fn failed_scan_keeps_error_visible_with_partial_and_filtered_results() {
+    i18n::with_language(i18n::Language::English, || {
+        for dark in [false, true] {
+            for size in [[540.0, 580.0], [920.0, 740.0]] {
+                let ctx = egui::Context::default();
+                theme::setup(&ctx);
+                ctx.set_theme(if dark {
+                    egui::Theme::Dark
+                } else {
+                    egui::Theme::Light
+                });
+                let mut app = Reclaim::default();
+                app.page = 1;
+                app.busy = true;
+                let (tx, rx) = mpsc::channel();
+                app.receiver = Some(rx);
+                tx.send(Message::Scan(Event::Found(Found {
+                    offset: 0,
+                    size: 4,
+                    kind: "png",
+                    selected: true,
+                    validation: reclaim::Validation::MetadataChecked,
+                    original_name: Some("photo.png".into()),
+                    resident_data: Some(Arc::from(&b"data"[..])),
+                    ntfs: None,
+                })))
+                .unwrap();
+                tx.send(Message::Done(Err(
+                    "Source read failed at offset 4096".into()
+                )))
+                .unwrap();
+                drop(tx);
+                app.poll();
+                assert!(!app.busy);
+                assert_eq!(app.recovery_files().len(), 1);
+                for query in ["", "no-match"] {
+                    app.filter = query.into();
+                    for _ in 0..3 {
+                        let output = ctx.run_ui(input(size), |ui| app.render(ui));
+                        let found = output.shapes.iter().any(|shape| match &shape.shape {
+                            egui::Shape::Text(text) => text
+                                .galley
+                                .job
+                                .text
+                                .contains("Source read failed at offset 4096"),
+                            _ => false,
+                        });
+                        output.drop_without_applying_deltas();
+                        assert!(found, "Error hidden at {size:?}, filter {query:?}");
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn disconnected_workers_stop_busy_state_without_overwriting_completed_results() {
+    for exporting in [false, true] {
+        let mut app = Reclaim::default();
+        app.busy = true;
+        app.exporting = exporting;
+        let (tx, rx) = mpsc::channel();
+        app.receiver = Some(rx);
+        drop(tx);
+        app.poll();
+        assert!(!app.busy);
+        assert!(!app.exporting);
+        assert!(app.receiver.is_none());
+        assert_eq!(app.scan_error.is_some(), !exporting);
+        let status = app.status.clone();
+        app.poll();
+        assert_eq!(app.status, status);
+    }
+}
+
+#[test]
+fn skipped_ranges_are_merged_and_completion_reports_incomplete_coverage() {
+    let mut app = Reclaim::default();
+    app.busy = true;
+    let (tx, rx) = mpsc::channel();
+    app.receiver = Some(rx);
+    for offset in [4096, 8192, 20480] {
+        tx.send(Message::Scan(Event::Unreadable {
+            offset,
+            bytes: 4096,
+        }))
+        .unwrap();
+    }
+    tx.send(Message::Done(Ok(()))).unwrap();
+    app.poll();
+    assert_eq!(app.unreadable, vec![(4096, 8192), (20480, 4096)]);
+    assert!(!app.busy);
+    assert!(app.scan_error.is_none());
+    assert!(app.status.contains("unreadable areas"));
+}

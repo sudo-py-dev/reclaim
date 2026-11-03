@@ -287,5 +287,10 @@
   "Destination": "יעד",
   "Choose another folder": "בחירת תיקייה אחרת",
   "Could not connect to the update server. Check your internet connection and try again.": "לא ניתן להתחבר לשרת העדכונים. יש לבדוק את החיבור לאינטרנט ולנסות שוב.",
-  "Could not check for updates. Please try again later.": "לא ניתן לבדוק אם קיימים עדכונים. יש לנסות שוב מאוחר יותר."
+  "Could not check for updates. Please try again later.": "לא ניתן לבדוק אם קיימים עדכונים. יש לנסות שוב מאוחר יותר.",
+  "The scan ended unexpectedly. You can recover the files already found or scan again.": "הסריקה הסתיימה באופן בלתי צפוי. אפשר לשחזר את הקבצים שכבר נמצאו או לסרוק מחדש.",
+  "Recovery ended unexpectedly. Check the destination folder before trying again.": "השחזור הסתיים באופן בלתי צפוי. בדקו את תיקיית היעד לפני ניסיון נוסף.",
+  "Scan finished with unreadable areas. Some files could not be checked.": "הסריקה הסתיימה עם אזורים שאינם ניתנים לקריאה. חלק מהקבצים לא נבדקו.",
+  "Unreadable areas were skipped. Files overlapping these areas are excluded.": "בוצע דילוג על אזורים שאינם ניתנים לקריאה. קבצים החופפים לאזורים אלה אינם נכללים בתוצאות.",
+  "Unreadable source ranges": "טווחים במקור שאינם ניתנים לקריאה"
 }

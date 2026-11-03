@@ -287,5 +287,10 @@
   "Destination": "الوجهة",
   "Choose another folder": "اختيار مجلد آخر",
   "Could not connect to the update server. Check your internet connection and try again.": "تعذر الاتصال بخادم التحديثات. تحقق من اتصالك بالإنترنت وحاول مجددًا.",
-  "Could not check for updates. Please try again later.": "تعذر البحث عن تحديثات. حاول مجددًا لاحقًا."
+  "Could not check for updates. Please try again later.": "تعذر البحث عن تحديثات. حاول مجددًا لاحقًا.",
+  "The scan ended unexpectedly. You can recover the files already found or scan again.": "انتهى الفحص بشكل غير متوقع. يمكنك استعادة الملفات التي تم العثور عليها أو الفحص مجددًا.",
+  "Recovery ended unexpectedly. Check the destination folder before trying again.": "انتهت الاستعادة بشكل غير متوقع. تحقق من مجلد الوجهة قبل المحاولة مجددًا.",
+  "Scan finished with unreadable areas. Some files could not be checked.": "اكتمل الفحص مع وجود مناطق غير قابلة للقراءة. تعذر فحص بعض الملفات.",
+  "Unreadable areas were skipped. Files overlapping these areas are excluded.": "تم تخطي المناطق غير القابلة للقراءة. تُستبعد الملفات المتداخلة مع هذه المناطق.",
+  "Unreadable source ranges": "نطاقات المصدر غير القابلة للقراءة"
 }

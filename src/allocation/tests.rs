@@ -336,3 +336,65 @@ fn malformed_boot_geometry_does_not_panic() {
         }
     }
 }
+
+#[test]
+fn media_faults_skip_free_data_but_never_fabricate_an_allocation_map() {
+    struct Fault {
+        input: Cursor<Vec<u8>>,
+        bad: std::ops::Range<u64>,
+    }
+    impl Read for Fault {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            let at = self.input.position();
+            if at < self.bad.end && self.bad.start < at + bytes.len() as u64 {
+                return Err(io::Error::from_raw_os_error(if cfg!(windows) {
+                    1117
+                } else {
+                    5
+                }));
+            }
+            self.input.read(bytes)
+        }
+    }
+    impl Seek for Fault {
+        fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+            self.input.seek(from)
+        }
+    }
+    let (mut bytes, start) = fat12();
+    let pdf = b"%PDF-1.7\nhello\n%%EOF";
+    // Two free extents: damage the first, retain the file in the second.
+    let bad_start = start + 512;
+    let good_start = start + 4 * 512;
+    bytes[good_start..good_start + pdf.len()].copy_from_slice(pdf);
+    let total = bytes.len() as u64;
+    let cancel = AtomicBool::new(false);
+    let mut fault = Fault {
+        input: Cursor::new(bytes.clone()),
+        bad: bad_start as u64..(bad_start + 512) as u64,
+    };
+    let mut found = Vec::new();
+    let mut skipped = Vec::new();
+    scan(&mut fault, total, &cancel, |e| match e {
+        crate::Event::Found(f) => found.push(f.offset),
+        crate::Event::Unreadable { offset, bytes } => skipped.push((offset, bytes)),
+        _ => {}
+    })
+    .unwrap();
+    assert_eq!(found, vec![good_start as u64]);
+    assert!(!skipped.is_empty());
+    let mut fault = Fault {
+        input: Cursor::new(bytes),
+        bad: 512..1024,
+    };
+    let mut mapped = false;
+    assert!(
+        scan(&mut fault, total, &cancel, |e| {
+            if matches!(e, crate::Event::UnusedSpace { .. }) {
+                mapped = true;
+            }
+        })
+        .is_err()
+    );
+    assert!(!mapped);
+}

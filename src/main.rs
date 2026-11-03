@@ -63,6 +63,7 @@ struct Reclaim {
     busy: bool,
     scan_stopped: bool,
     scan_error: Option<String>,
+    unreadable: Vec<(u64, u64)>,
     status: String,
     filter: String,
     page: usize,
@@ -109,6 +110,7 @@ impl Default for Reclaim {
             busy: false,
             scan_stopped: false,
             scan_error: None,
+            unreadable: Vec::new(),
             status: "Choose a drive or disk image to get started.".into(),
             filter: String::new(),
             page: 0,
@@ -130,9 +132,12 @@ impl Reclaim {
         self.thumbnails.clear();
         self.thumbnail_receiver = None;
         self.results.clear();
+        self.filter.clear();
+        self.category = 0;
         self.details_file = None;
         self.scan_stopped = false;
         self.scan_error = None;
+        self.unreadable.clear();
         self.page = 1;
         self.exporting = false;
         self.started = Some(std::time::Instant::now());
@@ -353,7 +358,25 @@ impl Reclaim {
             self.apply_drive_update(result);
         }
         if let Some(rx) = &self.receiver {
-            for message in rx.try_iter().take(512) {
+            for _ in 0..512 {
+                let message = match rx.try_recv() {
+                    Ok(message) => message,
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        if self.busy {
+                            self.busy = false;
+                            self.scan_activity = None;
+                            if self.exporting {
+                                self.exporting = false;
+                                self.status = "Recovery ended unexpectedly. Check the destination folder before trying again.".into();
+                            } else {
+                                self.scan_error = Some("The scan ended unexpectedly. You can recover the files already found or scan again.".into());
+                                self.status = "Scan failed. See the message above.".into();
+                            }
+                        }
+                        break;
+                    }
+                };
                 match message {
                     Message::Opened(handle) => {
                         self.source_handle = Some(handle);
@@ -363,6 +386,15 @@ impl Reclaim {
                             "Scanning for recoverable files…"
                         }
                         .into();
+                    }
+                    Message::Scan(Event::Unreadable { offset, bytes }) => {
+                        if let Some((start, length)) = self.unreadable.last_mut()
+                            && *start + *length == offset
+                        {
+                            *length += bytes;
+                        } else {
+                            self.unreadable.push((offset, bytes));
+                        }
                     }
                     Message::Scan(Event::UnusedSpace { bytes, .. }) => {
                         self.unused_scan = true;
@@ -421,6 +453,10 @@ impl Reclaim {
                             {
                                 "No unused space is available on this volume.".into()
                             }
+                            Ok(()) if !self.unreadable.is_empty() => {
+                                self.scanned = self.total.max(self.scanned);
+                                "Scan finished with unreadable areas. Some files could not be checked.".into()
+                            }
                             Ok(()) => {
                                 self.scanned = self.total.max(self.scanned);
                                 format!(
@@ -446,6 +482,9 @@ impl Reclaim {
                     }
                 }
             }
+        }
+        if !self.busy {
+            self.receiver = None;
         }
     }
     fn choose_source(&mut self) {
@@ -656,6 +695,44 @@ impl Reclaim {
                 .truncate(),
             )
             .raw_on_hover_text(p.display().to_string());
+        }
+        if !self.unreadable.is_empty() {
+            theme::card(ui).inner_margin(12.0).show(ui, |ui| {
+                ui.t_label(
+                    "Unreadable areas were skipped. Files overlapping these areas are excluded.",
+                );
+                ui.t_weak(theme::bytes(
+                    self.unreadable.iter().map(|(_, bytes)| bytes).sum(),
+                ));
+                egui::CollapsingHeader::new(i18n::t("Unreadable source ranges")).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(100.0).show_rows(
+                        ui,
+                        ui.text_style_height(&egui::TextStyle::Body),
+                        self.unreadable.len(),
+                        |ui, rows| {
+                            for index in rows {
+                                let (offset, bytes) = self.unreadable[index];
+                                ui.label(format!(
+                                    "0x{offset:X}–0x{:X} · {}",
+                                    offset + bytes,
+                                    theme::bytes(bytes)
+                                ));
+                            }
+                        },
+                    );
+                });
+            });
+            ui.add_space(8.0);
+        }
+        if !self.results.is_empty()
+            && let Some(error) = &self.scan_error
+        {
+            theme::card(ui).inner_margin(12.0).show(ui, |ui| {
+                ui.t_label("Could not scan this drive");
+                ui.t_label(error);
+                ui.t_weak("Scan stopped. You can recover partial results.");
+            });
+            ui.add_space(8.0);
         }
         ui.add_space(4.0);
         ui.allocate_ui_with_layout(

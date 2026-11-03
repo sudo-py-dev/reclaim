@@ -206,7 +206,7 @@ pub(crate) fn scan(
             position: 0,
         };
         let mut limited = false;
-        crate::scan_reader_with_buffer(
+        crate::resilient::scan(
             &mut extent,
             cancel,
             |e| match e {
@@ -232,6 +232,12 @@ pub(crate) fn scan(
                     event(crate::Event::Checking {
                         offset: start + offset,
                         kind,
+                        bytes,
+                    });
+                }
+                crate::Event::Unreadable { offset, bytes } => {
+                    event(crate::Event::Unreadable {
+                        offset: start + offset,
                         bytes,
                     });
                 }

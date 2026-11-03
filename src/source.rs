@@ -59,10 +59,12 @@ impl<R: Read + Seek> Read for SourceReader<R> {
             self.cached_at = None;
             return Ok(count);
         }
-        let aligned = self.position / self.window_size as u64 * self.window_size as u64;
-        if self.cached_at != Some(aligned) {
+        let aligned = self.position / self.alignment as u64 * self.alignment as u64;
+        if self.cached_at.is_none_or(|start| {
+            self.position < start || self.position >= start + self.cached_len as u64
+        }) {
             self.inner.seek(SeekFrom::Start(aligned))?;
-            let required = self
+            let mut required = self
                 .size
                 .map(|n| (n - aligned).min(self.window_size as u64) as usize)
                 .unwrap_or(self.window_size);
@@ -81,12 +83,19 @@ impl<R: Read + Seek> Read for SourceReader<R> {
                     Ok(0) => break,
                     Ok(n) => self.cached_len += n,
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) if is_media_error(&e) && required > self.alignment => {
+                        // A large read may include a bad sector beyond the requested bytes.
+                        // Retry only the sector at the current position before failing.
+                        required = self.alignment;
+                        self.cached_len = 0;
+                        self.inner.seek(SeekFrom::Start(aligned))?;
+                    }
                     Err(e) => return Err(e),
                 }
             }
             self.cached_at = Some(aligned);
         }
-        let start = (self.position - aligned) as usize;
+        let start = (self.position - self.cached_at.unwrap()) as usize;
         let count = bytes.len().min(self.cached_len.saturating_sub(start));
         if count == 0 {
             return Ok(0);
@@ -119,6 +128,14 @@ impl<R: Read + Seek> Seek for SourceReader<R> {
         self.position = position;
         Ok(position)
     }
+}
+
+/// Only media read errors are skippable; permission, seek and programming errors remain fatal.
+pub(crate) fn is_media_error(error: &io::Error) -> bool {
+    #[cfg(windows)]
+    return matches!(error.raw_os_error(), Some(23 | 27 | 1117));
+    #[cfg(not(windows))]
+    matches!(error.raw_os_error(), Some(5))
 }
 
 #[cfg(test)]

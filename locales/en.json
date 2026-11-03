@@ -287,5 +287,10 @@
   "Destination": "Destination",
   "Choose another folder": "Choose another folder",
   "Could not connect to the update server. Check your internet connection and try again.": "Could not connect to the update server. Check your internet connection and try again.",
-  "Could not check for updates. Please try again later.": "Could not check for updates. Please try again later."
+  "Could not check for updates. Please try again later.": "Could not check for updates. Please try again later.",
+  "The scan ended unexpectedly. You can recover the files already found or scan again.": "The scan ended unexpectedly. You can recover the files already found or scan again.",
+  "Recovery ended unexpectedly. Check the destination folder before trying again.": "Recovery ended unexpectedly. Check the destination folder before trying again.",
+  "Scan finished with unreadable areas. Some files could not be checked.": "Scan finished with unreadable areas. Some files could not be checked.",
+  "Unreadable areas were skipped. Files overlapping these areas are excluded.": "Unreadable areas were skipped. Files overlapping these areas are excluded.",
+  "Unreadable source ranges": "Unreadable source ranges"
 }
