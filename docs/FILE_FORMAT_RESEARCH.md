@@ -67,7 +67,7 @@ and content independently of signature carving.
 
 ## Verification and resources
 
-- `scripts/generate-format-fixtures.py` creates project-owned framing fixtures,
+- `cargo xtask fixtures` creates project-owned framing fixtures,
   including PE32/PE32+, certificate extents, four ELF class/byte-order combinations,
   CFB v3/v4 Installer CLSIDs, genuine USTAR/GZIP/DEB members, and small archive/image
   encodings. Minimal MSI/RPM/DEX fixtures exercise format metadata; they are not

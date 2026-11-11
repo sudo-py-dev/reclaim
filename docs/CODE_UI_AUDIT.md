@@ -59,7 +59,7 @@ production. A finding can be accepted only next to its code with
 - Keep image decoding and candidate parsing bounded; validate untrusted sizes.
 - Prefer existing components and dependencies; simplify only with equivalent behavior.
 
-The Python checks enforce the file/catalog rules. Rust tests and compiler checks
+The Rust project audit enforces the file/catalog rules. Tests and compiler checks
 cover selected behavior. The architectural rules above still require code review;
 text matching cannot prove UI responsiveness or memory safety.
 

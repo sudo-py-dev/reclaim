@@ -106,7 +106,22 @@ RECLAIM_PREVIEW_DIR=/tmp/reclaim-previews cargo test --locked --bin reclaim slin
 
 The previews are PNG images rendered from the actual Slint components using its software renderer. They do not test native window management, authentication prompts, or real-device recovery.
 
-[Desktop CI](../.github/workflows/build.yml) runs tests, formatting, Clippy, and release builds on Linux, Windows, and macOS. It also packages a universal Intel/Apple Silicon macOS app with ad-hoc signing. Developer ID signing and notarization are not configured. Windows/macOS cross-target checks have passed locally; hardware and native desktop testing remain necessary.
+[Desktop CI](../.github/workflows/build.yml) runs locked tests (including the UI
+and project audit) and Clippy with warnings as errors on Linux, Windows, and
+macOS. Formatting runs once on Linux. Separate jobs check dependency advisories,
+bans and sources, and install the website's locked dependencies, type-check it,
+and build it. Checks run on pull requests, main, and weekly; newer commits cancel
+older PR runs. Third-party actions are pinned to immutable revisions.
+
+Tests compile the app and UI in the test profile; PR checks do not perform a
+second optimized build, package installers, or upload executable artifacts.
+The [release workflow](../.github/workflows/release.yml) calls the same validation
+workflow before building optimized binaries and native installers for all four
+shipping targets. Only releases upload artifacts, sign updates, and publish
+GitHub downloads. Release runs are serialized per tag and artifacts expire after
+seven days. macOS binaries use ad-hoc signing; Developer ID signing and
+notarization are not configured. Native desktop and hardware testing remain
+necessary; headless tests do not replace them.
 
 ## License and credits
 
@@ -128,3 +143,24 @@ Each result has a file-type badge and an information action. The details dialog 
 ## Automatic drive refresh
 
 A background worker rechecks the native drive inventory about every two seconds. Only changed inventories (including mount/unlock metadata) wake the UI. Manual Refresh requests use the same worker. Bounded update/request channels prevent an update backlog; dropping the monitor disconnects the worker. Existing selection is retained while its device remains present; removed selections are cleared, and disk-image selections are unaffected. Transient discovery errors retain the last successful list. Inventory updates do not restart scans or discard their results/authorized handles.
+
+## Repository tooling
+
+`cargo xtask` builds the independent `tools/` crate, without the desktop UI.
+It replaces the former scripting tools:
+
+```sh
+cargo xtask fixtures
+cargo xtask seed-corpus
+cargo xtask package linux --binary target/release/reclaim
+```
+
+`fixtures` regenerates the project-owned framing data in `tests/fixtures/formats`.
+Compression output can differ between encoder versions while preserving the
+same decoded data. `seed-corpus` copies small checked-in fixtures and creates
+NTFS/PDF seeds for both fuzz harnesses. Installer packaging requires the native
+platform's packaging tools listed in the README.
+
+The release workflow also uses `cargo xtask validate-tag`, `bundle`, and
+`checksums`; update signatures remain a separate, verified release step.
+CI formats, tests, and lints the tooling crate on all desktop platforms.
