@@ -23,7 +23,7 @@ pub struct Updates {
     dismissal_path: Option<PathBuf>,
     pub notice_visible: bool,
     pub status: String,
-    pub notes: String,
+    pub notes: Vec<NoteBlock>,
     pub progress: f32,
     pub restart: bool,
 }
@@ -196,7 +196,7 @@ impl Updates {
                                 .unwrap_or_else(|| "You’re up to date.".into());
                             self.notes = release
                                 .as_ref()
-                                .map(|r| clean_notes(&r.notes))
+                                .map(|r| format_notes(&r.notes))
                                 .unwrap_or_default();
                             self.release = release;
                         }
@@ -237,22 +237,97 @@ impl Updates {
     }
 }
 
-/// Release notes are plain text, bounded before they reach the layout engine.
-/// Remove Markdown heading/code markers without interpreting HTML or URLs.
-fn clean_notes(notes: &str) -> String {
+/// A bounded, non-interactive representation of the release Markdown.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoteBlock {
+    pub text: String,
+    // 0 = paragraph, 1 = heading, 2 = list item, 3 = code.
+    pub kind: i32,
+}
+
+fn format_notes(notes: &str) -> Vec<NoteBlock> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
     if notes.trim() == "No release notes." {
-        return String::new();
+        return Vec::new();
     }
-    let bounded: String = notes.chars().take(6000).collect();
-    bounded
+    let bounded: String = notes
+        .chars()
+        .take(6000)
+        .collect::<String>()
         .lines()
         .take(40)
-        .filter(|line| !line.trim_start().starts_with("```"))
-        .map(|line| line.trim().trim_start_matches('#').trim().replace('`', ""))
         .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_owned()
+        .join("\n");
+    let mut blocks = Vec::new();
+    let mut text = String::new();
+    let mut kind = 0;
+    let mut lists: Vec<Option<u64>> = Vec::new();
+    let flush = |blocks: &mut Vec<NoteBlock>, text: &mut String, kind| {
+        let value = if kind == 2 || kind == 3 {
+            text.trim_matches('\n').to_owned()
+        } else {
+            text.trim().to_owned()
+        };
+        if !value.is_empty() {
+            blocks.push(NoteBlock { text: value, kind });
+        }
+        text.clear();
+    };
+    for event in Parser::new_ext(
+        &bounded,
+        Options::ENABLE_TASKLISTS | Options::ENABLE_STRIKETHROUGH,
+    ) {
+        match event {
+            Event::Start(Tag::Heading { .. }) => {
+                flush(&mut blocks, &mut text, kind);
+                kind = 1;
+            }
+            Event::Start(Tag::CodeBlock(_)) => {
+                flush(&mut blocks, &mut text, kind);
+                kind = 3;
+            }
+            Event::Start(Tag::List(start)) => {
+                flush(&mut blocks, &mut text, kind);
+                lists.push(start);
+            }
+            Event::Start(Tag::Item) => {
+                flush(&mut blocks, &mut text, kind);
+                kind = 2;
+                text.push_str(&"  ".repeat(lists.len().saturating_sub(1)));
+                if let Some(Some(number)) = lists.last_mut() {
+                    text.push_str(&format!("{number}. "));
+                    *number = number.saturating_add(1);
+                } else {
+                    text.push_str("• ");
+                }
+            }
+            Event::End(
+                TagEnd::Heading(_) | TagEnd::CodeBlock | TagEnd::Item | TagEnd::Paragraph,
+            ) => {
+                flush(&mut blocks, &mut text, kind);
+                kind = if lists.is_empty() { 0 } else { 2 };
+            }
+            Event::End(TagEnd::List(_)) => {
+                flush(&mut blocks, &mut text, kind);
+                lists.pop();
+                kind = if lists.is_empty() { 0 } else { 2 };
+            }
+            Event::Text(value)
+            | Event::Code(value)
+            | Event::Html(value)
+            | Event::InlineHtml(value) => text.push_str(&value),
+            Event::SoftBreak => text.push(' '),
+            Event::HardBreak => text.push('\n'),
+            Event::Rule => {
+                flush(&mut blocks, &mut text, kind);
+            }
+            Event::TaskListMarker(checked) => text.push_str(if checked { "☑ " } else { "☐ " }),
+            _ => {}
+        }
+    }
+    flush(&mut blocks, &mut text, kind);
+    blocks
 }
 
 #[cfg(test)]
@@ -320,13 +395,24 @@ mod tests {
         assert!(!updates.status.is_empty());
     }
     #[test]
-    fn release_notes_are_bounded_plain_text() {
-        assert_eq!(
-            clean_notes("## Fixes\n- Handle `files` safely\n```"),
-            "Fixes\n- Handle files safely"
+    fn release_notes_render_markdown_with_bounds() {
+        let notes = format_notes(
+            "## Fixes\n\n- Handle **files** safely\n- See [details](https://example.com)\n\n```rust\nlet x = 1;\n```",
         );
-        assert_eq!(clean_notes("No release notes."), "");
-        assert!(clean_notes(&"א".repeat(10000)).chars().count() <= 6000);
-        assert!(clean_notes(&"line\n".repeat(100)).lines().count() <= 40);
+        assert_eq!(
+            notes
+                .iter()
+                .map(|n| (n.kind, n.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, "Fixes"),
+                (2, "• Handle files safely"),
+                (2, "• See details"),
+                (3, "let x = 1;")
+            ]
+        );
+        assert!(format_notes("No release notes.").is_empty());
+        assert!(format_notes(&"א".repeat(10000))[0].text.chars().count() <= 6000);
+        assert!(format_notes(&"line\n\n".repeat(100)).len() <= 40);
     }
 }

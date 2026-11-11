@@ -172,9 +172,10 @@ scan or export is running. A manual check is always available at the top of
 Settings. Checking does not disable recovery controls; installation does.
 Background failures do not display an error notice or trigger repeated retries.
 
-An available release appears as a non-modal banner without taking keyboard
-focus. Later remembers the dismissed version in the per-user update cache,
-including across restarts; a different release can show a new notice. Dismissal
-keeps installation and release notes available in Settings. Release notes are
-collapsed until requested, rendered as bounded plain text, and scroll when long.
-Downloading, installation, and restarting require the explicit update action.
+An available release appears in a non-modal floating notice above the main page.
+Later remembers the dismissed version in the per-user update cache, including
+across restarts; a different release can show a new notice. Dismissal keeps
+installation and release notes available in Settings. What's new expands bounded,
+scrollable Markdown blocks in the notice and Settings. Links and HTML are displayed
+as text and are not opened or executed. Downloading, installation, and restarting
+require the explicit update action.

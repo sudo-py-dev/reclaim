@@ -342,7 +342,27 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
     .unwrap();
     let ui = AppWindow::new().unwrap();
     ui.set_update_available(true);
-    ui.set_update_notes("Improvements\n\n• Clearer recovery results\n• More reliable drive detection\n• Smaller downloads".into());
+    ui.set_update_notes(
+        Rc::new(VecModel::from(vec![
+            ReleaseNoteBlock {
+                text: "Improvements".into(),
+                kind: 1,
+            },
+            ReleaseNoteBlock {
+                text: "• Clearer recovery results".into(),
+                kind: 2,
+            },
+            ReleaseNoteBlock {
+                text: "• More reliable drive detection".into(),
+                kind: 2,
+            },
+            ReleaseNoteBlock {
+                text: "• Smaller downloads".into(),
+                kind: 2,
+            },
+        ]))
+        .into(),
+    );
     let installed = Rc::new(std::cell::Cell::new(false));
     let flag = installed.clone();
     ui.on_apply_update(move || flag.set(true));
@@ -367,7 +387,7 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
                 if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
                     std::fs::create_dir_all(&directory).unwrap();
                     image::save_buffer(
-                        format!("{directory}/update-banner-{code}-{dark}.png"),
+                        format!("{directory}/update-notice-{code}-{dark}.png"),
                         snapshot.as_bytes(),
                         snapshot.width(),
                         snapshot.height(),
@@ -394,7 +414,7 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
                 .next()
                 .expect("review release notes");
                 details.invoke_accessible_default_action();
-                assert_eq!(ui.get_page(), 2);
+                assert_eq!(ui.get_page(), 0);
                 assert!(ui.get_update_details_open());
                 assert!(!installed.get());
                 let snapshot = ui.window().take_snapshot().unwrap();
@@ -418,9 +438,32 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
                     )
                     .next()
                     .is_none(),
-                    "no update banner during a scan"
+                    "no update notice during a scan"
                 );
                 ui.set_busy(false);
+                ui.window().take_snapshot().unwrap();
+                let apply = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                    &ui,
+                    &i18n::t("Update and restart"),
+                )
+                .next()
+                .expect("explicit update action");
+                apply.invoke_accessible_default_action();
+                assert!(installed.replace(false));
+                ui.set_update_notice(false);
+                ui.set_page(2);
+                ui.set_update_details_open(false);
+                ui.window().take_snapshot().unwrap();
+                let settings_details =
+                    i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                        &ui,
+                        &i18n::t("What’s new"),
+                    )
+                    .next()
+                    .expect("release notes remain available in settings");
+                settings_details.invoke_accessible_default_action();
+                assert!(ui.get_update_details_open());
+                ui.window().take_snapshot().unwrap();
             }
         });
     }

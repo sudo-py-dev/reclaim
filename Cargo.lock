@@ -3579,6 +3579,7 @@ dependencies = [
  "log",
  "minisign-verify",
  "proc-macro2",
+ "pulldown-cmark",
  "quick-xml",
  "quote",
  "rfd",
