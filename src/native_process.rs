@@ -10,6 +10,25 @@ pub struct Child;
 
 #[cfg(target_os = "linux")]
 pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
+    let environment = std::env::vars_os()
+        .map(|(key, value)| {
+            let mut item = key;
+            item.push("=");
+            item.push(value);
+            item
+        })
+        .collect();
+    spawn_with_environment(program, arguments, environment)
+}
+
+/// Like [`spawn`], with exactly `environment` (`KEY=value` items) instead of
+/// this process's own.
+#[cfg(target_os = "linux")]
+pub fn spawn_with_environment(
+    program: &Path,
+    arguments: &[String],
+    environment: Vec<std::ffi::OsString>,
+) -> Result<Child, String> {
     use std::{ffi::CString, os::unix::ffi::OsStrExt};
     let program = CString::new(program.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     let mut args = vec![program.clone()];
@@ -21,13 +40,9 @@ pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
         .map(|s| s.as_ptr().cast_mut())
         .chain(Some(std::ptr::null_mut()))
         .collect();
-    let environment: Vec<_> = std::env::vars_os()
-        .map(|(key, value)| {
-            let mut item = key;
-            item.push("=");
-            item.push(value);
-            CString::new(item.as_bytes()).map_err(|e| e.to_string())
-        })
+    let environment: Vec<_> = environment
+        .into_iter()
+        .map(|item| CString::new(item.as_bytes()).map_err(|e| e.to_string()))
         .collect::<Result<_, _>>()?;
     let envp: Vec<_> = environment
         .iter()
@@ -111,7 +126,8 @@ impl Drop for Child {
 }
 
 impl Child {
-    #[cfg(test)]
+    /// Waits for the child to exit and returns its exit code.
+    #[cfg(any(test, target_os = "linux"))]
     pub fn wait(self) -> Result<u32, String> {
         #[cfg(target_os = "linux")]
         {

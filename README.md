@@ -81,7 +81,7 @@ Reclaim checks for stable updates on startup. Open **Settings → What’s new**
 <summary>Installation, updates, and drive access</summary>
 
 - **Portable builds:** extract the ZIP to a writable folder. On Linux and macOS, the executable may need `chmod +x reclaim-*`. Linux portable builds require glibc 2.35 or newer and X11/Wayland desktop libraries.
-- **Linux updates:** installed Debian packages use PackageKit and may show the normal administrator authentication prompt. The package service must be available. Portable copies update in their writable folder.
+- **Linux updates:** installed Debian packages ask for administrator permission through the desktop's normal prompt (pkexec). The elevated step checks the release signature again over a private root-only copy before handing it to apt, so a package changed after download is never installed. Portable copies update in their writable folder.
 - **Windows updates:** the verified per-user installer closes Reclaim, preserves the install location and uninstaller metadata, then starts the installed version.
 - **macOS updates:** download verification is followed by **Open installer**. Quit Reclaim before upgrading.
 - **Uninstall:** use the Windows uninstaller, run `sudo apt remove reclaim` on Debian/Ubuntu, or move Reclaim.app to Trash on macOS. The Windows desktop shortcut is optional.

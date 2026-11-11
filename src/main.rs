@@ -940,6 +940,22 @@ fn run() -> Result<(), slint::PlatformError> {
     result
 }
 fn main() {
+    // The privileged update step runs as root through pkexec, with no desktop
+    // session, so it is handled before any GUI, D-Bus or settings setup.
+    #[cfg(target_os = "linux")]
+    {
+        let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+        if args
+            .first()
+            .is_some_and(|a| a == reclaim::updater::INSTALL_DEB_FLAG)
+        {
+            if let Err(error) = update_runtime::run_privileged_deb_update(&args) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+    }
     diagnostics::install();
     i18n::init();
     #[cfg(target_os = "linux")]
