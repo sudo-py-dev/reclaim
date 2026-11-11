@@ -373,6 +373,14 @@ component ReleaseNotes inherits Rectangle {
     }
 }
 
+component StepBadge inherits Rectangle {
+    in property <int> number;
+    width: 32px; height: 24px; horizontal-stretch: 0; vertical-stretch: 0;
+    Rectangle { width: 24px; height: 24px; border-radius: 12px; background: Palette.selected;
+        Text { text: root.number; color: Palette.accent; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
 // Settings building blocks: every row has the same icon tile, label column and trailing control edge.
 component GroupTitle inherits Label { color: Palette.muted; font-size: 12px; font-weight: 600; }
 component IconTile inherits Rectangle {
@@ -734,7 +742,7 @@ export component AppWindow inherits Window {
             if root.page == 2 : Rectangle { vertical-stretch: 1; ScrollView { x: 0px; y: 0px; width: parent.width + 16px; height: parent.height; VerticalLayout { padding-right: 16px; spacing: 8px; alignment: start;
                 GroupTitle { text: Strings.updates; }
                 Card { VerticalLayout {
-                    SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-status;
+                    SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-available && !root.update-busy && root.update-title != "" ? root.update-title : root.update-status;
                         Action { enabled: !root.update-busy && !root.update-check-feedback;
                             spinning: (root.update-busy && !root.update-installing) || root.update-check-feedback;
                             text: Strings.check-for-updates; icon: @image-url("icons/refresh.svg");
@@ -747,10 +755,7 @@ export component AppWindow inherits Window {
                             Rectangle { horizontal-stretch: 1; }
                             Action { text: root.update-label; primary: true; enabled: !root.busy && !root.update-busy; clicked => { root.apply-update(); } }
                         }
-                        if root.update-details-open : VerticalLayout { spacing: 8px;
-                            Label { text: Strings.whats-new; color: Palette.ink; font-size: 13px; font-weight: 600; }
-                            ReleaseNotes { notes: root.update-notes; }
-                        }
+                        if root.update-details-open : ReleaseNotes { notes: root.update-notes; }
                         if root.update-installing : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * clamp(root.update-progress, 0, 1); background: Palette.primary; animate width { duration: 200ms; } } }
                     }
                 } }
@@ -768,13 +773,11 @@ export component AppWindow inherits Window {
                 Rectangle { height: 8px; }
                 GroupTitle { text: Strings.recover-in-three-steps; }
                 Card { VerticalLayout { padding: 16px; spacing: 12px;
-                    for step[i] in Strings.recovery-step-list : Row { spacing: 12px;
-                        Rectangle { width: 32px; height: 24px;
-                            Rectangle { width: 24px; height: 24px; border-radius: 12px; background: Palette.selected;
-                                Text { text: i + 1; color: Palette.accent; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-                            }
-                        }
-                        Label { text: step; color: Palette.ink; font-size: 13px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
+                    // A box layout (not Row's flexbox) so wrapped text is measured at its final width.
+                    for step[i] in Strings.recovery-step-list : HorizontalLayout { spacing: 12px;
+                        if !Locale.rtl : StepBadge { number: i + 1; }
+                        Label { text: step; color: Palette.ink; font-size: 13px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; vertical-alignment: center; }
+                        if Locale.rtl : StepBadge { number: i + 1; }
                     }
                     Divider { }
                     Label { text: Strings.supported-formats; color: Palette.ink; font-size: 13px; font-weight: 600; }
@@ -795,11 +798,16 @@ export component AppWindow inherits Window {
             }
         }
     }
-    // A non-modal floating notice stays above the page without changing its layout.
+    // The update notice is a centered dialog over a dimmed backdrop. The backdrop swallows
+    // clicks so nothing behind it is triggered by accident; it is dismissed only with Later.
     if root.update-notice && !root.busy && !root.update-installing && root.page != 2 : Rectangle {
-        x: Locale.rtl ? 20px : root.width - self.width - 20px;
-        y: root.height - self.height - 20px;
-        width: 460px; height: notice-content.preferred-height;
+        background: #00000066;
+        TouchArea { }
+        Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(460px, parent.width - 40px); height: min(notice-content.preferred-height, parent.height - 40px);
+        clip: true;
         background: Palette.surface; border-radius: 12px; border-width: 1px; border-color: Palette.line;
         drop-shadow-blur: 24px; drop-shadow-offset-y: 6px; drop-shadow-color: #00000050;
         notice-content := VerticalLayout { padding: 20px; spacing: 12px;
@@ -817,6 +825,7 @@ export component AppWindow inherits Window {
                 Action { text: Strings.later; quiet: true; clicked => { root.dismiss-update(); } }
                 Action { text: root.update-label; primary: true; enabled: !root.update-busy; clicked => { root.apply-update(); } }
             }
+        }
         }
     }
     // The page column's title bar, drawn over its top padding.
