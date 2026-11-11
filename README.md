@@ -46,9 +46,9 @@ Ubuntu 22.04 / Debian 12 or newer are recommended. Windows includes the Microsof
 
 **Read-only scanning.** Reclaim reads the allocation map for NTFS, FAT12/16/32, or exFAT, then searches free clusters. Allocated files are skipped. Unsupported or damaged maps produce an error rather than a scan of occupied space. Recovered files receive numbered names when needed to avoid replacing existing output files.
 
-**Results you can inspect.** File-type icons, search, category filters, image previews for supported formats, and a details dialog help you review candidates before saving. A match is a possible recovery candidate; it does not prove that a file was deleted or is complete.
+**Results you can inspect.** File-type icons, search, category filters, image previews for supported formats, and a file inspector help you review candidates before saving. A match is a possible recovery candidate; it does not prove that a file was deleted or is complete.
 
-**A comfortable desktop interface.** Choose light, dark, or System appearance, choose English, Hebrew, Spanish, French, German, Arabic, or Russian, with right-to-left layouts for Hebrew and Arabic, and turn animations on or off. System appearance follows desktop changes while the app runs. A built-in recovery guide is available from the book icon in Settings.
+**A Slint desktop interface.** Switch between light and dark themes, browse sources and searchable results from the sidebar, and inspect candidates without leaving the recovery workspace. SVG icons, animated controls, and live progress keep the interface clear. Settings & help includes recovery guidance, updates, and a saved language preference; all seven language catalogs cover the interface, with mirrored Hebrew and Arabic layouts and theme-aware icons.
 
 ### What it looks for
 
@@ -94,7 +94,7 @@ See [platform permissions](docs/DEVELOPMENT.md#drive-permissions) for details.
 <details>
 <summary>Windows startup errors and crash reports</summary>
 
-Windows uses DirectX 12, including the Microsoft software adapter when available, so a VM does not need an OpenGL driver just to open Reclaim. Startup errors, Rust panics, and unhandled Windows exceptions display a native error message.
+The Slint interface uses software rendering, so a VM does not need an OpenGL driver just to open Reclaim. Startup errors, Rust panics, and unhandled Windows exceptions display a native error message.
 
 Diagnostics stay on your computer at `%LOCALAPPDATA%\Reclaim\logs\reclaim.log`, with a fallback under `%TEMP%` if that location cannot be written. The previous log is retained when a log exceeds 1 MiB at startup. The crash guard cannot catch failures before Windows loads the executable or every fatal system failure.
 
@@ -102,7 +102,7 @@ Diagnostics stay on your computer at `%LOCALAPPDATA%\Reclaim\logs\reclaim.log`, 
 
 ## Build and contribute
 
-Reclaim is written in Rust with [egui](https://github.com/emilk/egui). Install stable Rust and your platform’s native build tools. Linux also needs the [GUI development libraries](docs/DEVELOPMENT.md#build-and-run).
+Reclaim is written in Rust with [Slint](https://slint.dev). Install stable Rust and your platform’s native build tools. Linux also needs the [GUI development libraries](docs/DEVELOPMENT.md#build-and-run).
 
 ```sh
 git clone https://github.com/sudo-py-dev/reclaim.git

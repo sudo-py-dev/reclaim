@@ -1,20 +1,9 @@
-# Interface screenshots
+# Interface previews
 
-These PNGs show the current Reclaim 0.1.0 interface with sample drives and file results. They are rendered from the app’s actual egui meshes using the existing headless preview test, not mockups or photographs of real recovered data.
-
-To refresh them from the repository root:
+The screenshots show the actual Slint components with sample source and result data. Generate software-rendered previews with:
 
 ```sh
-mkdir -p /tmp/reclaim-readme-preview
-RECLAIM_PREVIEW_DIR=/tmp/reclaim-readme-preview cargo test --locked pages_render_at_minimum_and_default_sizes_in_both_themes
+RECLAIM_PREVIEW_DIR=/tmp/reclaim-previews cargo test --locked --bin reclaim slint_workspace
 ```
 
-Convert `page-0-dark-920.ppm` to `reclaim-drives.png`. For the mixed file-type results screenshot, run:
-
-```sh
-RECLAIM_PREVIEW_DIR=/tmp/reclaim-readme-preview cargo test --locked file_type_icons_open_details_with_dates_and_unknown_deletion_time
-```
-
-Convert `file-types-English.ppm` to `reclaim-results.png`, keeping the original image dimensions. A PPM-capable image editor or Python’s Pillow library can perform the conversion.
-
-The fixtures are illustrative. They do not establish real-device recovery success or test native desktop window behavior.
+This renders Sources, Recovered files, and Settings & help across all seven languages in light and dark themes. English, Hebrew, and Arabic are also rendered at the compact window size. Filenames include locale, width, page, and theme. Native dialogs and physical device access need desktop testing.

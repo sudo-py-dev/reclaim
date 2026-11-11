@@ -15,3 +15,5 @@ The generated font is committed, so normal builds need no Python dependencies.
 All original copyright/license records remain in the subset. The applicable
 licenses are `FontAwesome-LICENSE.txt` and `DejaVu-LICENSE.txt`; packaging continues
 to include both license files.
+
+The Slint interface embeds DejaVu Sans regular and bold for consistent Latin, Hebrew, and Arabic rendering. Both are covered by `DejaVu-LICENSE.txt`.

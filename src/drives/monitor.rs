@@ -1,7 +1,6 @@
 //! Background native inventory refresh. No GUI timers, shell commands, or
 //! authentication requests: discovery only reads device metadata.
 use super::Drive;
-use eframe::egui;
 use std::{
     sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
     time::Duration,
@@ -24,15 +23,14 @@ impl DriveMonitor {
     }
 }
 
-pub fn watch(ctx: &egui::Context) -> Option<DriveMonitor> {
+pub fn watch() -> Option<DriveMonitor> {
     if !super::AVAILABLE {
         return None;
     }
-    watch_with(ctx.clone(), Duration::from_secs(2), super::discover)
+    watch_with(Duration::from_secs(2), super::discover)
 }
 
 fn watch_with(
-    ctx: egui::Context,
     interval: Duration,
     mut discover: impl FnMut() -> Inventory + Send + 'static,
 ) -> Option<DriveMonitor> {
@@ -51,7 +49,6 @@ fn watch_with(
                     match updates.try_send(current.clone()) {
                         Ok(()) => {
                             previous = Some(current);
-                            ctx.request_repaint();
                         }
                         Err(TrySendError::Full(_)) => {} // Keep previous; retry the newest state next time.
                         Err(TrySendError::Disconnected(_)) => break,
@@ -94,11 +91,9 @@ mod tests {
     fn monitor_reports_plug_unplug_and_manual_refresh_without_unchanged_updates() {
         let state = Arc::new(Mutex::new(Ok(vec![drive("one")])));
         let worker_state = state.clone();
-        let monitor = watch_with(
-            egui::Context::default(),
-            Duration::from_millis(10),
-            move || worker_state.lock().unwrap().clone(),
-        )
+        let monitor = watch_with(Duration::from_millis(10), move || {
+            worker_state.lock().unwrap().clone()
+        })
         .unwrap();
         assert_eq!(
             monitor

@@ -68,6 +68,8 @@ impl<R: Read + Seek> Read for SourceReader<R> {
                 .size
                 .map(|n| (n - aligned).min(self.window_size as u64) as usize)
                 .unwrap_or(self.window_size);
+            // A failed refill must not expose new bytes under the old offset.
+            self.cached_at = None;
             self.cached_len = 0;
             while self.cached_len < required {
                 match self.inner.read(
@@ -141,6 +143,66 @@ pub(crate) fn is_media_error(error: &io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_partial_refill_does_not_relabel_new_bytes_with_the_old_offset() {
+        struct FailingReader {
+            data: io::Cursor<Vec<u8>>,
+            eof: bool,
+        }
+        impl Read for FailingReader {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                if self.data.position() >= 1024 * 1024 + 512 {
+                    return if self.eof {
+                        Ok(0)
+                    } else {
+                        Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "read failed",
+                        ))
+                    };
+                }
+                let count = if self.data.position() >= 1024 * 1024 {
+                    bytes.len().min(512)
+                } else {
+                    bytes.len()
+                };
+                self.data.read(&mut bytes[..count])
+            }
+        }
+        impl Seek for FailingReader {
+            fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+                self.data.seek(from)
+            }
+        }
+        for alignment in [512, 4096] {
+            for eof in [false, true] {
+                let mut data = vec![1; 2 * 1024 * 1024];
+                data[1024 * 1024..].fill(2);
+                let input = FailingReader {
+                    data: io::Cursor::new(data),
+                    eof,
+                };
+                let mut reader =
+                    SourceReader::new(input, alignment, Some(2 * 1024 * 1024)).unwrap();
+                let mut byte = [0];
+                reader.read_exact(&mut byte).unwrap();
+                assert_eq!(byte, [1]);
+                reader.seek(SeekFrom::Start(1024 * 1024)).unwrap();
+                assert_eq!(
+                    reader.read(&mut byte).unwrap_err().kind(),
+                    if eof {
+                        io::ErrorKind::UnexpectedEof
+                    } else {
+                        io::ErrorKind::PermissionDenied
+                    }
+                );
+                reader.seek(SeekFrom::Start(0)).unwrap();
+                reader.read_exact(&mut byte).unwrap();
+                assert_eq!(byte, [1], "alignment {alignment}, eof {eof}");
+            }
+        }
+    }
+
     #[test]
     fn an_unreadable_nonempty_device_is_an_error_not_an_empty_scan() {
         for alignment in [1, 512, 4096] {

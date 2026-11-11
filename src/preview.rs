@@ -1,4 +1,3 @@
-use eframe::egui;
 use reclaim::Found;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -83,7 +82,7 @@ pub fn load(
     found: &Found,
     handle: Option<Arc<std::fs::File>>,
     alignment: usize,
-) -> Result<egui::ColorImage, String> {
+) -> Result<image::RgbaImage, String> {
     if found.size > 32 * 1024 * 1024 {
         return Err(
             "This image is too large to preview. Recover it to view the full image.".into(),
@@ -117,16 +116,13 @@ pub fn load(
     let image = reader.decode().map_err(|_| {
         "This image could not be previewed. Its contents may be incomplete or damaged.".to_string()
     })?;
-    let image = if image.width() > 80 || image.height() > 80 {
-        image.thumbnail(80, 80)
+    let image = if image.width() > 512 || image.height() > 512 {
+        image.thumbnail(512, 512)
     } else {
         image
     }
     .to_rgba8();
-    Ok(egui::ColorImage::from_rgba_unmultiplied(
-        [image.width() as usize, image.height() as usize],
-        image.as_raw(),
-    ))
+    Ok(image)
 }
 
 #[cfg(test)]
@@ -153,7 +149,7 @@ mod tests {
         let mut bytes = std::io::Cursor::new(Vec::new());
         image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
         let preview = load(&candidate(bytes.get_ref()), None, 1).unwrap();
-        assert_eq!(preview.size, [2, 3]);
+        assert_eq!(preview.dimensions(), (2, 3));
         assert!(load(&candidate(b"damaged"), None, 1).is_err());
         let mut large = candidate(b"");
         large.size = 33 * 1024 * 1024;
