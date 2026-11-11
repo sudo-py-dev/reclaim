@@ -201,5 +201,9 @@
   "This update is not signed by the Reclaim release key": "This update is not signed by the Reclaim release key",
   "Update checksum verification failed": "Update checksum verification failed",
   "Update exceeds expected size": "Update exceeds expected size",
-  "Update signature verification failed": "Update signature verification failed"
+  "Update signature verification failed": "Update signature verification failed",
+  "Minimize": "Minimize",
+  "Maximize": "Maximize",
+  "Restore": "Restore",
+  "Close": "Close"
 }

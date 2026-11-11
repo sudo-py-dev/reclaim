@@ -201,5 +201,9 @@
   "This update is not signed by the Reclaim release key": "هذا التحديث غير موقّع بمفتاح إصدارات Reclaim",
   "Update checksum verification failed": "فشل التحقق من المجموع الاختباري للتحديث",
   "Update exceeds expected size": "يتجاوز التحديث الحجم المتوقع",
-  "Update signature verification failed": "فشل التحقق من توقيع التحديث"
+  "Update signature verification failed": "فشل التحقق من توقيع التحديث",
+  "Minimize": "تصغير",
+  "Maximize": "تكبير",
+  "Restore": "استعادة الحجم",
+  "Close": "إغلاق"
 }

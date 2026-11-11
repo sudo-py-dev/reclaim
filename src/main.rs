@@ -960,6 +960,12 @@ fn run() -> Result<(), slint::PlatformError> {
             },
         );
     }
+    // macOS users expect the native traffic-light buttons; elsewhere the app
+    // draws its own themed title bar.
+    ui.set_custom_frame(!cfg!(target_os = "macos"));
+    ui.on_close_window(|| {
+        let _ = slint::quit_event_loop();
+    });
     state.borrow().sync_ui(&ui);
     let result = ui.run();
     state.borrow().cancel.store(true, Ordering::Relaxed);

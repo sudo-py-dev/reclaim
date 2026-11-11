@@ -201,5 +201,9 @@
   "This update is not signed by the Reclaim release key": "Esta actualización no está firmada con la clave de publicación de Reclaim",
   "Update checksum verification failed": "Falló la verificación de la suma de comprobación de la actualización",
   "Update exceeds expected size": "La actualización supera el tamaño esperado",
-  "Update signature verification failed": "Falló la verificación de la firma de la actualización"
+  "Update signature verification failed": "Falló la verificación de la firma de la actualización",
+  "Minimize": "Minimizar",
+  "Maximize": "Maximizar",
+  "Restore": "Restaurar",
+  "Close": "Cerrar"
 }

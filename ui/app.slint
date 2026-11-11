@@ -35,6 +35,10 @@ export global Strings {
     in-out property <string> icons: "Icons";
     in-out property <string> select-all: "Select all";
     in-out property <string> choose-a-drive: "Choose a drive";
+    in-out property <string> minimize: "Minimize";
+    in-out property <string> maximize: "Maximize";
+    in-out property <string> restore: "Restore";
+    in-out property <string> close: "Close";
     in-out property <string> save-to-a-different-physical-drive: "Save to a different physical drive";
     in-out property <string> separator: " · ";
     in-out property <string> searching-candidates-will-appear-here: "Searching… candidates will appear here.";
@@ -80,6 +84,8 @@ export global Palette {
     out property <color> line: dark ? #3b424f : #dfe4ec;
     out property <color> ink: dark ? #e6e9ef : #151c2b;
     out property <color> muted: dark ? #aab3c2 : #5b6880;
+    // Supporting text that must stay readable, between ink and muted.
+    out property <color> secondary: dark ? #c9d0db : #3f4b60;
     out property <color> accent: dark ? #a3bdff : #2c5cc5;
     out property <color> primary: dark ? #4c7be0 : #2c5cc5;
     out property <color> primary-hover: dark ? #5c89ea : #3567d3;
@@ -321,11 +327,54 @@ component DeviceTag inherits Rectangle {
     tag := Text { text: root.text; font-family: "DejaVu Sans Mono"; font-size: 11px; color: Palette.muted; }
 }
 
+// One caption button of the custom title bar. Close turns red on hover, as on Windows.
+component CaptionButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> danger;
+    callback clicked();
+    width: 46px; height: 36px;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    background: touch.pressed ? (root.danger ? #a52a1f : Palette.line)
+        : touch.has-hover ? (root.danger ? #c42b1c : Palette.subtle) : transparent;
+    animate background { duration: 100ms; }
+    Image { source: root.icon; width: 16px; height: 16px; colorize: root.danger && touch.has-hover ? #ffffff : Palette.ink; }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Title bar for the frameless window on Windows and Linux: drag to move,
+// double-click to maximize, caption buttons at the inline end (left in RTL).
+component TitleBar inherits Rectangle {
+    in property <bool> maximized;
+    callback minimize();
+    callback toggle-maximize();
+    callback close();
+    height: 36px;
+    WindowMoveArea {
+        TouchArea { double-clicked => { root.toggle-maximize(); } }
+    }
+    Row { alignment: end;
+        CaptionButton { icon: @image-url("icons/window-minimize.svg"); label: Strings.minimize; clicked => { root.minimize(); } }
+        CaptionButton {
+            icon: root.maximized ? @image-url("icons/window-restore.svg") : @image-url("icons/window-maximize.svg");
+            label: root.maximized ? Strings.restore : Strings.maximize;
+            clicked => { root.toggle-maximize(); }
+        }
+        CaptionButton { icon: @image-url("icons/window-close.svg"); label: Strings.close; danger: true; clicked => { root.close(); } }
+    }
+}
+
 export component AppWindow inherits Window {
     title: Strings.window-title;
     icon: @image-url("../assets/icons/reclaim.png");
     preferred-width: 1160px; preferred-height: 780px; min-width: 900px; min-height: 640px;
     background: Palette.bg; default-font-family: "DejaVu Sans"; default-font-size: 13px;
+    // Draw our own title bar (Windows, Linux). macOS keeps its native traffic lights.
+    in property <bool> custom-frame: true;
+    no-frame: root.custom-frame;
+    callback close-window();
     in property <[DriveItem]> drives;
     in property <[FileItem]> files;
     in property <string> source: Strings.no-source-selected;
@@ -369,33 +418,41 @@ export component AppWindow inherits Window {
         // ── Sidebar ─────────────────────────────────────────────
         Rectangle { width: 232px; background: Palette.surface;
             VerticalLayout { padding: 16px; spacing: 4px;
-                Row { height: 36px; spacing: 10px;
-                    Image { width: 32px; height: 32px; source: @image-url("../assets/icons/reclaim-64.png"); }
-                    Label { text: Strings.reclaim; color: Palette.ink; font-size: 19px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                // Brand: icon and name kept together at the inline start; drags the window.
+                Rectangle { height: 36px;
+                    Row { alignment: start; spacing: 8px;
+                        Image { width: 32px; height: 32px; source: @image-url("../assets/icons/reclaim-64.png"); }
+                        Label { text: Strings.reclaim; color: Palette.ink; font-size: 19px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 0; }
+                    }
+                    if root.custom-frame : WindowMoveArea { }
                 }
-                Rectangle { height: 4px; }
-                Label { text: Strings.a-second-chance-for-your; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
-                Rectangle { height: 16px; }
+                Rectangle { height: 6px; }
+                Label { text: Strings.a-second-chance-for-your; color: Palette.secondary; font-size: 12px; wrap: word-wrap; }
+                Rectangle { height: 20px; }
                 NavItem { text: Strings.sources; icon: @image-url("icons/drive.svg"); current: root.page == 0; clicked => { root.page = 0; } }
                 NavItem { text: Strings.recovered-files; icon: @image-url("icons/files.svg"); current: root.page == 1; clicked => { root.page = 1; } }
                 NavItem { text: Strings.settings-help; icon: @image-url("icons/settings.svg"); current: root.page == 2; clicked => { root.page = 2; } }
-                Rectangle { vertical-stretch: 1; }
+                Rectangle { vertical-stretch: 1; min-height: 24px; }
                 Rectangle { border-radius: 10px; background: Palette.bg; vertical-stretch: 0;
                     VerticalLayout { padding: 12px; spacing: 6px;
                         Row { spacing: 8px;
                             Image { source: @image-url("icons/shield.svg"); width: 16px; height: 16px; colorize: Palette.accent; }
                             Label { text: Strings.read-only-by-design; color: Palette.ink; font-size: 12px; font-weight: 600; min-width: 0px; horizontal-stretch: 1; wrap: word-wrap; }
                         }
-                        Label { text: Strings.your-source-stays-untouched-save; color: Palette.muted; wrap: word-wrap; font-size: 12px; }
+                        Label { text: Strings.your-source-stays-untouched-save; color: Palette.secondary; wrap: word-wrap; font-size: 12px; }
                     }
                 }
-                Rectangle { height: 8px; }
-                Label { text: "RECLAIM  /  " + root.version; color: Palette.muted; font-size: 10px; }
+                Rectangle { height: 12px; }
+                // Footer: product and version, aligned with the card's text.
+                Row { alignment: start; spacing: 6px; padding-left: 12px; padding-right: 12px; height: 18px;
+                    Label { text: "Reclaim"; color: Palette.muted; font-size: 11px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 0; }
+                    DeviceTag { text: "v" + root.version; }
+                }
             }
         }
         Rectangle { width: 1px; background: Palette.line; }
         // ── Page ────────────────────────────────────────────────
-        VerticalLayout { horizontal-stretch: 1; padding: 24px; padding-top: 20px; spacing: 16px;
+        VerticalLayout { horizontal-stretch: 1; padding: 24px; padding-top: root.custom-frame ? 40px : 20px; spacing: 16px;
             VerticalLayout { spacing: 4px; vertical-stretch: 0;
                 Label { text: root.page == 0 ? Strings.sources : root.page == 1 ? Strings.recovered-files : Strings.settings-help; color: Palette.ink; font-size: 22px; font-weight: 700; }
                 Body { text: root.page == 0 ? Strings.choose-a-drive-or-disk : root.page == 1 ? Strings.inspect-candidates-choose-your-files : Strings.appearance-updates-and-a-little; }
@@ -590,4 +647,16 @@ export component AppWindow inherits Window {
             }
         }
     }
+    // The page column's title bar, drawn over its top padding.
+    if root.custom-frame : TitleBar {
+        x: Locale.rtl ? 0px : 233px;
+        y: 0px;
+        width: root.width - 233px;
+        maximized: root.maximized;
+        minimize => { root.minimized = true; }
+        toggle-maximize => { root.maximized = !root.maximized; }
+        close => { root.close-window(); }
+    }
+    // A hairline edge, since a frameless window has no system border.
+    if root.custom-frame && !root.maximized : Rectangle { border-width: 1px; border-color: Palette.line; }
 }

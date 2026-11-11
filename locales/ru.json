@@ -201,5 +201,9 @@
   "This update is not signed by the Reclaim release key": "Это обновление не подписано ключом выпусков Reclaim",
   "Update checksum verification failed": "Не удалось проверить контрольную сумму обновления",
   "Update exceeds expected size": "Размер обновления больше ожидаемого",
-  "Update signature verification failed": "Не удалось проверить подпись обновления"
+  "Update signature verification failed": "Не удалось проверить подпись обновления",
+  "Minimize": "Свернуть",
+  "Maximize": "Развернуть",
+  "Restore": "Восстановить",
+  "Close": "Закрыть"
 }

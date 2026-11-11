@@ -201,5 +201,9 @@
   "This update is not signed by the Reclaim release key": "העדכון הזה אינו חתום במפתח ההפצה של Reclaim",
   "Update checksum verification failed": "אימות סכום הביקורת של העדכון נכשל",
   "Update exceeds expected size": "העדכון גדול מהגודל הצפוי",
-  "Update signature verification failed": "אימות החתימה של העדכון נכשל"
+  "Update signature verification failed": "אימות החתימה של העדכון נכשל",
+  "Minimize": "מזעור",
+  "Maximize": "הגדלה",
+  "Restore": "שחזור גודל",
+  "Close": "סגירה"
 }
