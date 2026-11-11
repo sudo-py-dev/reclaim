@@ -64,7 +64,7 @@ jobs:
           cp "$binary" "dist/$ASSET"
           if [[ "$RUNNER_OS" == macOS ]]; then codesign --force --sign - "dist/$ASSET"; fi
           cp "dist/$ASSET" bundle/
-          cp LICENSE assets/fonts/DejaVu-LICENSE.txt assets/fonts/FontAwesome-LICENSE.txt bundle/
+          cp LICENSE assets/fonts/DejaVu-LICENSE.txt bundle/
           python - <<'PY'
           import os, pathlib, zipfile, hashlib
           asset = os.environ['ASSET']

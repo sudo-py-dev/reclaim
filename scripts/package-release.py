@@ -20,7 +20,7 @@ def run(*args):
 
 def licenses(destination):
     destination.mkdir(parents=True, exist_ok=True)
-    for source in ['LICENSE', 'assets/fonts/DejaVu-LICENSE.txt', 'assets/fonts/FontAwesome-LICENSE.txt']:
+    for source in ['LICENSE', 'assets/fonts/DejaVu-LICENSE.txt']:
         shutil.copy2(ROOT / source, destination)
 
 
@@ -53,7 +53,7 @@ Description: Read-only disk image carving and file recovery
     (root / 'usr/share/doc/reclaim/copyright').write_text(
         'Upstream-Name: Reclaim\nSource: https://github.com/sudo-py-dev/reclaim\n'
         'License: MIT; see LICENSE in this directory.\n'
-        'Bundled fonts: see DejaVu-LICENSE.txt and FontAwesome-LICENSE.txt.\n')
+        'Bundled fonts: see DejaVu-LICENSE.txt.\n')
     for path in root.rglob('*'):
         path.chmod(0o755 if path.is_dir() or path == root / 'usr/bin/reclaim' else 0o644)
     root.chmod(0o755)

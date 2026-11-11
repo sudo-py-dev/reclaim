@@ -129,4 +129,4 @@ File signatures and format-specific recovery limits are documented in [the forma
 
 ## License
 
-[MIT](LICENSE). Bundled fonts and icons include their [DejaVu](assets/fonts/DejaVu-LICENSE.txt) and [Font Awesome](assets/fonts/FontAwesome-LICENSE.txt) license notices.
+[MIT](LICENSE). Bundled fonts include their [DejaVu](assets/fonts/DejaVu-LICENSE.txt) license notice.

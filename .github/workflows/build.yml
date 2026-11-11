@@ -34,7 +34,7 @@ jobs:
           cp packaging/macos/Info.plist dist/Reclaim.app/Contents/
           mkdir -p dist/Reclaim.app/Contents/Resources
           cp assets/icons/reclaim.icns dist/Reclaim.app/Contents/Resources/
-          cp assets/fonts/DejaVu-LICENSE.txt assets/fonts/FontAwesome-LICENSE.txt dist/Reclaim.app/Contents/Resources/
+          cp assets/fonts/DejaVu-LICENSE.txt dist/Reclaim.app/Contents/Resources/
           codesign --force --sign - dist/Reclaim.app
           ditto -c -k --keepParent dist/Reclaim.app dist/Reclaim-macOS.zip
       - uses: actions/upload-artifact@v4
@@ -47,4 +47,3 @@ jobs:
             README.md
             LICENSE
             assets/fonts/DejaVu-LICENSE.txt
-            assets/fonts/FontAwesome-LICENSE.txt

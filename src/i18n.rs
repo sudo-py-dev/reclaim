@@ -32,19 +32,22 @@ pub enum Preference {
     Arabic,
     Russian,
 }
+/// Menu order, display language and saved settings code for every preference.
+/// `Preference` discriminants match the menu index used by the interface.
+const PREFERENCES: [(Preference, Option<Language>, &str); 8] = [
+    (Preference::System, None, "system"),
+    (Preference::English, Some(Language::English), "en"),
+    (Preference::Hebrew, Some(Language::Hebrew), "he"),
+    (Preference::Spanish, Some(Language::Spanish), "es"),
+    (Preference::French, Some(Language::French), "fr"),
+    (Preference::German, Some(Language::German), "de"),
+    (Preference::Arabic, Some(Language::Arabic), "ar"),
+    (Preference::Russian, Some(Language::Russian), "ru"),
+];
 static PREFERENCE: AtomicU8 = AtomicU8::new(0);
 thread_local! { static OVERRIDE: Cell<Option<Language>> = const { Cell::new(None) }; }
 fn en() -> &'static BTreeMap<String, String> {
-    static C: OnceLock<BTreeMap<String, String>> = OnceLock::new();
-    C.get_or_init(|| {
-        serde_json::from_str(include_str!("../locales/en.json")).expect("valid English catalog")
-    })
-}
-fn he() -> &'static BTreeMap<String, String> {
-    static C: OnceLock<BTreeMap<String, String>> = OnceLock::new();
-    C.get_or_init(|| {
-        serde_json::from_str(include_str!("../locales/he.json")).expect("valid Hebrew catalog")
-    })
+    catalog(Language::English)
 }
 fn catalog(language: Language) -> &'static BTreeMap<String, String> {
     macro_rules! bundled {
@@ -56,8 +59,8 @@ fn catalog(language: Language) -> &'static BTreeMap<String, String> {
         }};
     }
     match language {
-        Language::English => en(),
-        Language::Hebrew => he(),
+        Language::English => bundled!("../locales/en.json"),
+        Language::Hebrew => bundled!("../locales/he.json"),
         Language::Spanish => bundled!("../locales/es.json"),
         Language::French => bundled!("../locales/fr.json"),
         Language::German => bundled!("../locales/de.json"),
@@ -65,37 +68,21 @@ fn catalog(language: Language) -> &'static BTreeMap<String, String> {
         Language::Russian => bundled!("../locales/ru.json"),
     }
 }
+/// The preference shown at `index` in the language menu.
+pub fn preference_at(index: usize) -> Option<Preference> {
+    PREFERENCES.get(index).map(|entry| entry.0)
+}
 pub fn preference() -> Preference {
-    match PREFERENCE.load(Ordering::Relaxed) {
-        1 => Preference::English,
-        2 => Preference::Hebrew,
-        3 => Preference::Spanish,
-        4 => Preference::French,
-        5 => Preference::German,
-        6 => Preference::Arabic,
-        7 => Preference::Russian,
-
-        _ => Preference::System,
-    }
+    preference_at(PREFERENCE.load(Ordering::Relaxed).into()).unwrap_or(Preference::System)
 }
 pub fn language() -> Language {
     if let Some(language) = OVERRIDE.with(Cell::get) {
         return language;
     }
-    match preference() {
-        Preference::English => Language::English,
-        Preference::Hebrew => Language::Hebrew,
-        Preference::Spanish => Language::Spanish,
-        Preference::French => Language::French,
-        Preference::German => Language::German,
-        Preference::Arabic => Language::Arabic,
-        Preference::Russian => Language::Russian,
-        Preference::System => {
-            static SYSTEM: OnceLock<Language> = OnceLock::new();
-            *SYSTEM
-                .get_or_init(|| language_for_locale(&sys_locale::get_locale().unwrap_or_default()))
-        }
-    }
+    PREFERENCES[preference() as usize].1.unwrap_or_else(|| {
+        static SYSTEM: OnceLock<Language> = OnceLock::new();
+        *SYSTEM.get_or_init(|| language_for_locale(&sys_locale::get_locale().unwrap_or_default()))
+    })
 }
 pub fn is_rtl() -> bool {
     matches!(language(), Language::Hebrew | Language::Arabic)
@@ -133,56 +120,33 @@ pub fn init() {
     let Some(path) = settings_path() else {
         return;
     };
-    if let Ok(file) = std::fs::File::open(path) {
-        let mut value = String::new();
-        if file.take(64).read_to_string(&mut value).is_ok() {
-            let value = serde_json::from_str::<String>(&value).unwrap_or_default();
-            PREFERENCE.store(
-                match value.as_str() {
-                    "en" => 1,
-                    "he" => 2,
-                    "es" => 3,
-                    "fr" => 4,
-                    "de" => 5,
-                    "ar" => 6,
-                    "ru" => 7,
-
-                    _ => 0,
-                },
-                Ordering::Relaxed,
-            );
-        }
+    let Ok(file) = std::fs::File::open(path) else {
+        return;
+    };
+    let mut value = String::new();
+    if file.take(64).read_to_string(&mut value).is_ok() {
+        let code = serde_json::from_str::<String>(&value).unwrap_or_default();
+        let index = PREFERENCES
+            .iter()
+            .position(|entry| entry.2 == code)
+            .unwrap_or(0);
+        PREFERENCE.store(index as u8, Ordering::Relaxed);
     }
 }
 pub fn set_preference(value: Preference) -> io::Result<()> {
-    let number = match value {
-        Preference::System => 0,
-        Preference::English => 1,
-        Preference::Hebrew => 2,
-        Preference::Spanish => 3,
-        Preference::French => 4,
-        Preference::German => 5,
-        Preference::Arabic => 6,
-        Preference::Russian => 7,
+    PREFERENCE.store(value as u8, Ordering::Relaxed);
+    let Some(path) = settings_path() else {
+        return Ok(());
     };
-    PREFERENCE.store(number, Ordering::Relaxed);
-    if let Some(path) = settings_path() {
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
-        let text = match value {
-            Preference::System => "\"system\"",
-            Preference::English => "\"en\"",
-            Preference::Hebrew => "\"he\"",
-            Preference::Spanish => "\"es\"",
-            Preference::French => "\"fr\"",
-            Preference::German => "\"de\"",
-            Preference::Arabic => "\"ar\"",
-            Preference::Russian => "\"ru\"",
-        };
-        temporary.write_all(text.as_bytes())?;
-        temporary.as_file().sync_all()?;
-        temporary.persist(path).map_err(|e| e.error)?;
-    }
+    let folder = path
+        .parent()
+        .ok_or_else(|| io::Error::other("Invalid settings path"))?;
+    std::fs::create_dir_all(folder)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(folder)?;
+    let code = PREFERENCES[value as usize].2;
+    temporary.write_all(serde_json::to_string(code)?.as_bytes())?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -270,6 +234,16 @@ pub fn message(key: &str, values: &[&str]) -> String {
 pub fn has_message(key: &str) -> bool {
     en().contains_key(key)
 }
+/// Templated English keys, longest first so specific patterns win over generic
+/// count labels. Sorted once: `translate` runs for every status refresh.
+fn patterns() -> &'static [&'static String] {
+    static PATTERNS: OnceLock<Vec<&'static String>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        let mut patterns: Vec<_> = en().keys().filter(|key| key.contains('{')).collect();
+        patterns.sort_by_key(|key| std::cmp::Reverse(key.len()));
+        patterns
+    })
+}
 fn translate(text: &str, language: Language, depth: usize) -> String {
     if language == Language::English || depth > 5 {
         return text.into();
@@ -278,10 +252,7 @@ fn translate(text: &str, language: Language, depth: usize) -> String {
     if let Some(value) = translations.get(text) {
         return value.clone();
     }
-    // Longer patterns take precedence over generic count labels.
-    let mut patterns: Vec<_> = en().keys().filter(|key| key.contains('{')).collect();
-    patterns.sort_by_key(|key| std::cmp::Reverse(key.len()));
-    for key in patterns {
+    for &key in patterns() {
         let Some(values) = capture(key, text) else {
             continue;
         };
@@ -359,6 +330,14 @@ mod tests {
         Language::Russian,
     ];
 
+    #[test]
+    fn preference_table_matches_menu_order_and_round_trips() {
+        for (index, (preference, _, code)) in PREFERENCES.iter().enumerate() {
+            assert_eq!(*preference as usize, index, "{code}");
+            assert_eq!(preference_at(index), Some(*preference));
+        }
+        assert_eq!(preference_at(PREFERENCES.len()), None);
+    }
     #[test]
     fn catalogs_cover_all_keys_and_keep_format_arguments() {
         for language in LANGUAGES {

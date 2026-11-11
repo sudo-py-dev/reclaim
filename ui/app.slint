@@ -14,7 +14,6 @@ export global Strings {
     in-out property <string> settings-help: "Settings & help";
     in-out property <string> read-only-by-design: "Read-only by design";
     in-out property <string> your-source-stays-untouched-save: "Your source stays untouched. Save recovered files to another drive.";
-    in-out property <string> reclaim-0-1-11: "RECLAIM  /  0.1.11";
     in-out property <string> choose-a-drive-or-disk: "Choose a drive or disk image to search for deleted files.";
     in-out property <string> inspect-candidates-choose-your-files: "Inspect candidates, choose your files, and recover them safely.";
     in-out property <string> appearance-updates-and-a-little: "Appearance, updates, and a little guidance.";
@@ -348,7 +347,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 Rectangle { height: 8px; }
-                Label { text: Strings.reclaim-0-1-11; color: Palette.muted; font-size: 10px; }
+                Label { text: "RECLAIM  /  " + root.version; color: Palette.muted; font-size: 10px; }
             }
         }
         Rectangle { width: 1px; background: Palette.line; }

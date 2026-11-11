@@ -8,6 +8,7 @@ use std::{
 
 const REPO: &str = "sudo-py-dev/reclaim";
 const MAX_BINARY: u64 = 128 * 1024 * 1024;
+const USER_AGENT: &str = concat!("Reclaim/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Clone, Debug)]
 pub struct Release {
@@ -37,6 +38,15 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
+/// Every request identifies the app, as GitHub's API requires.
+fn get(url: &str) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+    agent().get(url).header("User-Agent", USER_AGENT)
+}
+
+fn release_url(tag: &str, asset: &str) -> String {
+    format!("https://github.com/{REPO}/releases/download/{tag}/{asset}")
+}
+
 fn check_error(error: ureq::Error) -> String {
     log::warn!("Could not check GitHub releases: {error}");
     match error {
@@ -52,14 +62,12 @@ fn check_error(error: ureq::Error) -> String {
 }
 
 pub fn check() -> Result<Option<Release>, String> {
-    let mut response = agent()
-        .get(&format!(
-            "https://api.github.com/repos/{REPO}/releases/latest"
-        ))
-        .header("User-Agent", concat!("Reclaim/", env!("CARGO_PKG_VERSION")))
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(check_error)?;
+    let mut response = get(&format!(
+        "https://api.github.com/repos/{REPO}/releases/latest"
+    ))
+    .header("Accept", "application/vnd.github+json")
+    .call()
+    .map_err(check_error)?;
     let json = response
         .body_mut()
         .with_config()
@@ -109,9 +117,7 @@ fn parse_release_after(
     let url = asset["browser_download_url"]
         .as_str()
         .ok_or("Missing download URL")?;
-    if url != format!("https://github.com/{REPO}/releases/download/{tag}/{asset_name}")
-        || !(tag == version.to_string() || tag == format!("v{version}"))
-    {
+    if url != release_url(tag, asset_name) {
         return Err("Unexpected release download URL".into());
     }
     let digest = asset["digest"]
@@ -124,14 +130,17 @@ fn parse_release_after(
         .as_u64()
         .filter(|s| *s > 0 && *s <= MAX_BINARY)
         .ok_or("Invalid update size")?;
-    Ok(Some(Release {
+    let release = Release {
         version,
         asset: asset_name.into(),
         notes: json["body"].as_str().unwrap_or("No release notes.").into(),
         url: url.into(),
         digest,
         size,
-    }))
+    };
+    // Also rejects tags that are not exactly `vX.Y.Z` or `X.Y.Z` for the parsed version.
+    validate_url(&release)?;
+    Ok(Some(release))
 }
 
 /// Installed packages must be updated as packages to preserve receipts and uninstall metadata.
@@ -150,14 +159,8 @@ pub fn download_installer(
     destination: &std::path::Path,
     progress: impl Fn(u64, u64),
 ) -> Result<(), String> {
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-    if installer_name(&executable, &release.version).as_deref() != Some(&release.asset) {
-        return Err("Unexpected installer for this installation".into());
-    }
-    validate_url(release)?;
-    let mut response = agent()
-        .get(&release.url)
-        .header("User-Agent", concat!("Reclaim/", env!("CARGO_PKG_VERSION")))
+    expect_installer(release)?;
+    let mut response = get(&release.url)
         .call()
         .map_err(|e| format!("Could not download update: {e}"))?;
     publish_download(
@@ -190,17 +193,24 @@ fn validate_url(release: &Release) -> Result<(), String> {
     if release.asset.is_empty() || release.asset.contains(['/', '\\', '?', '#', '%']) {
         return Err("Unexpected release asset name".into());
     }
-    for tag in [format!("v{}", release.version), release.version.to_string()] {
-        if release.url
-            == format!(
-                "https://github.com/{REPO}/releases/download/{tag}/{}",
-                release.asset
-            )
-        {
-            return Ok(());
-        }
+    let version = release.version.to_string();
+    if [format!("v{version}"), version]
+        .iter()
+        .any(|tag| release.url == release_url(tag, &release.asset))
+    {
+        Ok(())
+    } else {
+        Err("Unexpected release download URL".into())
     }
-    Err("Unexpected release download URL".into())
+}
+
+/// The release must be the package format this installation was installed with.
+fn expect_installer(release: &Release) -> Result<(), String> {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    if installer_name(&executable, &release.version).as_deref() != Some(&release.asset) {
+        return Err("Unexpected installer for this installation".into());
+    }
+    validate_url(release)
 }
 
 fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Option<String> {
@@ -244,10 +254,7 @@ pub fn install_with_progress(release: &Release, progress: impl Fn(u64, u64)) -> 
     }
     // Private temporary file, bounded streaming download, verify before replacing anything.
     let mut file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
-    let mut response = agent()
-        .get(&release.url)
-        .call()
-        .map_err(|e| e.to_string())?;
+    let mut response = get(&release.url).call().map_err(|e| e.to_string())?;
     verify_download_progress(
         response.body_mut().as_reader(),
         &mut file,
@@ -280,11 +287,7 @@ fn replace_executable(
 
 /// Recheck a staged package immediately before handing it to the native installer.
 pub fn verify_installer_file(release: &Release, path: &std::path::Path) -> Result<(), String> {
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-    if installer_name(&executable, &release.version).as_deref() != Some(&release.asset) {
-        return Err("Unexpected installer for this installation".into());
-    }
-    validate_url(release)?;
+    expect_installer(release)?;
     verify_download_progress(
         std::fs::File::open(path).map_err(|e| e.to_string())?,
         std::io::sink(),

@@ -14,59 +14,71 @@ pub fn open_installer(path: &std::path::Path) -> Result<(), String> {
         portal_open(Some(&path), None)?;
     }
     #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
-        // SAFETY: the terminated strings remain alive until ShellExecuteW returns.
-        let result = unsafe {
-            windows_sys::Win32::UI::Shell::ShellExecuteW(
-                std::ptr::null_mut(),
-                verb.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                1,
-            )
-        } as isize;
-        if result <= 32 {
-            return Err(format!(
-                "Could not open installer (Windows error {result}). Open the downloaded file from Explorer."
-            ));
-        }
-    }
+    shell_open(path.as_os_str()).map_err(|code| {
+        format!(
+            "Could not open installer (Windows error {code}). Open the downloaded file from Explorer."
+        )
+    })?;
     #[cfg(target_os = "macos")]
     {
-        use core_foundation_sys::{
-            base::{CFRelease, kCFAllocatorDefault},
-            url::{CFURLCreateFromFileSystemRepresentation, CFURLRef},
-        };
         use std::os::unix::ffi::OsStrExt;
-        #[link(name = "CoreServices", kind = "framework")]
-        unsafe extern "C" {
-            fn LSOpenCFURLRef(url: CFURLRef, launched: *mut CFURLRef) -> i32;
-        }
         let bytes = path.as_os_str().as_bytes();
-        // SAFETY: URL is created from a live byte slice; the returned +1 reference
-        // is released after Launch Services has consumed it.
-        unsafe {
-            let url = CFURLCreateFromFileSystemRepresentation(
-                kCFAllocatorDefault,
+        // SAFETY: the URL is created from a live byte slice; the +1 reference is
+        // handed to `launch`, which releases it.
+        let url = unsafe {
+            core_foundation_sys::url::CFURLCreateFromFileSystemRepresentation(
+                core_foundation_sys::base::kCFAllocatorDefault,
                 bytes.as_ptr(),
                 bytes.len() as isize,
                 0,
-            );
-            if url.is_null() {
-                return Err("Could not create installer file URL".into());
-            }
-            let status = LSOpenCFURLRef(url, std::ptr::null_mut());
-            CFRelease(url.cast());
-            if status != 0 {
-                return Err(format!("Could not open installer: {status}"));
-            }
-        }
+            )
+        };
+        launch(url)
+            .ok_or("Could not create installer file URL")?
+            .map_err(|status| format!("Could not open installer: {status}"))?;
     }
     Ok(())
+}
+
+/// `ShellExecuteW` "open" for a file or URL; returns the Windows error code on failure.
+#[cfg(windows)]
+fn shell_open(target: &std::ffi::OsStr) -> Result<(), isize> {
+    use std::os::windows::ffi::OsStrExt;
+    let target: Vec<u16> = target.encode_wide().chain(Some(0)).collect();
+    let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+    // SAFETY: both terminated strings remain alive until ShellExecuteW returns.
+    let result = unsafe {
+        windows_sys::Win32::UI::Shell::ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    } as isize;
+    if result <= 32 { Err(result) } else { Ok(()) }
+}
+
+/// Open a newly created (+1) URL with Launch Services, then release it.
+/// `None` when the URL could not be created; otherwise the Launch Services status.
+#[cfg(target_os = "macos")]
+fn launch(url: core_foundation_sys::url::CFURLRef) -> Option<Result<(), i32>> {
+    use core_foundation_sys::{base::CFRelease, url::CFURLRef};
+    #[link(name = "CoreServices", kind = "framework")]
+    unsafe extern "C" {
+        fn LSOpenCFURLRef(url: CFURLRef, launched: *mut CFURLRef) -> i32;
+    }
+    if url.is_null() {
+        return None;
+    }
+    // SAFETY: `url` is a live, owned CFURL; it is released exactly once here.
+    let status = unsafe {
+        let status = LSOpenCFURLRef(url, std::ptr::null_mut());
+        CFRelease(url.cast());
+        status
+    };
+    Some(if status == 0 { Ok(()) } else { Err(status) })
 }
 
 #[cfg(target_os = "linux")]
@@ -149,53 +161,23 @@ pub fn open_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     portal_open(None, Some(url))?;
     #[cfg(windows)]
-    {
-        let url: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
-        let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
-        // SAFETY: both terminated strings remain live through the native call.
-        let result = unsafe {
-            windows_sys::Win32::UI::Shell::ShellExecuteW(
-                std::ptr::null_mut(),
-                verb.as_ptr(),
-                url.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                1,
-            )
-        } as isize;
-        if result <= 32 {
-            return Err(format!("Could not open browser (Windows error {result})."));
-        }
-    }
+    shell_open(std::ffi::OsStr::new(url))
+        .map_err(|code| format!("Could not open browser (Windows error {code})."))?;
     #[cfg(target_os = "macos")]
     {
-        use core_foundation_sys::{
-            base::{CFRelease, kCFAllocatorDefault},
-            string::kCFStringEncodingUTF8,
-            url::{CFURLCreateWithBytes, CFURLRef},
-        };
-        #[link(name = "CoreServices", kind = "framework")]
-        unsafe extern "C" {
-            fn LSOpenCFURLRef(url: CFURLRef, launched: *mut CFURLRef) -> i32;
-        }
-        // SAFETY: live UTF-8 bytes; release the created reference after opening.
-        unsafe {
-            let native_url = CFURLCreateWithBytes(
-                kCFAllocatorDefault,
+        // SAFETY: live UTF-8 bytes; the +1 reference is handed to `launch`.
+        let native_url = unsafe {
+            core_foundation_sys::url::CFURLCreateWithBytes(
+                core_foundation_sys::base::kCFAllocatorDefault,
                 url.as_ptr(),
                 url.len() as isize,
-                kCFStringEncodingUTF8,
+                core_foundation_sys::string::kCFStringEncodingUTF8,
                 std::ptr::null(),
-            );
-            if native_url.is_null() {
-                return Err("Could not create browser URL.".into());
-            }
-            let status = LSOpenCFURLRef(native_url, std::ptr::null_mut());
-            CFRelease(native_url.cast());
-            if status != 0 {
-                return Err(format!("Could not open browser: {status}"));
-            }
-        }
+            )
+        };
+        launch(native_url)
+            .ok_or("Could not create browser URL.")?
+            .map_err(|status| format!("Could not open browser: {status}"))?;
     }
     #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
     return Err("Opening browser links is unavailable on this platform.".into());

@@ -126,26 +126,19 @@ impl Reclaim {
         self.allocation_ready = false;
         self.scanned = 0;
         self.total = 0;
-        let source_size = self
-            .drives
-            .iter()
-            .find(|d| d.path == path)
+        let drive = self.drives.iter().find(|d| d.path == path);
+        let source_size = drive
             .map(|d| d.size)
             .unwrap_or_else(|| path.metadata().map(|m| m.len()).unwrap_or(0));
         self.source_size = (source_size > 0).then_some(source_size);
         self.source_handle = None;
-        self.source_alignment = self
-            .drives
-            .iter()
-            .find(|d| d.path == path)
-            .map(|d| d.sector_size)
-            .unwrap_or_else(|| {
-                if cfg!(target_os = "windows") && path.to_string_lossy().starts_with(r"\\.\") {
-                    4096
-                } else {
-                    1
-                }
-            });
+        self.source_alignment = drive.map(|d| d.sector_size).unwrap_or_else(|| {
+            if cfg!(target_os = "windows") && path.to_string_lossy().starts_with(r"\\.\") {
+                4096
+            } else {
+                1
+            }
+        });
         let alignment = self.source_alignment;
         let source_size = self.source_size;
         self.scanned_source = Some(path.clone());
@@ -204,10 +197,14 @@ impl Reclaim {
             .map(|(i, _)| i)
             .collect()
     }
+    fn selected_indices(&self) -> Vec<usize> {
+        let mut indices = self.visible_result_indices();
+        indices.retain(|&index| self.results[index].selected);
+        indices
+    }
     fn recovery_files(&self) -> Vec<(Found, usize)> {
-        self.visible_result_indices()
+        self.selected_indices()
             .into_iter()
-            .filter(|&index| self.results[index].selected)
             .map(|index| (self.results[index].clone(), index + 1))
             .collect()
     }
@@ -412,15 +409,6 @@ impl Reclaim {
                         if !self.unused_scan {
                             self.scanned = self.scanned.max(offset);
                         }
-                        if !self.cancel.load(Ordering::Relaxed) {
-                            self.status = format!(
-                                "{} · {} · {} · {}",
-                                "Checking file contents…",
-                                kind.to_uppercase(),
-                                format_bytes(bytes as u64),
-                                format_bytes(offset)
-                            );
-                        }
                     }
                     Message::Done(result) => {
                         self.scan_activity = None;
@@ -504,7 +492,8 @@ impl Reclaim {
         );
         ui.set_busy(self.busy);
         ui.set_can_scan(!self.busy && self.source.is_some());
-        ui.set_can_recover(!self.busy && !self.recovery_files().is_empty());
+        let selected = self.selected_indices().len();
+        ui.set_can_recover(!self.busy && selected > 0);
         let status = if let Some((offset, kind, size, _)) = self.scan_activity
             && self.busy
             && !self.cancel.load(Ordering::Relaxed)
@@ -536,10 +525,7 @@ impl Reclaim {
         ui.set_summary(
             i18n::message(
                 "Found: {0} · Selected: {1}",
-                &[
-                    &self.results.len().to_string(),
-                    &self.recovery_files().len().to_string(),
-                ],
+                &[&self.results.len().to_string(), &selected.to_string()],
             )
             .into(),
         );
@@ -606,6 +592,13 @@ impl Reclaim {
             .collect();
         replace_model(ui.get_files(), files, |m| ui.set_files(m));
     }
+}
+/// Clear the preview and invalidate any preview still loading on a worker.
+fn reset_preview(ui: &AppWindow) {
+    ui.set_preview(Default::default());
+    ui.set_preview_error_raw("".into());
+    ui.set_preview_error("".into());
+    ui.set_preview_token(ui.get_preview_token().wrapping_add(1));
 }
 fn replace_model<T: Clone + PartialEq + 'static>(
     current: ModelRc<T>,
@@ -694,18 +687,8 @@ fn run() -> Result<(), slint::PlatformError> {
     {
         let weak = ui.as_weak();
         ui.on_change_language(move |i| {
-            let choices = [
-                i18n::Preference::System,
-                i18n::Preference::English,
-                i18n::Preference::Hebrew,
-                i18n::Preference::Spanish,
-                i18n::Preference::French,
-                i18n::Preference::German,
-                i18n::Preference::Arabic,
-                i18n::Preference::Russian,
-            ];
-            if let Some(preference) = choices.get(i as usize) {
-                let result = i18n::set_preference(*preference);
+            if let Some(preference) = usize::try_from(i).ok().and_then(i18n::preference_at) {
+                let result = i18n::set_preference(preference);
                 if let Some(ui) = weak.upgrade() {
                     ui_text::apply(&ui);
                     if let Err(e) = result {
@@ -744,6 +727,20 @@ fn run() -> Result<(), slint::PlatformError> {
             });
         }};
     }
+    // Same as `action!` for callbacks that carry one value from the interface.
+    macro_rules! action_with {
+        ($method:ident, |$s:ident, $arg:ident: $ty:ty| $body:block) => {{
+            let state = state.clone();
+            let weak = ui.as_weak();
+            ui.$method(move |$arg: $ty| {
+                let mut $s = state.borrow_mut();
+                $body
+                if let Some(ui) = weak.upgrade() {
+                    $s.sync_ui(&ui);
+                }
+            });
+        }};
+    }
     action!(on_open_image, |s: &mut Reclaim, _: &AppWindow| {
         if !s.busy {
             s.choose_source();
@@ -758,10 +755,7 @@ fn run() -> Result<(), slint::PlatformError> {
             ui.set_page(1);
             ui.set_query("".into());
             ui.set_category(0);
-            ui.set_preview(Default::default());
-            ui.set_preview_error_raw("".into());
-            ui.set_preview_error("".into());
-            ui.set_preview_token(ui.get_preview_token().wrapping_add(1));
+            reset_preview(ui);
         }
     });
     action!(on_stop, |s: &mut Reclaim, _: &AppWindow| {
@@ -797,47 +791,23 @@ fn run() -> Result<(), slint::PlatformError> {
             }
         }
     });
-    {
-        let state = state.clone();
-        let weak = ui.as_weak();
-        ui.on_select_drive(move |i| {
-            let mut s = state.borrow_mut();
-            if !s.busy
-                && let Some(d) = s.drives.get(i as usize).filter(|d| !d.encrypted)
-            {
-                s.source = Some(d.path.clone());
-            }
-            if let Some(ui) = weak.upgrade() {
-                s.sync_ui(&ui);
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let weak = ui.as_weak();
-        ui.on_toggle_file(move |i| {
-            let mut s = state.borrow_mut();
-            if let Some(f) = s.results.get_mut(i as usize) {
-                f.selected = !f.selected;
-            }
-            if let Some(ui) = weak.upgrade() {
-                s.sync_ui(&ui);
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let weak = ui.as_weak();
-        ui.on_select_all(move |selected| {
-            let mut s = state.borrow_mut();
-            for i in s.visible_result_indices() {
-                s.results[i].selected = selected;
-            }
-            if let Some(ui) = weak.upgrade() {
-                s.sync_ui(&ui);
-            }
-        });
-    }
+    action_with!(on_select_drive, |s, i: i32| {
+        if !s.busy
+            && let Some(d) = s.drives.get(i as usize).filter(|d| !d.encrypted)
+        {
+            s.source = Some(d.path.clone());
+        }
+    });
+    action_with!(on_toggle_file, |s, i: i32| {
+        if let Some(f) = s.results.get_mut(i as usize) {
+            f.selected = !f.selected;
+        }
+    });
+    action_with!(on_select_all, |s, selected: bool| {
+        for i in s.visible_result_indices() {
+            s.results[i].selected = selected;
+        }
+    });
     {
         let state = state.clone();
         let weak = ui.as_weak();
@@ -850,10 +820,7 @@ fn run() -> Result<(), slint::PlatformError> {
             let Some(ui) = weak.upgrade() else {
                 return;
             };
-            ui.set_preview(Default::default());
-            ui.set_preview_error_raw("".into());
-            ui.set_preview_error("".into());
-            ui.set_preview_token(ui.get_preview_token().wrapping_add(1));
+            reset_preview(&ui);
             ui.set_detail(file_details(f, i as usize + 1).into());
             ui.set_inspected(i);
             if preview::supported(f.kind) {
