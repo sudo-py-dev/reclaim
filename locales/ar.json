@@ -205,5 +205,10 @@
   "Minimize": "تصغير",
   "Maximize": "تكبير",
   "Restore": "استعادة الحجم",
-  "Close": "إغلاق"
+  "Close": "إغلاق",
+  "What’s new": "ما الجديد",
+  "Later": "لاحقًا",
+  "Hide details": "إخفاء التفاصيل",
+  "You can keep working and update later.": "يمكنك متابعة العمل والتحديث لاحقًا.",
+  "Updates": "التحديثات"
 }

@@ -22,7 +22,7 @@ fn windows_installer_arguments() -> Vec<String> {
 
 /// Private per-user folder for staged update packages. Each download gets its
 /// own `pending-*` folder, removed after installing or on the next launch.
-fn cache_root() -> Result<PathBuf, String> {
+pub(super) fn cache_root() -> Result<PathBuf, String> {
     #[cfg(windows)]
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)

@@ -205,5 +205,10 @@
   "Minimize": "Свернуть",
   "Maximize": "Развернуть",
   "Restore": "Восстановить",
-  "Close": "Закрыть"
+  "Close": "Закрыть",
+  "What’s new": "Что нового",
+  "Later": "Позже",
+  "Hide details": "Скрыть подробности",
+  "You can keep working and update later.": "Можно продолжить работу и обновить приложение позже.",
+  "Updates": "Обновления"
 }

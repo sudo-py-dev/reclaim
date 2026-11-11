@@ -330,3 +330,98 @@ fn recovery_scrollbar_keeps_controls_clear_and_reaches_the_last_file() {
         }
     }
 }
+
+#[test]
+fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.set_update_available(true);
+    ui.set_update_notes("Improvements\n\n• Clearer recovery results\n• More reliable drive detection\n• Smaller downloads".into());
+    let installed = Rc::new(std::cell::Cell::new(false));
+    let flag = installed.clone();
+    ui.on_apply_update(move || flag.set(true));
+    let weak = ui.as_weak();
+    ui.on_dismiss_update(move || weak.upgrade().unwrap().set_update_notice(false));
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    for (code, language) in [
+        ("en", i18n::Language::English),
+        ("he", i18n::Language::Hebrew),
+    ] {
+        i18n::with_language(language, || {
+            ui_text::apply(&ui);
+            ui.set_update_title(i18n::message("Version {0} is available.", &["0.3.0"]).into());
+            ui.set_update_label(i18n::t("Update and restart").into());
+            for dark in [false, true] {
+                ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+                ui.set_page(0);
+                ui.set_update_notice(true);
+                ui.set_update_details_open(false);
+                let snapshot = ui.window().take_snapshot().unwrap();
+                if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                    std::fs::create_dir_all(&directory).unwrap();
+                    image::save_buffer(
+                        format!("{directory}/update-banner-{code}-{dark}.png"),
+                        snapshot.as_bytes(),
+                        snapshot.width(),
+                        snapshot.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+                let later = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                    &ui,
+                    &i18n::t("Later"),
+                )
+                .next()
+                .expect("dismiss update notice");
+                later.invoke_accessible_default_action();
+                assert!(!ui.get_update_notice());
+                assert!(ui.get_update_available());
+                assert!(!installed.get());
+                ui.set_update_notice(true);
+                ui.window().take_snapshot().unwrap();
+                let details = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                    &ui,
+                    &i18n::t("What’s new"),
+                )
+                .next()
+                .expect("review release notes");
+                details.invoke_accessible_default_action();
+                assert_eq!(ui.get_page(), 2);
+                assert!(ui.get_update_details_open());
+                assert!(!installed.get());
+                let snapshot = ui.window().take_snapshot().unwrap();
+                if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                    image::save_buffer(
+                        format!("{directory}/update-notes-{code}-{dark}.png"),
+                        snapshot.as_bytes(),
+                        snapshot.width(),
+                        snapshot.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+                ui.set_page(0);
+                ui.set_busy(true);
+                ui.window().take_snapshot().unwrap();
+                assert!(
+                    i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                        &ui,
+                        &i18n::t("Later")
+                    )
+                    .next()
+                    .is_none(),
+                    "no update banner during a scan"
+                );
+                ui.set_busy(false);
+            }
+        });
+    }
+}

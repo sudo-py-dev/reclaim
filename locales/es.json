@@ -205,5 +205,10 @@
   "Minimize": "Minimizar",
   "Maximize": "Maximizar",
   "Restore": "Restaurar",
-  "Close": "Cerrar"
+  "Close": "Cerrar",
+  "What’s new": "Novedades",
+  "Later": "Más tarde",
+  "Hide details": "Ocultar detalles",
+  "You can keep working and update later.": "Puedes seguir trabajando y actualizar más tarde.",
+  "Updates": "Actualizaciones"
 }
