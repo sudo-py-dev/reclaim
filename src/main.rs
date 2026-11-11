@@ -940,6 +940,7 @@ fn run() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         let last_language = std::cell::Cell::new(i18n::preference());
         let started = std::time::Instant::now();
+        let mut last_notes = Vec::new();
         timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(100),
@@ -961,7 +962,21 @@ fn run() -> Result<(), slint::PlatformError> {
                         s.sync_ui(&ui);
                     }
                     ui.set_update_status(i18n::t(&updates.status).into());
-                    ui.set_update_notes(updates.notes.clone().into());
+                    if last_notes != updates.notes {
+                        replace_model(
+                            ui.get_update_notes(),
+                            updates
+                                .notes
+                                .iter()
+                                .map(|note| ReleaseNoteBlock {
+                                    text: note.text.clone().into(),
+                                    kind: note.kind,
+                                })
+                                .collect(),
+                            |model| ui.set_update_notes(model),
+                        );
+                        last_notes.clone_from(&updates.notes);
+                    }
                     ui.set_update_busy(updates.busy());
                     ui.set_update_installing(updates.installing());
                     ui.set_update_notice(updates.notice_visible);

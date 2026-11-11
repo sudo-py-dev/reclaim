@@ -72,6 +72,7 @@ import { CheckBox, LineEdit, ScrollView, ListView as NativeListView, Palette as 
 export enum DriveIcon { disk, usb, volume, locked }
 export struct DriveItem { name: string, device: string, icon: DriveIcon, detail: string, size: string, available: bool }
 export struct FileItem { name: string, kind: string, size: string, selected: bool, index: int }
+export struct ReleaseNoteBlock { text: string, kind: int }
 export global Locale { in-out property <bool> rtl; }
 
 // Design tokens. Every colour in the interface comes from here so both themes stay consistent.
@@ -354,6 +355,24 @@ component Choice inherits Rectangle {
     }
 }
 
+// Release notes are rendered as bounded Markdown blocks, without executing links or HTML.
+component ReleaseNotes inherits Rectangle {
+    in property <[ReleaseNoteBlock]> notes;
+    height: min(190px, max(48px, notes-content.preferred-height + 8px));
+    ScrollView { width: parent.width; height: parent.height;
+        notes-content := VerticalLayout { padding: 4px; padding-right: 16px; spacing: 8px; alignment: start;
+            if root.notes.length == 0 : Label { text: Strings.no-release-notes; color: Palette.secondary; wrap: word-wrap; }
+            for block in root.notes : Label {
+                text: block.text; wrap: word-wrap; min-width: 0px;
+                color: block.kind == 1 ? Palette.ink : Palette.secondary;
+                font-size: block.kind == 1 ? 15px : 13px;
+                font-weight: block.kind == 1 ? 700 : 400;
+                font-family: block.kind == 3 ? "DejaVu Sans Mono" : "DejaVu Sans";
+            }
+        }
+    }
+}
+
 // Settings building blocks: every row has the same icon tile, label column and trailing control edge.
 component GroupTitle inherits Label { color: Palette.muted; font-size: 12px; font-weight: 600; }
 component IconTile inherits Rectangle {
@@ -508,7 +527,7 @@ export component AppWindow inherits Window {
     in-out property <string> query;
     in-out property <int> category;
     in property <string> update-status;
-    in property <string> update-notes;
+    in property <[ReleaseNoteBlock]> update-notes;
     in property <bool> update-busy;
     in property <bool> update-installing;
     in property <bool> update-notice;
@@ -568,24 +587,6 @@ export component AppWindow inherits Window {
                 Body { text: root.page == 0 ? Strings.choose-a-drive-or-disk : root.page == 1 ? Strings.inspect-candidates-choose-your-files : Strings.appearance-updates-and-a-little; }
             }
             // Sources: pick a drive, then start the scan.
-            if root.update-notice && !root.busy && !root.update-installing && root.page != 2 : Card {
-                vertical-stretch: 0;
-                VerticalLayout { padding: 12px; spacing: 8px;
-                    Row { spacing: 12px;
-                        IconTile { icon: @image-url("icons/download.svg"); }
-                        VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 3px;
-                            Label { text: root.update-title; color: Palette.ink; font-size: 13px; font-weight: 600; wrap: word-wrap; }
-                            Body { text: Strings.update-when-ready; font-size: 12px; }
-                        }
-                    }
-                    Row { spacing: 8px;
-                        Action { text: Strings.whats-new; quiet: true; clicked => { root.page = 2; root.update-details-open = true; } }
-                        Rectangle { horizontal-stretch: 1; }
-                        Action { text: Strings.later; quiet: true; clicked => { root.dismiss-update(); } }
-                        Action { text: root.update-label; primary: true; enabled: !root.update-busy; clicked => { root.apply-update(); } }
-                    }
-                }
-            }
             if root.page == 0 : VerticalLayout { vertical-stretch: 1; spacing: 12px;
                 Row { height: Metrics.control; cross-axis-alignment: stretch; spacing: 8px;
                     SectionLabel { text: Strings.available-sources; vertical-alignment: center; }
@@ -748,9 +749,7 @@ export component AppWindow inherits Window {
                         }
                         if root.update-details-open : VerticalLayout { spacing: 8px;
                             Label { text: Strings.whats-new; color: Palette.ink; font-size: 13px; font-weight: 600; }
-                            ScrollView { height: min(180px, max(72px, release-notes.preferred-height + 4px)); vertical-stretch: 0;
-                                release-notes := Label { x: 0px; y: 0px; width: parent.width - 16px; height: self.preferred-height; vertical-alignment: top; text: root.update-notes != "" ? root.update-notes : Strings.no-release-notes; color: Palette.secondary; font-size: 13px; wrap: word-wrap; }
-                            }
+                            ReleaseNotes { notes: root.update-notes; }
                         }
                         if root.update-installing : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * clamp(root.update-progress, 0, 1); background: Palette.primary; animate width { duration: 200ms; } } }
                     }
@@ -793,6 +792,30 @@ export component AppWindow inherits Window {
             // Settings has nothing to do with scanning, so it only appears there while a scan runs or failed.
             if (root.page == 1 && root.show-status) || (root.page == 2 && (root.busy || root.error != "")) : Card { vertical-stretch: 0;
                 ScanStatus { padding: 12px; padding-left: 16px; padding-right: 16px; status: root.status; error: root.error; busy: root.busy; progress: root.progress; stop => { root.stop(); } }
+            }
+        }
+    }
+    // A non-modal floating notice stays above the page without changing its layout.
+    if root.update-notice && !root.busy && !root.update-installing && root.page != 2 : Rectangle {
+        x: Locale.rtl ? 20px : root.width - self.width - 20px;
+        y: root.height - self.height - 20px;
+        width: 460px; height: notice-content.preferred-height;
+        background: Palette.surface; border-radius: 12px; border-width: 1px; border-color: Palette.line;
+        drop-shadow-blur: 24px; drop-shadow-offset-y: 6px; drop-shadow-color: #00000050;
+        notice-content := VerticalLayout { padding: 20px; spacing: 12px;
+            Row { spacing: 12px;
+                IconTile { icon: @image-url("icons/download.svg"); }
+                VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 4px;
+                    Label { text: root.update-title; color: Palette.ink; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+                    Body { text: Strings.update-when-ready; font-size: 12px; }
+                }
+            }
+            if root.update-details-open : ReleaseNotes { notes: root.update-notes; }
+            Row { spacing: 8px;
+                Action { text: root.update-details-open ? Strings.hide-details : Strings.whats-new; quiet: true; clicked => { root.update-details-open = !root.update-details-open; } }
+                Rectangle { horizontal-stretch: 1; }
+                Action { text: Strings.later; quiet: true; clicked => { root.dismiss-update(); } }
+                Action { text: root.update-label; primary: true; enabled: !root.update-busy; clicked => { root.apply-update(); } }
             }
         }
     }
