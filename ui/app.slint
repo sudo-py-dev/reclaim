@@ -1,0 +1,521 @@
+import "../assets/fonts/DejaVuSans.ttf";
+import "../assets/fonts/DejaVuSans-Bold.ttf";
+export global Strings {
+    in-out property <string> window-title: "Reclaim — File Recovery";
+    in-out property <string> language: "Language";
+    in-out property <string> appearance: "Appearance";
+
+    in-out property <string> no-source-selected: "No source selected";
+    in-out property <string> select-a-file-to-inspect: "Select a file to inspect its details.";
+    in-out property <string> reclaim: "reclaim";
+    in-out property <string> a-second-chance-for-your: "A second chance for your files";
+    in-out property <string> sources: "Sources";
+    in-out property <string> recovered-files: "Recovered files";
+    in-out property <string> settings-help: "Settings & help";
+    in-out property <string> read-only-by-design: "Read-only by design";
+    in-out property <string> your-source-stays-untouched-save: "Your source stays untouched. Save recovered files to another drive.";
+    in-out property <string> choose-a-drive-or-disk: "Choose a drive or disk image to search for deleted files.";
+    in-out property <string> inspect-candidates-choose-your-files: "Inspect candidates, choose your files, and recover them safely.";
+    in-out property <string> appearance-updates-and-a-little: "Appearance, updates, and a little guidance.";
+    in-out property <string> available-sources: "AVAILABLE SOURCES";
+    in-out property <string> refresh: "Refresh";
+    in-out property <string> open-disk-image: "Open disk image";
+    in-out property <string> no-drives-found-open-a: "No drives found. Open a disk image or connect a drive and refresh.";
+    in-out property <string> selected-source: "SELECTED SOURCE";
+    in-out property <string> start-scanning: "Start scanning";
+    in-out property <string> search-name-or-offset: "Search name or offset…";
+    in-out property <string> all-files: "All files";
+    in-out property <string> pictures: "Pictures";
+    in-out property <string> documents: "Documents";
+    in-out property <string> archives: "Archives";
+    in-out property <string> audio: "Audio";
+    in-out property <string> video: "Video";
+    in-out property <string> applications: "Applications";
+    in-out property <string> icons: "Icons";
+    in-out property <string> select-all: "Select all";
+    in-out property <string> clear: "Clear";
+    in-out property <string> separator: " · ";
+    in-out property <string> searching-candidates-will-appear-here: "Searching… candidates will appear here.";
+    in-out property <string> no-matching-files-yet-start: "No matching files yet. Start a scan from Sources.";
+    in-out property <string> file-inspector: "FILE INSPECTOR";
+    in-out property <string> candidates-may-be-incomplete-verify: "Candidates may be incomplete. Verify recovered files before relying on them.";
+    in-out property <string> recover-selected: "Recover selected";
+    in-out property <string> system-language: "System language";
+    in-out property <string> light: "Light";
+    in-out property <string> dark: "Dark";
+    in-out property <string> system: "System";
+    in-out property <string> general: "General";
+    in-out property <string> about: "About";
+    in-out property <string> version: "Version";
+    in-out property <string> recover-in-three-steps: "Recover in three steps";
+    in-out property <[string]> recovery-step-list;
+    in-out property <string> supported-formats: "Supported formats";
+    in-out property <string> photos-documents-archives-audio-video: "Photos, documents, archives, audio, video, applications, and small NTFS resident files. FAT and NTFS unused-space scanning.";
+    in-out property <string> check-for-updates: "Check for updates";
+    in-out property <string> project-website: "Project website";
+    in-out property <string> built-with-rust-and-slint: "Built with Rust and Slint · MIT licensed application";
+    in-out property <string> stop: "Stop";
+}
+import { CheckBox, LineEdit, ScrollView, ListView, Palette as NativePalette } from "std-widgets.slint";
+export struct DriveItem { name: string, detail: string, size: string, available: bool }
+export struct FileItem { name: string, kind: string, size: string, selected: bool, index: int }
+export global Locale { in-out property <bool> rtl; }
+
+// Design tokens. Every colour in the interface comes from here so both themes stay consistent.
+export global Palette {
+    // 0 follows the system colour scheme, 1 is light, 2 is dark.
+    in-out property <int> theme: 0;
+    changed theme => { NativePalette.color-scheme = self.theme == 2 ? ColorScheme.dark : self.theme == 1 ? ColorScheme.light : ColorScheme.unknown; }
+    // The widget style resolves the system scheme; its background tells us which one it picked.
+    property <color> native-background: NativePalette.background;
+    out property <bool> dark: theme == 2 || (theme == 0 && native-background.to-hsv().value < 0.5);
+    out property <color> bg: dark ? #1c2028 : #f4f6f9;
+    out property <color> surface: dark ? #252a33 : #ffffff;
+    out property <color> subtle: dark ? #303641 : #eef1f6;
+    out property <color> hover: dark ? #2c313c : #f3f5f9;
+    out property <color> selected: dark ? #31415f : #e6eeff;
+    out property <color> line: dark ? #3b424f : #dfe4ec;
+    out property <color> ink: dark ? #e6e9ef : #151c2b;
+    out property <color> muted: dark ? #aab3c2 : #5b6880;
+    out property <color> accent: dark ? #a3bdff : #2c5cc5;
+    out property <color> primary: dark ? #4c7be0 : #2c5cc5;
+    out property <color> primary-hover: dark ? #5c89ea : #3567d3;
+    out property <color> primary-pressed: dark ? #416cc9 : #244ea8;
+    out property <color> danger: dark ? #ffaaa4 : #b42318;
+}
+// Shared metrics: one control height, one radius scale, spacing in multiples of 4.
+global Metrics {
+    out property <length> control: 36px;
+    out property <length> radius: 8px;
+}
+
+component Label inherits Text { vertical-stretch: 0; horizontal-alignment: Locale.rtl ? right : left; }
+component Row inherits FlexboxLayout {
+    flex-direction: Locale.rtl ? FlexboxLayoutDirection.row-reverse : FlexboxLayoutDirection.row;
+    flex-wrap: no-wrap; alignment: stretch; cross-axis-alignment: center;
+}
+component SectionLabel inherits Label { color: Palette.muted; font-size: 11px; font-weight: 700; letter-spacing: 0.4px; }
+component Body inherits Label { color: Palette.muted; font-size: 13px; wrap: word-wrap; }
+component Divider inherits Rectangle { height: 1px; background: Palette.line; vertical-stretch: 0; }
+component Card inherits Rectangle { clip: true; background: Palette.surface; border-radius: 12px; border-width: 1px; border-color: Palette.line; }
+
+// One button component: filled for the single primary action of a page, outlined otherwise,
+// borderless (`quiet`) for low-emphasis actions.
+component Action inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> primary;
+    in property <bool> quiet;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: Metrics.control; min-width: 64px; horizontal-stretch: 0;
+    preferred-width: caption.preferred-width + (root.icon.width > 0 ? 26px : 0px) + 30px;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    border-radius: Metrics.radius;
+    border-width: focus.has-focus ? 2px : primary || quiet ? 0px : 1px;
+    border-color: focus.has-focus ? Palette.accent : Palette.line;
+    background: primary ? (touch.pressed ? Palette.primary-pressed : touch.has-hover ? Palette.primary-hover : Palette.primary)
+        : touch.pressed ? Palette.line : touch.has-hover ? Palette.subtle : quiet ? transparent : Palette.surface;
+    animate background { duration: 120ms; }
+    opacity: enabled ? 1 : 0.45;
+    focus := FocusScope { enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    Row { padding-left: 14px; padding-right: 14px; spacing: 8px;
+        if root.icon.width > 0 : Image { source: root.icon; width: 18px; height: 18px; colorize: root.primary ? white : Palette.accent; }
+        caption := Label { font-size: 13px; font-weight: root.primary ? 600 : 500; min-width: 0px; horizontal-stretch: 1; overflow: elide; text: root.text; color: root.primary ? white : Palette.ink; vertical-alignment: center; }
+    }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+
+// Sidebar destination. The current page is tinted, never filled, so it does not compete with primary buttons.
+component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> current;
+    callback clicked();
+    min-height: 40px; vertical-stretch: 0;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    border-radius: Metrics.radius;
+    border-width: focus.has-focus ? 2px : 0px; border-color: Palette.accent;
+    background: current ? Palette.selected : touch.has-hover ? Palette.hover : transparent;
+    animate background { duration: 120ms; }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    Row { padding: 8px; padding-left: 12px; padding-right: 12px; spacing: 12px;
+        Image { source: root.icon; width: 18px; height: 18px; colorize: root.current ? Palette.accent : Palette.muted; }
+        Label { font-size: 13px; font-weight: root.current ? 600 : 400; min-width: 0px; horizontal-stretch: 1; wrap: word-wrap; text: root.text; color: root.current ? Palette.ink : Palette.muted; vertical-alignment: center; }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+
+// Icon-only segmented choice between light, dark and system themes.
+component ThemeOption inherits Rectangle {
+    in property <int> value;
+    in property <string> label;
+    in property <image> icon;
+    property <bool> current: Palette.theme == root.value;
+    width: 40px; height: 30px; border-radius: 6px;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.current;
+    accessible-action-default => { Palette.theme = root.value; }
+    background: current ? Palette.surface : touch.has-hover ? Palette.line : transparent;
+    border-width: focus.has-focus ? 2px : current ? 1px : 0px;
+    border-color: focus.has-focus ? Palette.accent : Palette.line;
+    animate background { duration: 120ms; }
+    Image { source: root.icon; width: 18px; height: 18px; colorize: root.current ? Palette.accent : Palette.muted; }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return { Palette.theme = root.value; return accept; }
+            return reject;
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); Palette.theme = root.value; } }
+}
+component ThemePicker inherits Rectangle {
+    width: 132px; height: Metrics.control; horizontal-stretch: 0;
+    border-radius: Metrics.radius; background: Palette.subtle;
+    Row { padding: 3px; spacing: 3px;
+        ThemeOption { value: 1; label: Strings.light; icon: @image-url("icons/sun.svg"); }
+        ThemeOption { value: 2; label: Strings.dark; icon: @image-url("icons/moon.svg"); }
+        ThemeOption { value: 0; label: Strings.system; icon: @image-url("icons/system.svg"); }
+    }
+}
+
+component Choice inherits Rectangle {
+    in property <[string]> model;
+    in-out property <int> current-index;
+    callback selected(int);
+    height: Metrics.control; min-width: 150px; horizontal-stretch: 1;
+    background: touch.has-hover ? Palette.subtle : Palette.surface; border-radius: Metrics.radius;
+    border-color: focus.has-focus ? Palette.accent : Palette.line; border-width: focus.has-focus ? 2px : 1px;
+    forward-focus: focus;
+    accessible-role: combobox;
+    accessible-label: model[current-index];
+    accessible-expanded: popup.is-open;
+    accessible-action-default => { focus.focus(); if popup.is-open { popup.close(); } else { popup.show(); } }
+    Row { padding-left: 12px; padding-right: 10px; spacing: 8px;
+        Label { text: root.model[root.current-index]; font-size: 13px; color: Palette.ink; overflow: elide; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; }
+        Image { source: @image-url("icons/chevron.svg"); colorize: Palette.muted; width: 16px; height: 16px; }
+    }
+    callback key-handler(KeyEvent) -> EventResult;
+    key-handler(event) => {
+            if event.text == Key.Escape { popup.close(); return accept; }
+            if event.text == Key.Space || event.text == Key.Return { if popup.is-open { popup.close(); } else { popup.show(); } return accept; }
+            if event.text == Key.DownArrow || event.text == Key.UpArrow {
+                root.current-index = clamp(root.current-index + (event.text == Key.DownArrow ? 1 : -1), 0, root.model.length - 1);
+                root.selected(root.current-index); return accept;
+            }
+            return reject;
+    }
+    focus := FocusScope { key-pressed(event) => { root.key-handler(event) } }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); if popup.is-open { popup.close(); } else { popup.show(); } } }
+    popup := PopupWindow {
+        y: root.height + 4px; width: root.width; height: min(320px, root.model.length * 36px + 10px);
+        close-policy: close-on-click-outside;
+        forward-focus: popup-focus;
+        popup-focus := FocusScope { key-pressed(event) => { root.key-handler(event) }
+        Rectangle { background: Palette.surface; border-width: 1px; border-color: Palette.line; border-radius: Metrics.radius; drop-shadow-blur: 16px; drop-shadow-offset-y: 4px; drop-shadow-color: #00000040;
+            ListView { x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
+                for value[index] in root.model : Rectangle {
+                    height: 36px; border-radius: 6px; background: index == root.current-index ? Palette.selected : option.has-hover ? Palette.subtle : transparent;
+                    Label { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; text: value; font-size: 13px; color: Palette.ink; overflow: elide; }
+                    option := TouchArea { mouse-cursor: pointer; clicked => { root.current-index = index; root.selected(index); popup.close(); } }
+                }
+            }
+        }
+        }
+    }
+}
+
+// Settings building blocks: every row has the same icon tile, label column and trailing control edge.
+component GroupTitle inherits Label { color: Palette.muted; font-size: 12px; font-weight: 600; }
+component IconTile inherits Rectangle {
+    in property <image> icon;
+    width: 32px; height: 32px; border-radius: Metrics.radius; background: Palette.subtle;
+    Image { source: root.icon; width: 18px; height: 18px; colorize: Palette.accent; }
+}
+component SettingRow inherits Row {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> detail;
+    padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 12px; min-height: 60px;
+    IconTile { icon: root.icon; }
+    VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 2px; alignment: center;
+        Label { text: root.title; color: Palette.ink; font-size: 13px; font-weight: 500; wrap: word-wrap; }
+        if root.detail != "" : Label { text: root.detail; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
+    }
+    @children
+}
+// Divider that starts at the label column, so rows read as one group.
+component RowDivider inherits Rectangle { height: 1px; vertical-stretch: 0;
+    Rectangle { x: Locale.rtl ? 16px : 60px; width: parent.width - 76px; background: Palette.line; }
+}
+
+// Centered icon + message for lists that have nothing to show yet.
+component EmptyState inherits VerticalLayout {
+    in property <string> text;
+    in property <image> icon;
+    alignment: center; spacing: 12px; padding: 24px;
+    HorizontalLayout { alignment: center;
+        Rectangle { width: 48px; height: 48px; border-radius: 24px; background: Palette.subtle;
+            Image { source: root.icon; width: 22px; height: 22px; colorize: Palette.muted; }
+        }
+    }
+    Text { text: root.text; color: Palette.muted; font-size: 13px; wrap: word-wrap; horizontal-alignment: center; }
+}
+
+export component AppWindow inherits Window {
+    title: Strings.window-title;
+    icon: @image-url("../assets/icons/reclaim.png");
+    preferred-width: 1160px; preferred-height: 780px; min-width: 900px; min-height: 640px;
+    background: Palette.bg; default-font-family: "DejaVu Sans"; default-font-size: 13px;
+    in property <[DriveItem]> drives;
+    in property <[FileItem]> files;
+    in property <string> source: Strings.no-source-selected;
+    in property <string> status;
+    in property <string> error;
+    in property <string> summary;
+    in property <string> detail: Strings.select-a-file-to-inspect;
+    in property <image> preview;
+    in-out property <string> preview-error-raw;
+    in-out property <string> preview-error;
+    in-out property <int> preview-token;
+    in property <bool> busy;
+    in property <bool> can-scan;
+    in property <bool> can-recover;
+    in property <float> progress;
+    in property <int> selected-drive: -1;
+    in property <int> inspected: -1;
+    in property <string> version;
+    in-out property <int> page: 0;
+    in-out property <string> query;
+    in-out property <int> category;
+    in property <string> update-status;
+    in property <string> update-notes;
+    in property <bool> update-busy;
+    in property <bool> update-available;
+    in property <string> update-label;
+    in property <float> update-progress;
+    in-out property <int> language;
+    callback change-language(int);
+    callback open-project();
+    callback apply-update();
+    callback open-image(); callback refresh(); callback select-drive(int); callback scan(); callback stop();
+    callback recover(); callback toggle-file(int); callback inspect(int); callback select-all(bool); callback filter(); callback check-update();
+    Row { cross-axis-alignment: stretch;
+        // ── Sidebar ─────────────────────────────────────────────
+        Rectangle { width: 232px; background: Palette.surface;
+            VerticalLayout { padding: 16px; spacing: 4px;
+                Row { height: 36px; spacing: 10px;
+                    Rectangle { width: 32px; height: 32px; border-radius: 9px; background: Palette.selected;
+                        Image { width: 20px; height: 20px; source: @image-url("icons/brand.svg"); colorize: Palette.accent; }
+                    }
+                    Label { text: Strings.reclaim; color: Palette.ink; font-size: 19px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                }
+                Rectangle { height: 4px; }
+                Label { text: Strings.a-second-chance-for-your; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
+                Rectangle { height: 16px; }
+                NavItem { text: Strings.sources; icon: @image-url("icons/drive.svg"); current: root.page == 0; clicked => { root.page = 0; } }
+                NavItem { text: Strings.recovered-files; icon: @image-url("icons/files.svg"); current: root.page == 1; clicked => { root.page = 1; } }
+                NavItem { text: Strings.settings-help; icon: @image-url("icons/settings.svg"); current: root.page == 2; clicked => { root.page = 2; } }
+                Rectangle { vertical-stretch: 1; }
+                Rectangle { border-radius: 10px; background: Palette.bg; vertical-stretch: 0;
+                    VerticalLayout { padding: 12px; spacing: 6px;
+                        Row { spacing: 8px;
+                            Image { source: @image-url("icons/shield.svg"); width: 16px; height: 16px; colorize: Palette.accent; }
+                            Label { text: Strings.read-only-by-design; color: Palette.ink; font-size: 12px; font-weight: 600; min-width: 0px; horizontal-stretch: 1; wrap: word-wrap; }
+                        }
+                        Label { text: Strings.your-source-stays-untouched-save; color: Palette.muted; wrap: word-wrap; font-size: 12px; }
+                    }
+                }
+                Rectangle { height: 8px; }
+                Label { text: "RECLAIM  /  " + root.version; color: Palette.muted; font-size: 10px; }
+            }
+        }
+        Rectangle { width: 1px; background: Palette.line; }
+        // ── Page ────────────────────────────────────────────────
+        VerticalLayout { horizontal-stretch: 1; padding: 24px; padding-top: 20px; spacing: 16px;
+            VerticalLayout { spacing: 4px; vertical-stretch: 0;
+                Label { text: root.page == 0 ? Strings.sources : root.page == 1 ? Strings.recovered-files : Strings.settings-help; color: Palette.ink; font-size: 22px; font-weight: 700; }
+                Body { text: root.page == 0 ? Strings.choose-a-drive-or-disk : root.page == 1 ? Strings.inspect-candidates-choose-your-files : Strings.appearance-updates-and-a-little; }
+            }
+            // Sources: pick a drive, then start the scan.
+            if root.page == 0 : VerticalLayout { vertical-stretch: 1; spacing: 12px;
+                Row { height: Metrics.control; cross-axis-alignment: stretch; spacing: 8px;
+                    SectionLabel { text: Strings.available-sources; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; height: 1px; }
+                    Action { text: Strings.refresh; icon: @image-url("icons/refresh.svg"); enabled: !root.busy; clicked => { root.refresh(); } }
+                    Action { text: Strings.open-disk-image; icon: @image-url("icons/files.svg"); enabled: !root.busy; clicked => { root.open-image(); } }
+                }
+                Card { vertical-stretch: 1;
+                    if root.drives.length == 0 : EmptyState { text: Strings.no-drives-found-open-a; icon: @image-url("icons/drive.svg"); }
+                    if root.drives.length > 0 : ScrollView { VerticalLayout { padding: 8px; spacing: 4px; alignment: start;
+                        for drive[i] in root.drives : Rectangle {
+                            height: 60px; border-radius: Metrics.radius;
+                            opacity: drive.available ? 1 : 0.5;
+                            background: root.selected-drive == i ? Palette.selected : area.has-hover ? Palette.hover : transparent;
+                            animate background { duration: 120ms; }
+                            Row { padding-left: 12px; padding-right: 16px; spacing: 12px;
+                                Rectangle { width: 36px; height: 36px; border-radius: Metrics.radius; background: root.selected-drive == i ? Palette.surface : Palette.subtle;
+                                    Image { source: @image-url("icons/drive.svg"); width: 20px; height: 20px; colorize: Palette.accent; }
+                                }
+                                VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 2px; alignment: center;
+                                    Label { text: drive.name; color: Palette.ink; font-size: 14px; font-weight: 600; overflow: elide; }
+                                    Label { text: drive.detail; color: Palette.muted; font-size: 12px; overflow: elide; }
+                                }
+                                Label { text: drive.size; color: Palette.muted; font-size: 13px; vertical-alignment: center; }
+                                Rectangle { width: 18px; height: 18px; border-radius: 9px; border-width: 2px;
+                                    border-color: root.selected-drive == i ? Palette.primary : Palette.line;
+                                    Rectangle { visible: root.selected-drive == i; width: 8px; height: 8px; border-radius: 4px; background: Palette.primary; }
+                                }
+                            }
+                            forward-focus: drive-focus;
+                            accessible-role: button; accessible-label: drive.name;
+                            accessible-enabled: !root.busy && drive.available;
+                            accessible-action-default => { if !root.busy && drive.available { root.select-drive(i); } }
+                            border-width: drive-focus.has-focus ? 2px : 0px; border-color: Palette.accent;
+                            drive-focus := FocusScope { enabled: !root.busy && drive.available;
+                                key-pressed(event) => { if event.text == Key.Space || event.text == Key.Return { root.select-drive(i); return accept; } return reject; }
+                            }
+                            area := TouchArea { enabled: !root.busy && drive.available; mouse-cursor: pointer; clicked => { drive-focus.focus(); root.select-drive(i); } }
+                        }
+                    } }
+                }
+                Card { vertical-stretch: 0; Row { padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 16px;
+                    VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 4px; alignment: center;
+                        SectionLabel { text: Strings.selected-source; }
+                        Label { text: root.source; color: root.can-scan || root.busy ? Palette.ink : Palette.muted; font-size: 14px; overflow: elide; }
+                    }
+                    Action { height: 40px; text: Strings.start-scanning; icon: @image-url("icons/search.svg"); primary: true; enabled: root.can-scan; clicked => { root.scan(); } }
+                } }
+            }
+            // Recovered files: filter, inspect, select, recover.
+            if root.page == 1 : VerticalLayout { vertical-stretch: 1; spacing: 12px;
+                Row { height: Metrics.control; cross-axis-alignment: stretch; spacing: 8px;
+                    LineEdit { height: Metrics.control; min-width: 120px; horizontal-stretch: 2; font-size: 13px; horizontal-alignment: Locale.rtl ? right : left; placeholder-text: Strings.search-name-or-offset; text <=> root.query; edited => { root.filter(); } }
+                    Choice { horizontal-stretch: 1; max-width: 220px; model: [Strings.all-files, Strings.pictures, Strings.documents, Strings.archives, Strings.audio, Strings.video, Strings.applications, Strings.icons]; current-index <=> root.category; selected(_) => { root.filter(); } }
+                    Action { text: Strings.select-all; enabled: root.files.length > 0; clicked => { root.select-all(true); } }
+                    Action { text: Strings.clear; quiet: true; enabled: root.files.length > 0; clicked => { root.select-all(false); } }
+                }
+                Row { cross-axis-alignment: stretch; vertical-stretch: 1; spacing: 12px;
+                    Card { horizontal-stretch: 1; min-width: 0px;
+                        if root.files.length == 0 : EmptyState { text: root.busy ? Strings.searching-candidates-will-appear-here : Strings.no-matching-files-yet-start; icon: @image-url("icons/search.svg"); }
+                        if root.files.length > 0 : ListView { x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px;
+                            for file in root.files : Rectangle { height: 52px;
+                                accessible-role: list-item; accessible-label: file.name;
+                                accessible-action-default => { root.inspect(file.index); }
+                                Rectangle { y: 2px; height: parent.height - 4px; border-radius: Metrics.radius;
+                                    background: file.index == root.inspected ? Palette.selected : row.has-hover ? Palette.hover : transparent;
+                                    border-width: row-focus.has-focus ? 2px : 0px; border-color: Palette.accent;
+                                    row-focus := FocusScope {
+                                        key-pressed(event) => { if event.text == Key.Return { root.inspect(file.index); return accept; } return reject; }
+                                    }
+                                    row := TouchArea { mouse-cursor: pointer; clicked => { row-focus.focus(); root.inspect(file.index); } }
+                                    Row { padding-left: 10px; padding-right: 12px; spacing: 10px;
+                                        CheckBox { horizontal-stretch: 0; checked: file.selected; accessible-label: file.name; toggled => { root.toggle-file(file.index); } }
+                                        Image { source: @image-url("icons/files.svg"); width: 20px; height: 20px; colorize: Palette.accent; }
+                                        VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 2px; alignment: center;
+                                            Label { text: file.name; color: Palette.ink; font-size: 13px; font-weight: 500; overflow: elide; }
+                                            Label { text: file.kind + Strings.separator + file.size; color: Palette.muted; font-size: 11px; overflow: elide; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Card { width: 264px; VerticalLayout { padding: 16px; spacing: 12px;
+                        SectionLabel { text: Strings.file-inspector; }
+                        if root.preview.width > 0 : Rectangle { height: 132px; vertical-stretch: 0; border-radius: Metrics.radius; background: Palette.bg; clip: true;
+                            Image { source: root.preview; width: parent.width - 8px; height: parent.height - 8px; image-fit: contain; }
+                        }
+                        ScrollView { vertical-stretch: 1; Label { x: Locale.rtl ? 12px : 0px; y: 0px; width: parent.width - 12px; height: self.preferred-height; vertical-alignment: top; text: root.detail; font-size: 13px; color: root.inspected >= 0 ? Palette.ink : Palette.muted; wrap: word-wrap; } }
+                        if root.preview-error != "" : Label { text: root.preview-error; color: Palette.danger; wrap: word-wrap; font-size: 12px; }
+                        Divider { }
+                        Label { text: Strings.candidates-may-be-incomplete-verify; color: Palette.muted; wrap: word-wrap; font-size: 11px; }
+                    } }
+                }
+                Row { height: 40px; cross-axis-alignment: stretch; spacing: 16px;
+                    Label { text: root.summary; color: Palette.muted; font-size: 13px; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; overflow: elide; }
+                    Action { height: 40px; text: Strings.recover-selected; icon: @image-url("icons/reclaim.svg"); primary: true; enabled: root.can-recover; clicked => { root.recover(); } }
+                }
+            }
+            // Settings & help: preferences, then guidance, then version and project details.
+            // The scroll area reaches 16px into the page padding so its scrollbar never covers a card.
+            if root.page == 2 : Rectangle { vertical-stretch: 1; ScrollView { x: 0px; y: 0px; width: parent.width + 16px; height: parent.height; VerticalLayout { padding-right: 16px; spacing: 8px; alignment: start;
+                GroupTitle { text: Strings.general; }
+                Card { VerticalLayout {
+                    SettingRow { icon: @image-url("icons/globe.svg"); title: Strings.language;
+                        VerticalLayout { horizontal-stretch: 0; width: 220px; alignment: center; Choice { model: [Strings.system-language, "English", "עברית", "Español", "Français", "Deutsch", "العربية", "Русский"]; current-index <=> root.language; selected(i) => { root.change-language(i); } } }
+                    }
+                    RowDivider { }
+                    SettingRow { icon: @image-url("icons/contrast.svg"); title: Strings.appearance;
+                        ThemePicker { accessible-role: groupbox; accessible-label: Strings.appearance; }
+                    }
+                } }
+                Rectangle { height: 8px; }
+                GroupTitle { text: Strings.recover-in-three-steps; }
+                Card { VerticalLayout { padding: 16px; spacing: 12px;
+                    for step[i] in Strings.recovery-step-list : Row { spacing: 12px;
+                        Rectangle { width: 32px; height: 24px;
+                            Rectangle { width: 24px; height: 24px; border-radius: 12px; background: Palette.selected;
+                                Text { text: i + 1; color: Palette.accent; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                        Label { text: step; color: Palette.ink; font-size: 13px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
+                    }
+                    Divider { }
+                    Label { text: Strings.supported-formats; color: Palette.ink; font-size: 13px; font-weight: 600; }
+                    Body { text: Strings.photos-documents-archives-audio-video; }
+                } }
+                Rectangle { height: 8px; }
+                GroupTitle { text: Strings.about; }
+                Card { VerticalLayout {
+                    SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-status;
+                        if root.update-available : Action { text: root.update-label; primary: true; enabled: !root.busy && !root.update-busy; clicked => { root.apply-update(); } }
+                        Action { enabled: !root.update-busy; text: Strings.check-for-updates; icon: @image-url("icons/refresh.svg"); clicked => { root.check-update(); } }
+                    }
+                    if root.update-notes != "" || root.update-busy : VerticalLayout { padding: 16px; padding-top: 0px; spacing: 12px;
+                        if root.update-notes != "" : Body { text: root.update-notes; }
+                        if root.update-busy : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * root.update-progress; background: Palette.primary; animate width { duration: 200ms; } } }
+                    }
+                    RowDivider { }
+                    SettingRow { icon: @image-url("icons/brand.svg"); title: Strings.reclaim; detail: Strings.built-with-rust-and-slint;
+                        Action { text: Strings.project-website; icon: @image-url("icons/external.svg"); clicked => { root.open-project(); } }
+                    }
+                } }
+            } } }
+            // Status strip: what the app is doing right now, with progress and Stop while a scan runs.
+            // Settings has nothing to do with scanning, so it only appears there while a scan runs or failed.
+            if root.page != 2 || root.busy || root.error != "" : Card { vertical-stretch: 0; VerticalLayout { padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 10px;
+                Row { spacing: 12px; min-height: 28px;
+                    Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.error != "" ? Palette.danger : root.busy ? Palette.primary : Palette.line; }
+                    Label { text: root.status; color: Palette.ink; font-size: 13px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
+                    if root.busy : Action { height: 28px; text: Strings.stop; clicked => { root.stop(); } }
+                }
+                if root.busy || root.progress > 0 : Rectangle { height: 4px; background: Palette.line; border-radius: 2px; clip: true;
+                    if root.busy && root.progress == 0 : Rectangle { x: (parent.width + self.width) * mod(animation-tick() / 1ms, 1800) / 1800 - self.width; width: parent.width / 4; border-radius: 2px; background: Palette.primary; }
+                    Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * root.progress; background: Palette.primary; border-radius: 2px; animate width { duration: 250ms; } }
+                }
+                if root.error != "" : Label { text: root.error; color: Palette.danger; wrap: word-wrap; font-size: 12px; }
+            } }
+        }
+    }
+}

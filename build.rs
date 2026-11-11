@@ -1,4 +1,7 @@
 fn main() {
+    let config = slint_build::CompilerConfiguration::new()
+        .with_debug_info(std::env::var("PROFILE").as_deref() == Ok("debug"));
+    slint_build::compile_with_config("ui/app.slint", config).expect("compile Slint interface");
     println!("cargo:rerun-if-changed=assets/icons/reclaim.ico");
     #[cfg(windows)]
     winresource::WindowsResource::new()

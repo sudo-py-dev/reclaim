@@ -8,11 +8,11 @@ A Rust desktop app for recovering file candidates from drives and raw disk image
 
 - **Native drive discovery:** Linux sysfs, Windows storage APIs, and macOS IOKit/Disk Arbitration. No `lsblk`, PowerShell, `diskutil`, or `plutil` subprocesses.
 - **Unused-space default:** NTFS, FAT12/16/32, and exFAT volume maps; occupied clusters and filesystem metadata are excluded from signature carving. No full-source fallback.
-- **Live scan results:** unused-byte progress, throughput, cancellation, and recoverable partial results.
+- **Live scan results:** unused-byte progress, cancellation, and recoverable partial results.
 - **Filtered recovery:** search by filename, extension, or source offset; filter by file category. Recovery saves only selected files matching the active filters.
 - **Safe output naming:** original NTFS leaf names when available, generated names otherwise, and numeric suffixes to avoid replacing existing files.
-- **English and Hebrew:** immediate language switching, a saved language preference, and RTL layouts.
-- **Desktop interface:** light/dark/system appearance, bundled icon fonts, optional animations, a scrollable drive list, and a four-step recovery guide.
+- **Localization:** saved language preference, seven matching translation catalogs, mirrored Hebrew/Arabic layouts, and isolated mixed-direction filenames and paths.
+- **Desktop interface:** Slint with light/dark appearance, SVG icons, animated controls and progress, a scrollable drive list, and an integrated recovery guide.
 
 ## Build and run
 
@@ -26,7 +26,7 @@ On Ubuntu, install the native GUI development dependencies first:
 
 ```sh
 sudo apt-get update
-sudo apt-get install libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+sudo apt-get install libfontconfig-dev
 ```
 
 To build an executable without launching the app:
@@ -44,7 +44,7 @@ The executable is written to `target/release/reclaim` (`reclaim.exe` on Windows)
 3. Filter the results, then select the files to recover. The recovery count reflects the selected files currently shown.
 4. Select **Recover files…** and save to a **different physical drive**. Open the saved files to verify their contents.
 
-Settings opens directly from the gear button. Choose appearance, language, or animations there. The book button in Settings opens the recovery guide, including details about filenames and recovery limits.
+Open **Settings & help** in the sidebar for appearance, language, updates, and recovery guidance.
 
 ### Drive permissions
 
@@ -80,7 +80,7 @@ Reclaim is not a complete filesystem recovery suite. A signature match does not 
 - `scan_unused_reader` is the desktop entry point. `scan_reader` remains a full-source API for tests and explicit lower-level use. Deleted resident NTFS recovery inside allocated MFT clusters is excluded from the desktop unused-space mode.
 - ZIP64/multipart archives, ZIP archives over 64 MiB that require data descriptors, unknown-length AU streams, and multi-segment OpenDML AVI are unsupported.
 - Mounted or changing sources can produce inconsistent results. For repeatable work, scan a raw disk image.
-- Language preference persists; appearance/animation choices and scan results are session-local.
+- Language preference persists; appearance choices and scan results are session-local.
 
 ## Development
 
@@ -95,16 +95,16 @@ Run the project-specific Python rules with `python3 scripts/check_project.py`
 Use `--previews /tmp/reclaim-previews` to also save headless UI renderings.
 See [the code and UI audit](CODE_UI_AUDIT.md) for findings, project rules, and limits.
 
-Tests cover signature boundaries, image validation, NTFS records, filtered exports, collision protection, sector-aligned reads, native Linux metadata fixtures, cancellation, RTL rendering, keyboard controls, and responsive layouts.
+Tests cover signature boundaries, image validation, NTFS records, filtered exports, collision protection, sector-aligned reads, native Linux metadata fixtures, cancellation, and Slint page rendering in both themes.
 
 Optional headless UI previews:
 
 ```sh
 mkdir -p /tmp/reclaim-previews
-RECLAIM_PREVIEW_DIR=/tmp/reclaim-previews cargo test --locked --bin reclaim pages_render
+RECLAIM_PREVIEW_DIR=/tmp/reclaim-previews cargo test --locked --bin reclaim slint_workspace
 ```
 
-The previews are PPM images rendered from egui meshes. They do not test native window management, authentication prompts, or real-device recovery.
+The previews are PNG images rendered from the actual Slint components using its software renderer. They do not test native window management, authentication prompts, or real-device recovery.
 
 [Desktop CI](../.github/workflows/build.yml) runs tests, formatting, Clippy, and release builds on Linux, Windows, and macOS. It also packages a universal Intel/Apple Silicon macOS app with ad-hoc signing. Developer ID signing and notarization are not configured. Windows/macOS cross-target checks have passed locally; hardware and native desktop testing remain necessary.
 
@@ -112,14 +112,14 @@ The previews are PPM images rendered from egui meshes. They do not test native w
 
 Reclaim is licensed under [MIT](../LICENSE).
 
-- [eframe/egui](https://github.com/emilk/egui) provides the interface; [rfd](https://github.com/PolyMeilex/rfd) provides native file dialogs.
+- [Slint](https://slint.dev) provides the interface; [rfd](https://github.com/PolyMeilex/rfd) provides native file dialogs.
 - The bundled DejaVu font includes its [license](../assets/fonts/DejaVu-LICENSE.txt).
-- Font Awesome Free 6.7.2 Solid supplies the icons. Its fonts are licensed under SIL OFL 1.1; the [upstream license](../assets/fonts/FontAwesome-LICENSE.txt) is bundled with the app.
+- Interface icons are project-local SVG assets in `ui/icons/`.
 - Translation notes are in [locales/README.md](../locales/README.md).
 
-## Live system appearance
+## Appearance
 
-System appearance follows desktop changes while the app is running. Windows and macOS use native theme events delivered by egui-winit. On Linux, a background session-bus listener reads the desktop Settings portal and subscribes to appearance changes. Standard color-scheme preferences take priority; when the portal reports no preference, the GNOME/GTK theme provides the fallback, including live `gtk-theme` changes. No command-line tools are launched. If the portal is unavailable, manual Light/Dark choices remain usable and the listener retries in the background. Explicit Light/Dark choices always take precedence over system updates.
+Choose light or dark appearance under Settings & help. The custom surfaces and Slint standard widgets use the same color scheme. The choice applies for the current session.
 
 ## Result metadata
 

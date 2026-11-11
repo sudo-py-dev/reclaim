@@ -78,7 +78,7 @@ def main():
         environment["RECLAIM_PREVIEW_DIR"] = str(directory)
         # In full mode the entire suite already includes these render tests.
         if not args.full:
-            commands.append(["cargo", "test", "--locked", "--bin", "reclaim", "pages_render"])
+            commands.append(["cargo", "test", "--locked", "--bin", "reclaim", "slint_workspace"])
     for command in commands:
         print("RUN:", " ".join(command), flush=True)
         subprocess.run(command, cwd=ROOT, env=environment, check=True)

@@ -30,7 +30,7 @@ def literals(text):
 def messages():
     values=set()
     for p in Path('src').glob('*.rs'):
-        if p.name in ('ui_tests.rs','i18n.rs'): continue
+        if p.name in ('slint_ui_tests.rs','i18n.rs'): continue
         text=p.read_text().split('#[cfg(test)]')[0].split('#[cfg(all(test,')[0]
         for s in literals(text):
             if len(s)>2 and re.search('[A-Za-z]',s) and (' ' in s or s in ['Back','Refresh','System','Light','Dark','Minimize','Maximize','Close','Reclaim','Scan','Language','English','Hebrew','Pictures','Documents','Archives','Audio','Video','Applications','Icons','Appearance','Recover']):

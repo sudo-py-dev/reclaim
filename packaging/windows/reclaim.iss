@@ -42,7 +42,6 @@ Source: "{#BinaryPath}"; DestDir: "{app}"; DestName: "reclaim.exe"; Flags: ignor
 Source: "installed-by-inno"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\assets\fonts\DejaVu-LICENSE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
-Source: "..\..\assets\fonts\FontAwesome-LICENSE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 [Icons]
 Name: "{group}\Reclaim"; Filename: "{app}\reclaim.exe"
 Name: "{autodesktop}\Reclaim"; Filename: "{app}\reclaim.exe"; Tasks: desktopicon

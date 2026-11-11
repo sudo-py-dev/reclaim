@@ -6,8 +6,8 @@ license = "MIT"
 description = "Read-only disk image carving and file recovery"
 
 [dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2", "accessibility"] }
 log = "=0.4.34"
-eframe = { version = "=0.36.2", default-features = false, features = ["glow", "default_fonts", "x11", "wayland", "accesskit"] }
 rfd = "=0.17.2"
 serde_json = "=1.0.151"
 image = { version = "=0.25.10", default-features = false, features = ["ico", "png", "bmp", "jpeg", "gif", "webp"] }
@@ -16,15 +16,15 @@ flate2 = { version = "=1.1.10", default-features = false, features = ["rust_back
 quick-xml = { version = "=0.41.0", default-features = false }
 chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
 sys-locale = "=0.3.2"
-unicode-bidi = "=0.3.18"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "=0.2.191"
 zbus = "=5.19.0"
+# Load X11 at runtime, as Wayland already is, so building needs only the
+# fontconfig headers (Slint's text layout links fontconfig directly).
+tiny-xlib = { version = "=0.2.5", default-features = false, features = ["dlopen"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-eframe = { version = "=0.36.2", default-features = false, features = ["wgpu_no_default_features"] }
-wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl", "dx12"] }
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading", "Win32_System_Ioctl", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -43,6 +43,10 @@ version = "1"
 [dependencies.sha2]
 version = "0.10"
 
+# Ed25519 (Minisign) update signatures; no transitive dependencies.
+[dependencies.minisign-verify]
+version = "=0.3.0"
+
 [dependencies.tempfile]
 version = "3"
 
@@ -55,3 +59,9 @@ panic = "abort"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = { version = "=0.1.34", default-features = false }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+[dev-dependencies]
+i-slint-backend-testing = { version = "=1.18.1", features = ["renderer-software"] }
