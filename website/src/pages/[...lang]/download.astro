@@ -1,0 +1,383 @@
+---
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import CopyCommand from '../../components/CopyCommand.astro';
+import Logo from '../../components/Logo.astro';
+import Warn from '../../components/Warn.astro';
+import { fill, localePath, localeStaticPaths, useDict, type Locale } from '../../i18n';
+import { REPO_URL, formatDate, formatSize, getRelease, type PlatformId } from '../../lib/release';
+import { breadcrumbs, softwareApp } from '../../lib/seo';
+
+export const getStaticPaths = localeStaticPaths;
+
+const { locale } = Astro.props as { locale: Locale };
+const t = useDict(locale);
+const release = await getRelease();
+const site = Astro.site!;
+const pageUrl = new URL(localePath(locale, 'download'), site).href;
+const dl = release.downloads;
+const size = (id: PlatformId) => formatSize(dl[id].size, locale);
+const date = formatDate(release.date, locale);
+const [versionPre, versionPost = ''] = t.download.version.split('{version}');
+const p = t.download.platforms;
+---
+
+<Base
+  locale={locale}
+  page="download"
+  title={t.meta.downloadTitle}
+  description={t.meta.downloadDescription}
+  jsonLd={[
+    softwareApp(t, locale, release, pageUrl, site),
+    breadcrumbs([
+      { name: 'Reclaim', url: new URL(localePath(locale), site).href },
+      { name: t.download.title, url: pageUrl },
+    ]),
+  ]}
+>
+  <section class="intro">
+    <div class="wrap">
+      <div class="app-icon"><Logo size={80} eager /></div>
+      <h1>{t.download.title}</h1>
+      <p class="lead">{t.download.lead}</p>
+      <p class="version">
+        <span>{versionPre}<strong data-release-version>{release.version}</strong>{versionPost}</span>
+        {date && <span data-release-stale>{fill(t.hero.released, { date })}</span>}
+        <a href={release.notesUrl} rel="noopener" class="link-arrow">
+          {t.download.notes}
+          <Icon name="arrow" size={15} class="flip" />
+        </a>
+      </p>
+    </div>
+  </section>
+
+  <section class="platforms-section" aria-label={t.download.title}>
+    <div class="wrap">
+      <div class="before"><Warn locale={locale} id="before-title" /></div>
+
+      <div class="platforms">
+        <!-- Windows -->
+        <article class="card" data-os-card="windows" data-reveal style="--i:0" aria-labelledby="win-title">
+          <span class="badge">{t.download.recommended}</span>
+          <h2 id="win-title">{p.windows.name}</h2>
+          <p class="detail">{p.windows.detail}</p>
+          <p class="scans">{p.windows.scans}</p>
+          <div class="buttons">
+            <a class="btn btn-primary" href={dl.windows.url} data-dl="windows">
+              <Icon name="download" />
+              {t.download.exe}
+            </a>
+          </div>
+          <p class="file" dir="ltr">
+            <code>.exe</code>
+            {size('windows') && <span data-release-stale>{size('windows')}</span>}
+          </p>
+          <p class="how">{p.windows.how}</p>
+          <a class="alt" href={dl['windows-zip'].url} data-dl="windows-zip">{t.download.portable}</a>
+        </article>
+
+        <!-- macOS -->
+        <article class="card" data-os-card="macos" data-reveal style="--i:1" aria-labelledby="mac-title">
+          <span class="badge">{t.download.recommended}</span>
+          <h2 id="mac-title">{p.macos.name}</h2>
+          <p class="detail">{p.macos.detail}</p>
+          <p class="scans">{p.macos.scans}</p>
+          <div class="buttons">
+            <a class="btn btn-primary" href={dl['macos-arm'].url} data-dl="macos-arm" data-mac-arch="arm">
+              <Icon name="download" />
+              {t.download.arm}
+            </a>
+            <a class="btn btn-ghost" href={dl['macos-intel'].url} data-dl="macos-intel" data-mac-arch="intel">
+              <Icon name="download" />
+              {t.download.intel}
+            </a>
+          </div>
+          <p class="file" dir="ltr">
+            <code>.pkg</code>
+            {size('macos-arm') && <span data-release-stale>{size('macos-arm')}</span>}
+          </p>
+          <p class="how">{p.macos.how}</p>
+          <span class="alt-group">
+            {t.download.portable}:
+            <a class="alt" href={dl['macos-arm-zip'].url} data-dl="macos-arm-zip">{t.download.arm}</a>
+            ·
+            <a class="alt" href={dl['macos-intel-zip'].url} data-dl="macos-intel-zip">{t.download.intel}</a>
+          </span>
+        </article>
+
+        <!-- Linux -->
+        <article class="card" data-os-card="linux" data-reveal style="--i:2" aria-labelledby="linux-title">
+          <span class="badge">{t.download.recommended}</span>
+          <h2 id="linux-title">{p.linux.name}</h2>
+          <p class="detail">{p.linux.detail}</p>
+          <p class="scans">{p.linux.scans}</p>
+          <div class="buttons">
+            <a class="btn btn-primary" href={dl['linux-deb'].url} data-dl="linux-deb">
+              <Icon name="download" />
+              {t.download.deb}
+            </a>
+          </div>
+          <p class="file" dir="ltr">
+            <code>.deb</code>
+            {size('linux-deb') && <span data-release-stale>{size('linux-deb')}</span>}
+          </p>
+          <p class="how">{p.linux.how}</p>
+          <CopyCommand
+            command={`sudo apt install ./${dl['linux-deb'].asset}`}
+            copy={t.download.copy}
+            copied={t.download.copied}
+            deb
+          />
+          <a class="alt" href={dl['linux-zip'].url} data-dl="linux-zip">{t.download.portable}</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="extras">
+    <div class="wrap extras-grid">
+      <div class="extra" data-reveal>
+        <Icon name="shield" size={22} class="extra-icon" />
+        <h2>{t.download.verifyTitle}</h2>
+        <p>{t.download.verifyBody}</p>
+        <a class="link-arrow" href={release.notesUrl} rel="noopener">
+          {t.download.allFiles}
+          <Icon name="arrow" size={15} class="flip" />
+        </a>
+      </div>
+      <div class="extra" data-reveal>
+        <Icon name="code" size={22} class="extra-icon" />
+        <h2>{t.download.sourceTitle}</h2>
+        <p>{t.download.sourceBody}</p>
+        <pre dir="ltr"><code>git clone {REPO_URL}.git
+cd reclaim
+cargo run --release --locked</code></pre>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .intro {
+    padding-block: clamp(48px, 8vw, 96px) 40px;
+  }
+
+  .app-icon {
+    margin-bottom: 28px;
+  }
+
+  h1 {
+    font-size: clamp(2.25rem, 1.5rem + 3vw, 3.25rem);
+    letter-spacing: -0.03em;
+  }
+
+  :global(:lang(he)) h1,
+  :global(:lang(ar)) h1 {
+    letter-spacing: 0;
+  }
+
+  .intro .lead {
+    margin-top: 16px;
+  }
+
+  .version {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 20px;
+    margin-top: 20px;
+    color: var(--muted);
+    font-size: 0.9375rem;
+  }
+
+  .version strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .before {
+    margin-bottom: 24px;
+  }
+
+  .scans {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--bg-sunken);
+    color: var(--ink-2);
+    font-size: 0.875rem;
+  }
+
+  .platforms {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  .card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 28px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    transition:
+      opacity 0.7s var(--ease-out),
+      transform 0.7s var(--ease-out),
+      border-color 0.2s ease;
+    transition-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  .card.is-recommended {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .badge {
+    display: none;
+    position: absolute;
+    top: -11px;
+    inset-inline-start: 24px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+
+  .card.is-recommended .badge {
+    display: inline-block;
+  }
+
+  .card h2 {
+    font-size: 1.5rem;
+  }
+
+  .detail {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 0.9375rem;
+  }
+
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 24px;
+  }
+
+  .buttons .btn {
+    flex: 1 1 auto;
+  }
+
+  .file {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 0.8125rem;
+  }
+
+  .file code {
+    overflow-wrap: anywhere;
+  }
+
+  :global([dir='rtl']) .file {
+    justify-content: flex-end;
+  }
+
+  .how {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: 0.9375rem;
+    flex: 1;
+  }
+
+  .alt,
+  .alt-group {
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+
+  .alt-group .alt {
+    margin-top: 0;
+    unicode-bidi: isolate;
+  }
+
+  .alt:hover {
+    color: var(--accent);
+  }
+
+  .extras {
+    padding-block: clamp(56px, 8vw, 96px) var(--section);
+  }
+
+  .extras-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  .extra {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    padding: 28px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-sunken);
+  }
+
+  .extra :global(.extra-icon) {
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .extra h2 {
+    font-size: 1.1875rem;
+  }
+
+  .extra p {
+    color: var(--muted);
+    font-size: 0.9375rem;
+  }
+
+  .extra .link-arrow {
+    margin-top: 6px;
+    font-size: 0.9375rem;
+  }
+
+  pre {
+    margin: 6px 0 0;
+    padding: 16px;
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--code-bg);
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    text-align: left;
+  }
+
+  @media (max-width: 960px) {
+    .platforms {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 720px) {
+    .extras-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .card,
+    .extra {
+      padding: 22px;
+    }
+  }
+</style>

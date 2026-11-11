@@ -1,4 +1,4 @@
-# Security review — 2026-11-01
+# Security review, 2026-11-01
 
 This pass reviewed carving and validation, NTFS resident records, recovery output,
 settings persistence, updater metadata/downloads, and native drive discovery.

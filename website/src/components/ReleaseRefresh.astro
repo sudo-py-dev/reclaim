@@ -1,0 +1,165 @@
+---
+/**
+ * Keeps download links current and points the main download button at the
+ * visitor's platform.
+ *
+ * - The build embeds the latest release known at build time.
+ * - In the browser, the GitHub API is checked once per session. If a newer
+ *   release exists, versioned links (the .deb) and version labels update in place.
+ * - Elements opt in with data attributes:
+ *     data-dl="<platform id>"   → href set to that asset's URL
+ *     data-release-version      → text set to the version number
+ *     data-deb-cmd              → text set to the apt install command
+ *     data-os-cta               → primary button; href/label follow the visitor's OS
+ *     data-os-card="<os>"       → gets `is-recommended` when it matches
+ */
+import { getRelease } from '../lib/release';
+
+const release = await getRelease();
+const payload = {
+  version: release.version,
+  urls: Object.fromEntries(Object.entries(release.downloads).map(([id, d]) => [id, d.url])),
+};
+---
+
+<script is:inline type="application/json" id="release-data" set:html={JSON.stringify(payload)} />
+
+<script>
+  type State = { version: string; urls: Record<string, string> };
+  type Os = 'windows' | 'macos' | 'linux';
+
+  const REPO = 'sudo-py-dev/reclaim';
+  const CACHE_KEY = 'reclaim:latest-release';
+  const CACHE_MS = 60 * 60 * 1000;
+
+  const el = document.getElementById('release-data');
+  const state: State = el ? JSON.parse(el.textContent || '{}') : { version: '', urls: {} };
+
+  const debName = (v: string) => `reclaim_${v}_amd64.deb`;
+
+  function newer(a: string, b: string): boolean {
+    const pa = a.split('.').map(Number);
+    const pb = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+    }
+    return false;
+  }
+
+  async function detectOs(): Promise<{ os: Os; arch: 'arm' | 'x86' | null } | null> {
+    const nav = navigator as Navigator & {
+      userAgentData?: {
+        platform?: string;
+        mobile?: boolean;
+        getHighEntropyValues?: (h: string[]) => Promise<{ architecture?: string }>;
+      };
+    };
+    const ua = navigator.userAgent;
+    if (nav.userAgentData?.mobile || /Android|iPhone|iPad|iPod/i.test(ua)) return null;
+    // iPadOS reports itself as a Mac; touch support gives it away.
+    if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return null;
+
+    const platform = (nav.userAgentData?.platform || navigator.platform || ua).toLowerCase();
+    let os: Os | null = null;
+    if (platform.includes('win')) os = 'windows';
+    else if (platform.includes('mac')) os = 'macos';
+    else if (platform.includes('linux') || platform.includes('x11')) os = 'linux';
+    if (!os) return null;
+
+    let arch: 'arm' | 'x86' | null = null;
+    try {
+      const hints = await nav.userAgentData?.getHighEntropyValues?.(['architecture']);
+      if (hints?.architecture === 'arm') arch = 'arm';
+      else if (hints?.architecture === 'x86') arch = 'x86';
+    } catch {
+      /* not available */
+    }
+    return { os, arch };
+  }
+
+  function idFor(os: Os, arch: 'arm' | 'x86' | null): string {
+    if (os === 'windows') return 'windows';
+    if (os === 'linux') return 'linux-deb';
+    // Apple Silicon is the default for current Macs; Intel only when known.
+    return arch === 'x86' ? 'macos-intel' : 'macos-arm';
+  }
+
+  let detected: { os: Os; arch: 'arm' | 'x86' | null } | null = null;
+
+  function apply() {
+    document.querySelectorAll<HTMLAnchorElement>('a[data-dl]').forEach((a) => {
+      const url = state.urls[a.dataset.dl!];
+      if (url) a.href = url;
+    });
+    document.querySelectorAll<HTMLElement>('[data-release-version]').forEach((n) => {
+      n.textContent = state.version;
+    });
+    document.querySelectorAll<HTMLElement>('[data-deb-cmd]').forEach((n) => {
+      n.textContent = `sudo apt install ./${debName(state.version)}`;
+    });
+
+    if (!detected) return;
+    const { os, arch } = detected;
+    document.querySelectorAll<HTMLAnchorElement>('a[data-os-cta]').forEach((a) => {
+      const template = a.dataset.labelTemplate;
+      const osName = a.dataset[`os${os[0].toUpperCase()}${os.slice(1)}`];
+      const url = state.urls[idFor(os, arch)];
+      if (!template || !osName || !url) return;
+      a.href = url;
+      a.dataset.dl = idFor(os, arch);
+      const label = a.querySelector('[data-label]');
+      if (label) label.textContent = template.replace('{os}', osName);
+    });
+    document.querySelectorAll<HTMLElement>('[data-os-card]').forEach((card) => {
+      card.classList.toggle('is-recommended', card.dataset.osCard === os);
+    });
+    if (os === 'macos') {
+      document.querySelectorAll<HTMLElement>('[data-mac-arch]').forEach((b) => {
+        const preferred = arch === 'x86' ? 'intel' : 'arm';
+        b.classList.toggle('btn-primary', b.dataset.macArch === preferred);
+        b.classList.toggle('btn-ghost', b.dataset.macArch !== preferred);
+      });
+    }
+  }
+
+  async function latest(): Promise<string | null> {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+      if (cached && Date.now() - cached.at < CACHE_MS) return cached.tag;
+    } catch {
+      /* storage unavailable */
+    }
+    try {
+      const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (!res.ok) return null;
+      const json = await res.json();
+      const tag: string = json.tag_name;
+      try {
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify({ tag, at: Date.now() }));
+      } catch {
+        /* storage unavailable */
+      }
+      return tag;
+    } catch {
+      return null;
+    }
+  }
+
+  detectOs().then((d) => {
+    detected = d;
+    apply();
+  });
+
+  latest().then((tag) => {
+    if (!tag) return;
+    const version = tag.replace(/^v/, '');
+    if (!/^\d+\.\d+\.\d+$/.test(version) || !newer(version, state.version)) return;
+    state.version = version;
+    state.urls['linux-deb'] = `https://github.com/${REPO}/releases/download/${tag}/${debName(version)}`;
+    // Build-time dates and sizes describe the older release; drop them.
+    document.querySelectorAll('[data-release-stale]').forEach((n) => n.remove());
+    apply();
+  });
+</script>

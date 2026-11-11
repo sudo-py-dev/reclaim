@@ -55,7 +55,7 @@ files during the main signature search.
 A signature catalogue can identify a possible format while saying nothing about
 its physical end, fragmented layout, compressed stream termination, or integrity.
 Adding signatures alone would produce arbitrary-size or truncated recoveries and
-more false lookahead reads—the scan slowdown addressed in the ZIP fixes.
+more false lookahead reads, the scan slowdown addressed in the ZIP fixes.
 
 Formats considered for later work include RAR4, ZIP64, XZ/BZIP2/Zstandard,
 Mach-O/universal binaries, MP4/MOV/HEIF, TIFF, ISO/UDF/DMG, and old Office-specific

@@ -2,7 +2,7 @@ import "../assets/fonts/DejaVuSans.ttf";
 import "../assets/fonts/DejaVuSans-Bold.ttf";
 import "../assets/fonts/DejaVuSansMono.ttf";
 export global Strings {
-    in-out property <string> window-title: "Reclaim — File Recovery";
+    in-out property <string> window-title: "Reclaim - File Recovery";
     in-out property <string> language: "Language";
     in-out property <string> appearance: "Appearance";
 
@@ -51,7 +51,7 @@ export global Strings {
     in-out property <string> recover-in-three-steps: "Recover in three steps";
     in-out property <[string]> recovery-step-list;
     in-out property <string> supported-formats: "Supported formats";
-    in-out property <string> photos-documents-archives-audio-video: "Photos, documents, archives, audio, video, applications, and small NTFS resident files. FAT and NTFS unused-space scanning.";
+    in-out property <string> photos-documents-archives-audio-video: "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, and NTFS volumes.";
     in-out property <string> check-for-updates: "Check for updates";
     in-out property <string> project-website: "Project website";
     in-out property <string> built-with-rust-and-slint: "Built with Rust and Slint · MIT licensed application";
@@ -251,15 +251,18 @@ component Choice inherits Rectangle {
 component GroupTitle inherits Label { color: Palette.muted; font-size: 12px; font-weight: 600; }
 component IconTile inherits Rectangle {
     in property <image> icon;
-    width: 32px; height: 32px; border-radius: Metrics.radius; background: Palette.subtle;
-    Image { source: root.icon; width: 18px; height: 18px; colorize: Palette.accent; }
+    // Full-colour artwork (the app icon) is shown as is, larger and untinted.
+    in property <bool> full-colour: false;
+    width: 32px; height: 32px; border-radius: Metrics.radius; background: root.full-colour ? transparent : Palette.subtle;
+    Image { source: root.icon; width: root.full-colour ? 30px : 18px; height: self.width; colorize: root.full-colour ? transparent : Palette.accent; }
 }
 component SettingRow inherits Row {
     in property <image> icon;
     in property <string> title;
     in property <string> detail;
+    in property <bool> full-colour-icon: false;
     padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 12px; min-height: 60px;
-    IconTile { icon: root.icon; }
+    IconTile { icon: root.icon; full-colour: root.full-colour-icon; }
     VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 2px; alignment: center;
         Label { text: root.title; color: Palette.ink; font-size: 13px; font-weight: 500; wrap: word-wrap; }
         if root.detail != "" : Label { text: root.detail; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
@@ -353,9 +356,7 @@ export component AppWindow inherits Window {
         Rectangle { width: 232px; background: Palette.surface;
             VerticalLayout { padding: 16px; spacing: 4px;
                 Row { height: 36px; spacing: 10px;
-                    Rectangle { width: 32px; height: 32px; border-radius: 9px; background: Palette.selected;
-                        Image { width: 20px; height: 20px; source: @image-url("icons/brand.svg"); colorize: Palette.accent; }
-                    }
+                    Image { width: 32px; height: 32px; source: @image-url("../assets/icons/reclaim-64.png"); }
                     Label { text: Strings.reclaim; color: Palette.ink; font-size: 19px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
                 }
                 Rectangle { height: 4px; }
@@ -543,7 +544,7 @@ export component AppWindow inherits Window {
                         if root.update-busy : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * root.update-progress; background: Palette.primary; animate width { duration: 200ms; } } }
                     }
                     RowDivider { }
-                    SettingRow { icon: @image-url("icons/brand.svg"); title: Strings.reclaim; detail: Strings.built-with-rust-and-slint;
+                    SettingRow { icon: @image-url("../assets/icons/reclaim-64.png"); full-colour-icon: true; title: Strings.reclaim; detail: Strings.built-with-rust-and-slint;
                         Action { text: Strings.project-website; icon: @image-url("icons/external.svg"); clicked => { root.open-project(); } }
                     }
                 } }

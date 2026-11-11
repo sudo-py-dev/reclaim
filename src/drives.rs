@@ -100,7 +100,7 @@ pub fn open_source(path: &Path) -> io::Result<File> {
             if e.kind() == io::ErrorKind::PermissionDenied {
                 return Err(io::Error::new(
                     e.kind(),
-                    "macOS denied access. Check Full Disk Access in System Settings > Privacy & Security. Raw device access may also require administrator privileges. You can open a disk image instead.",
+                    "macOS denied access. Reading a whole drive requires administrator rights, and macOS may ask you to allow access to removable volumes or Full Disk Access in System Settings > Privacy & Security. You can open a disk image instead.",
                 ));
             }
             Err(e)

@@ -2,9 +2,9 @@
 use crate::{AppWindow, Locale, Strings};
 use reclaim::i18n;
 use slint::ComponentHandle;
-const WINDOW_TITLE: &str = "Reclaim — File Recovery";
+const WINDOW_TITLE: &str = "Reclaim - File Recovery";
 const BRAND: &str = "Reclaim";
-const RECOVERY_STEPS: &str = "1. Choose the original drive or a raw disk image.\n\n2. Scan unused space. Stop any time and keep partial results.\n\n3. Inspect and select candidates, then save to a different physical drive.";
+const RECOVERY_STEPS: &str = "1. Stop using the drive you lost files from. Don't save, download or install anything to it.\n\n2. Choose that drive or a raw disk image, then scan its unused space. Stop any time and keep partial results.\n\n3. Inspect and select files, then save them to a different physical drive.";
 
 /// One table drives both the Slint setters and the catalog-coverage test, so a
 /// label cannot be added to the interface without also being checked.
@@ -63,7 +63,7 @@ ui_strings! {
     set_version => "Version",
     set_recover_in_three_steps => "Recover in three steps",
     set_supported_formats => "Supported formats",
-    set_photos_documents_archives_audio_video => "Photos, documents, archives, audio, video, applications, and small NTFS resident files. FAT and NTFS unused-space scanning.",
+    set_photos_documents_archives_audio_video => "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, and NTFS volumes.",
     set_check_for_updates => "Check for updates",
     set_project_website => "Project website",
     set_built_with_rust_and_slint => "Built with Rust and Slint · MIT licensed application",
@@ -117,10 +117,10 @@ mod tests {
 
     #[test]
     fn rtl_title_falls_back_to_brand_only_where_the_title_bar_cannot_draw_it() {
-        let hebrew = "Reclaim — שחזור קבצים".to_string();
+        let hebrew = "Reclaim - שחזור קבצים".to_string();
         assert_eq!(window_title(hebrew.clone(), true, true), "Reclaim");
         assert_eq!(window_title(hebrew.clone(), true, false), hebrew);
-        let english = "Reclaim — File Recovery".to_string();
+        let english = "Reclaim - File Recovery".to_string();
         assert_eq!(window_title(english.clone(), false, true), english);
     }
 }

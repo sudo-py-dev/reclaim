@@ -45,7 +45,7 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
             "Volume",
             true,
             "Volume",
-            "Encrypted — unlock in Disks, then refresh",
+            "Encrypted: unlock in Disks, then refresh",
             true,
         ),
     ] {

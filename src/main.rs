@@ -425,7 +425,7 @@ impl Reclaim {
                             }
                             Ok(()) if !self.unreadable.is_empty() => {
                                 self.scanned = self.total.max(self.scanned);
-                                "Scan finished with unreadable areas. Some files could not be checked.".into()
+                                "Scan finished with unreadable areas. Some files could not be checked. The drive may be failing: recover the files you need now and avoid repeated scans.".into()
                             }
                             Ok(()) => {
                                 self.scanned = self.total.max(self.scanned);

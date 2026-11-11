@@ -1,0 +1,327 @@
+---
+import AppWindow from './AppWindow.astro';
+import ScreenPicture from './ScreenPicture.astro';
+import { dirOf, useDict, type Locale } from '../i18n';
+import { rectStyle, screenImage, type Rect, type Screen } from '../lib/screens';
+
+/**
+ * "How it works" as a guided tour: each step shows the matching app screen and
+ * highlights the part of the window it talks about. Steps advance on their own
+ * while the tour is on screen, unless the visitor prefers reduced motion or
+ * interacts with it.
+ */
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = useDict(locale);
+const rtl = dirOf(locale) === 'rtl';
+const images = {
+  sources: await screenImage(locale, 'sources'),
+  results: await screenImage(locale, 'results'),
+};
+
+const plan: { screen: Screen; rect: Rect }[] = [
+  { screen: 'sources', rect: { x: 258, y: 130, w: 878, h: 220 } },
+  { screen: 'sources', rect: { x: 790, y: 696, w: 340, h: 54 } },
+  { screen: 'results', rect: { x: 870, y: 128, w: 268, h: 510 } },
+  { screen: 'results', rect: { x: 856, y: 642, w: 284, h: 52 } },
+];
+const steps = t.steps.items.map((item, i) => ({ ...item, ...plan[i], style: rectStyle(plan[i].rect, rtl) }));
+const pad = (n: number) => String(n).padStart(2, '0');
+---
+
+<div class="tour" data-tour>
+  <div class="steps" role="tablist" aria-label={t.ui.tour} aria-orientation="vertical">
+    {
+      steps.map((s, i) => (
+        <button
+          type="button"
+          role="tab"
+          id={`tour-tab-${i}`}
+          aria-controls="tour-panel"
+          aria-selected={i === 0 ? 'true' : 'false'}
+          tabindex={i === 0 ? 0 : -1}
+          data-step={i}
+          data-screen={s.screen}
+          data-rect={s.style}
+        >
+          <span class="n" aria-hidden="true">{pad(i + 1)}</span>
+          <span class="text">
+            <span class="title">{s.title}</span>
+            <span class="body"><span>{s.body}</span></span>
+          </span>
+          <span class="progress" aria-hidden="true" />
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="stage" id="tour-panel" role="tabpanel" aria-labelledby="tour-tab-0">
+    <AppWindow locale={locale}>
+      <div class="screens">
+        <div class="screen is-active" data-screen-view="sources">
+          <ScreenPicture image={images.sources} alt={t.hero.shotDrives} sizes="(min-width: 1024px) 640px, calc(100vw - 32px)" />
+        </div>
+        <div class="screen" data-screen-view="results">
+          <ScreenPicture image={images.results} alt={t.hero.shotResults} sizes="(min-width: 1024px) 640px, calc(100vw - 32px)" />
+        </div>
+        <span class="spot" style={steps[0].style} aria-hidden="true" />
+      </div>
+    </AppWindow>
+  </div>
+</div>
+
+<script>
+  const STEP_MS = 6000;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  document.querySelectorAll<HTMLElement>('[data-tour]').forEach((tour) => {
+    const tabs = [...tour.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const panel = tour.querySelector<HTMLElement>('[role="tabpanel"]')!;
+    const spot = tour.querySelector<HTMLElement>('.spot')!;
+    const views = [...tour.querySelectorAll<HTMLElement>('[data-screen-view]')];
+    let current = 0;
+    let timer = 0;
+    let visible = false;
+    let paused = false;
+    let stopped = reduce.matches;
+
+    function select(index: number, focus = false) {
+      current = (index + tabs.length) % tabs.length;
+      tabs.forEach((tab, i) => {
+        const on = i === current;
+        tab.setAttribute('aria-selected', String(on));
+        tab.tabIndex = on ? 0 : -1;
+      });
+      const tab = tabs[current];
+      panel.setAttribute('aria-labelledby', tab.id);
+      views.forEach((v) => v.classList.toggle('is-active', v.dataset.screenView === tab.dataset.screen));
+      spot.setAttribute('style', tab.dataset.rect ?? '');
+      if (focus) tab.focus();
+      schedule();
+    }
+
+    function schedule() {
+      window.clearTimeout(timer);
+      const running = visible && !paused && !stopped;
+      tour.classList.toggle('is-playing', running);
+      // Restart the progress bar animation on the active tab.
+      tabs.forEach((t) => t.classList.remove('is-timing'));
+      if (!running) return;
+      void tabs[current].offsetWidth;
+      tabs[current].classList.add('is-timing');
+      timer = window.setTimeout(() => select(current + 1), STEP_MS);
+    }
+
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => {
+        stopped = true; // A deliberate choice ends autoplay.
+        select(i);
+      });
+      tab.addEventListener('keydown', (e) => {
+        const rtl = getComputedStyle(tour).direction === 'rtl';
+        const moves: Record<string, number> = {
+          ArrowDown: 1,
+          ArrowUp: -1,
+          ArrowRight: rtl ? -1 : 1,
+          ArrowLeft: rtl ? 1 : -1,
+        };
+        let next: number | null = null;
+        if (e.key in moves) next = current + moves[e.key];
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = tabs.length - 1;
+        if (next === null) return;
+        e.preventDefault();
+        stopped = true;
+        select(next, true);
+      });
+    });
+
+    tour.addEventListener('pointerenter', () => ((paused = true), schedule()));
+    tour.addEventListener('pointerleave', () => ((paused = false), schedule()));
+    tour.addEventListener('focusin', () => ((paused = true), schedule()));
+    tour.addEventListener('focusout', () => ((paused = false), schedule()));
+    reduce.addEventListener('change', () => ((stopped = reduce.matches || stopped), schedule()));
+
+    new IntersectionObserver(
+      ([entry]) => {
+        visible = entry.isIntersecting;
+        schedule();
+      },
+      { threshold: 0.4 },
+    ).observe(tour);
+  });
+</script>
+
+<style>
+  .tour {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(32px, 5vw, 64px);
+    align-items: center;
+  }
+
+  .steps {
+    display: grid;
+    gap: 6px;
+  }
+
+  [role='tab'] {
+    position: relative;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    width: 100%;
+    padding: 18px 20px;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease;
+  }
+
+  [role='tab']:hover {
+    background: var(--bg-sunken);
+  }
+
+  [role='tab'][aria-selected='true'] {
+    border-color: var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .n {
+    flex: none;
+    padding-top: 2px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    transition: color 0.2s ease;
+  }
+
+  [aria-selected='true'] .n {
+    color: var(--accent);
+  }
+
+  .text {
+    display: grid;
+    gap: 4px;
+  }
+
+  .title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .body {
+    display: block;
+    color: var(--muted);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+
+  /* Collapse descriptions of inactive steps on large screens for a calmer list. */
+  @media (min-width: 1024px) {
+    [role='tab'] .body {
+      display: grid;
+      grid-template-rows: 0fr;
+      opacity: 0;
+      transition:
+        grid-template-rows 0.35s ease,
+        opacity 0.25s ease;
+    }
+    [role='tab'] .body > :global(*) {
+      overflow: hidden;
+    }
+    [role='tab'][aria-selected='true'] .body {
+      grid-template-rows: 1fr;
+      opacity: 1;
+    }
+  }
+
+  .progress {
+    position: absolute;
+    inset-inline: 20px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  :global([dir='rtl']) .progress {
+    transform-origin: right;
+  }
+
+  .is-timing .progress {
+    animation: progress 6s linear forwards;
+  }
+
+  @keyframes progress {
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  .screens {
+    position: relative;
+    display: grid;
+  }
+
+  .screen {
+    grid-area: 1 / 1;
+    opacity: 0;
+    transition: opacity 0.45s ease;
+  }
+
+  .screen.is-active {
+    opacity: 1;
+  }
+
+  .spot {
+    position: absolute;
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent),
+      0 0 0 9999px rgb(10 12 16 / 0.16);
+    pointer-events: none;
+    transition:
+      left 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
+      top 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
+      width 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
+      height 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  @media (max-width: 1023px) {
+    .tour {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .stage {
+      order: -1;
+    }
+    .steps {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 560px) {
+    .steps {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    [role='tab'] {
+      padding: 14px 16px;
+    }
+  }
+</style>

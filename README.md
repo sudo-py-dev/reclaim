@@ -29,7 +29,7 @@ Get an installer from the **[latest release](https://github.com/sudo-py-dev/recl
 
 Ubuntu 22.04 / Debian 12 or newer are recommended. Windows includes the Microsoft C++ runtime. macOS packages are unsigned and the app is ad-hoc signed, not notarized; you may need to approve it in **Privacy & Security**. Windows and macOS still need further testing on real devices.
 
-> **Protect the source.** Stop using the affected drive as soon as possible. Install Reclaim and save recovered files on a different physical drive to avoid overwriting data you want to recover.
+> **Protect the source.** Stop writing to the affected drive: every save, download or install can overwrite deleted data. If the files were on a memory card or USB drive, unplug it and install Reclaim normally. If they were on your computer's main drive, run the portable build from a USB stick instead of installing. Always save recovered files to a different drive.
 
 ## Recover in four steps
 

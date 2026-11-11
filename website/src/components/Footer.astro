@@ -1,0 +1,148 @@
+---
+import Logo from './Logo.astro';
+import { LANGUAGE_NAMES, LOCALES, localePath, useDict, type Locale, type PageKey } from '../i18n';
+import { REPO_URL, RELEASES_URL } from '../lib/release';
+
+interface Props {
+  locale: Locale;
+  page: PageKey;
+}
+
+const { locale, page } = Astro.props;
+const t = useDict(locale);
+const home = localePath(locale);
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <div class="wrap grid">
+    <div class="about">
+      <a class="brand" href={home}>
+        <Logo size={26} />
+        <span>Reclaim</span>
+      </a>
+      <p>{t.footer.tagline}</p>
+    </div>
+
+    <nav aria-label={t.footer.product}>
+      <h2>{t.footer.product}</h2>
+      <ul role="list">
+        <li><a href={localePath(locale, 'download')}>{t.nav.download}</a></li>
+        <li><a href={`${home}#features`}>{t.nav.features}</a></li>
+        <li><a href={`${home}#formats`}>{t.nav.formats}</a></li>
+        <li><a href={`${home}#faq`}>{t.nav.faq}</a></li>
+      </ul>
+    </nav>
+
+    <nav aria-label={t.footer.project}>
+      <h2>{t.footer.project}</h2>
+      <ul role="list">
+        <li><a href={REPO_URL} rel="noopener">{t.footer.source}</a></li>
+        <li><a href={RELEASES_URL} rel="noopener">{t.footer.releases}</a></li>
+        <li><a href={`${REPO_URL}/issues`} rel="noopener">{t.footer.issues}</a></li>
+        <li><a href={`${REPO_URL}/blob/main/docs/DEVELOPMENT.md`} rel="noopener">{t.footer.docs}</a></li>
+      </ul>
+    </nav>
+
+    <nav aria-label={t.nav.language}>
+      <h2>{t.nav.language}</h2>
+      <ul role="list" class="langs">
+        {
+          LOCALES.map((l) => (
+            <li>
+              <a href={localePath(l, page)} lang={l} hreflang={l} aria-current={l === locale ? 'true' : undefined}>
+                {LANGUAGE_NAMES[l]}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+  </div>
+  <div class="wrap legal">
+    <p>© {year} Reclaim contributors · {t.footer.license}</p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--line);
+    background: var(--bg-sunken);
+    padding-block: 56px 32px;
+    font-size: 0.9375rem;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1.4fr repeat(3, 1fr);
+    gap: 40px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-weight: 650;
+    font-size: 1.0625rem;
+    text-decoration: none;
+    color: var(--ink);
+  }
+
+  .about p {
+    max-width: 30ch;
+    color: var(--muted);
+  }
+
+  h2 {
+    margin-bottom: 14px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+
+  a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--ink);
+  }
+
+  .langs a[aria-current] {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .langs {
+    grid-template-columns: repeat(2, max-content);
+    column-gap: 20px;
+  }
+
+  .legal {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+
+  @media (max-width: 820px) {
+    .grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .about {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

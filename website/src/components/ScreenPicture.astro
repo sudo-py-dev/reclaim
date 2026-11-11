@@ -1,0 +1,34 @@
+---
+import type { ScreenImage } from '../lib/screens';
+
+/**
+ * A screenshot that follows the visitor's light/dark preference, in AVIF with a
+ * WebP fallback and responsive widths.
+ */
+interface Props {
+  image: ScreenImage;
+  alt: string;
+  sizes: string;
+  eager?: boolean;
+  class?: string;
+}
+
+const { image, alt, sizes, eager = false, class: className } = Astro.props;
+const dark = '(prefers-color-scheme: dark)';
+---
+
+<picture class={className} data-full-light={image.fullLight} data-full-dark={image.fullDark}>
+  <source media={dark} type="image/avif" srcset={image.dark.avif} sizes={sizes} />
+  <source media={dark} type="image/webp" srcset={image.dark.webp} sizes={sizes} />
+  <source type="image/avif" srcset={image.light.avif} sizes={sizes} />
+  <source type="image/webp" srcset={image.light.webp} sizes={sizes} />
+  <img
+    src={image.fullLight}
+    alt={alt}
+    width={image.width}
+    height={image.height}
+    loading={eager ? 'eager' : 'lazy'}
+    fetchpriority={eager ? 'high' : 'auto'}
+    decoding={eager ? 'sync' : 'async'}
+  />
+</picture>

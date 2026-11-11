@@ -1,0 +1,49 @@
+---
+import Icon from './Icon.astro';
+import { localePath, useDict, type Locale } from '../i18n';
+
+interface Props {
+  locale: Locale;
+  center?: boolean;
+}
+
+const { locale, center = false } = Astro.props;
+const t = useDict(locale);
+const downloadPage = localePath(locale, 'download');
+---
+
+<div class:list={['cta', { center }]}>
+  <a
+    class="btn btn-primary"
+    href={downloadPage}
+    data-os-cta
+    data-label-template={t.hero.ctaFor}
+    data-os-windows={t.os.windows}
+    data-os-macos={t.os.macos}
+    data-os-linux={t.os.linux}
+  >
+    <Icon name="download" />
+    <span data-label>{t.hero.cta}</span>
+  </a>
+  <a class="btn btn-ghost" href={downloadPage}>{t.hero.secondary}</a>
+</div>
+
+<style>
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .center {
+    justify-content: center;
+  }
+
+  @media (max-width: 480px) {
+    .cta {
+      flex-direction: column;
+      align-items: stretch;
+      width: 100%;
+    }
+  }
+</style>

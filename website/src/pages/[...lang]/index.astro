@@ -1,0 +1,509 @@
+---
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import DownloadCta from '../../components/DownloadCta.astro';
+import Warn from '../../components/Warn.astro';
+import HeroShot from '../../components/HeroShot.astro';
+import Tour from '../../components/Tour.astro';
+import AppWindow from '../../components/AppWindow.astro';
+import ScreenPicture from '../../components/ScreenPicture.astro';
+import { screenImage } from '../../lib/screens';
+import { fill, localePath, localeStaticPaths, useDict, type Locale } from '../../i18n';
+import { REPO_URL, formatDate, getRelease } from '../../lib/release';
+import { faqPage, softwareApp, website } from '../../lib/seo';
+
+export const getStaticPaths = localeStaticPaths;
+
+const { locale } = Astro.props as { locale: Locale };
+const t = useDict(locale);
+const release = await getRelease();
+const site = Astro.site!;
+const pageUrl = new URL(localePath(locale), site).href;
+const date = formatDate(release.date, locale);
+const [versionPre, versionPost = ''] = t.hero.meta.split('{version}');
+const results = await screenImage(locale, 'results');
+---
+
+<Base
+  locale={locale}
+  page=""
+  title={t.meta.title}
+  description={t.meta.description}
+  jsonLd={[softwareApp(t, locale, release, pageUrl, site), website(t, locale, site), faqPage(t)]}
+>
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">{t.hero.eyebrow}</p>
+        <h1>{t.hero.title}</h1>
+        <p class="lead hero-lead">{t.hero.lead}</p>
+        <DownloadCta locale={locale} />
+        <p class="hero-meta">
+          <span>{versionPre}<span data-release-version>{release.version}</span>{versionPost}</span>
+          {date && <span data-release-stale>{fill(t.hero.released, { date })}</span>}
+          <span>{t.hero.license}</span>
+        </p>
+      </div>
+      <div class="hero-media">
+        <HeroShot locale={locale} />
+      </div>
+    </div>
+  </section>
+
+  <!-- Protect the source -->
+  <div class="wrap" data-reveal>
+    <Warn locale={locale} />
+  </div>
+
+  <!-- Steps -->
+  <section class="section" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <header class="section-head" data-reveal>
+        <span class="kicker">{t.steps.kicker}</span>
+        <h2 class="h2" id="how-title">{t.steps.title}</h2>
+      </header>
+      <div data-reveal><Tour locale={locale} /></div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section" id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <header class="section-head" data-reveal>
+        <span class="kicker">{t.features.kicker}</span>
+        <h2 class="h2" id="features-title">{t.features.title}</h2>
+      </header>
+      <ul class="features" role="list">
+        {
+          t.features.items.map((f, i) => (
+            <li data-reveal style={`--i:${i % 3}`}>
+              <h3>{f.title}</h3>
+              <p>{f.body}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <!-- Formats -->
+  <section class="section" id="formats" aria-labelledby="formats-title">
+    <div class="wrap formats-grid">
+      <div>
+        <header class="section-head" data-reveal>
+          <span class="kicker">{t.formats.kicker}</span>
+          <h2 class="h2" id="formats-title">{t.formats.title}</h2>
+          <p class="lead">{t.formats.lead}</p>
+        </header>
+        <dl class="formats" data-reveal>
+          {
+            t.formats.rows.map((r) => (
+              <div>
+                <dt>{r.name}</dt>
+                <dd dir="ltr">{r.list}</dd>
+              </div>
+            ))
+          }
+        </dl>
+        <a class="link-arrow more" href={`${REPO_URL}/blob/main/docs/FILE_FORMAT_RESEARCH.md`} rel="noopener">
+          {t.formats.more}
+          <Icon name="arrow" size={16} class="flip" />
+        </a>
+      </div>
+      <div class="formats-media" data-reveal>
+        <AppWindow locale={locale}>
+          <ScreenPicture image={results} alt={t.hero.shotResults} sizes="(min-width: 1024px) 540px, calc(100vw - 32px)" />
+        </AppWindow>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section limits-section" id="limits" aria-labelledby="limits-title">
+    <div class="wrap limits-grid">
+      <header data-reveal>
+        <span class="kicker">{t.limits.kicker}</span>
+        <h2 class="h2" id="limits-title">{t.limits.title}</h2>
+        <p class="lead">{t.limits.lead}</p>
+      </header>
+      <ul class="limits" role="list" data-reveal style="--i:1">
+        {t.limits.items.map((item) => <li>{item}</li>)}
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section" id="faq" aria-labelledby="faq-title">
+    <div class="wrap faq-grid">
+      <h2 class="h2" id="faq-title" data-reveal>{t.faq.title}</h2>
+      <div class="faq" data-reveal style="--i:1">
+        {
+          t.faq.items.map((item) => (
+            <details>
+              <summary>
+                <h3>{item.q}</h3>
+                <Icon name="plus" size={20} class="faq-icon" />
+              </summary>
+              <p>{item.a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Closing call to action -->
+  <section class="closing" aria-labelledby="closing-title">
+    <div class="wrap">
+      <div class="closing-panel" data-reveal>
+        <h2 class="h2" id="closing-title">{t.cta.title}</h2>
+        <p class="lead">{t.cta.body}</p>
+        <DownloadCta locale={locale} center />
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  /* Hero */
+  .hero {
+    position: relative;
+    padding-block: clamp(40px, 7vw, 96px) clamp(40px, 6vw, 72px);
+    overflow: hidden;
+  }
+
+  /* A faint dot grid that fades out from behind the screenshot. */
+  .hero-bg {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: radial-gradient(var(--dot) 1px, transparent 1.2px);
+    background-size: 22px 22px;
+    mask-image: radial-gradient(60% 70% at 70% 45%, #000 0%, transparent 75%);
+    -webkit-mask-image: radial-gradient(60% 70% at 70% 45%, #000 0%, transparent 75%);
+  }
+
+  :global([dir='rtl']) .hero-bg {
+    mask-image: radial-gradient(60% 70% at 30% 45%, #000 0%, transparent 75%);
+    -webkit-mask-image: radial-gradient(60% 70% at 30% 45%, #000 0%, transparent 75%);
+  }
+
+  /* Staggered entrance for the hero copy. */
+  .hero-copy > :global(*) {
+    animation: rise 0.7s var(--ease-out) both;
+  }
+  .hero-copy > :global(:nth-child(2)) { animation-delay: 0.06s; }
+  .hero-copy > :global(:nth-child(3)) { animation-delay: 0.12s; }
+  .hero-copy > :global(:nth-child(4)) { animation-delay: 0.18s; }
+  .hero-copy > :global(:nth-child(5)) { animation-delay: 0.24s; }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr);
+    gap: clamp(40px, 5vw, 64px);
+    align-items: center;
+  }
+
+  .eyebrow {
+    margin-bottom: 20px;
+    color: var(--muted);
+    font-size: 0.9375rem;
+    font-weight: 500;
+  }
+
+  h1 {
+    font-size: clamp(2.25rem, 1.3rem + 3.2vw, 3.5rem);
+    letter-spacing: -0.032em;
+    line-height: 1.04;
+  }
+
+  :global(:lang(he)) h1,
+  :global(:lang(ar)) h1 {
+    letter-spacing: 0;
+    line-height: 1.2;
+  }
+
+  .hero-lead {
+    margin-top: 24px;
+    margin-bottom: 32px;
+  }
+
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: 20px;
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+
+  .hero-meta > span + span::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 3px;
+    margin-inline-end: 16px;
+    border-radius: 50%;
+    background: currentColor;
+    vertical-align: middle;
+    opacity: 0.6;
+  }
+
+  .hero-media {
+    position: relative;
+  }
+
+  .features h3 {
+    font-size: 1.1875rem;
+    letter-spacing: -0.012em;
+    margin-bottom: 10px;
+  }
+
+  .features p {
+    color: var(--muted);
+    font-size: 1rem;
+  }
+
+  /* Features */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .features li {
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    transition:
+      opacity 0.7s var(--ease-out),
+      border-color 0.2s ease,
+      transform 0.5s var(--ease-out),
+      box-shadow 0.25s var(--ease-out);
+    transition-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  .features li.is-in:hover {
+    transition-delay: 0s;
+  }
+
+  .features li:hover {
+    border-color: var(--line-strong);
+    box-shadow: var(--shadow);
+  }
+
+  .features li.is-in:hover {
+    transform: translateY(-2px);
+  }
+
+  .features h3::before {
+    content: '';
+    display: block;
+    width: 28px;
+    height: 3px;
+    margin-bottom: 18px;
+    border-radius: 3px;
+    background: var(--accent);
+  }
+
+  /* Formats */
+  .formats-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(40px, 6vw, 80px);
+    align-items: center;
+  }
+
+  .formats {
+    margin: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .formats > div {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.8fr) 1.2fr;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .formats dt {
+    font-weight: 600;
+  }
+
+  .formats dd {
+    margin: 0;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.875rem;
+    line-height: 1.7;
+    text-align: start;
+  }
+
+  :global([dir='rtl']) .formats dd {
+    text-align: right;
+  }
+
+  .more {
+    margin-top: 24px;
+  }
+
+  /* Limits */
+  .limits-section {
+    background: var(--bg-sunken);
+  }
+
+  .limits-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: clamp(32px, 6vw, 80px);
+  }
+
+  .limits-grid .lead {
+    margin-top: 16px;
+  }
+
+  .limits {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: limit;
+  }
+
+  .limits li {
+    position: relative;
+    padding: 16px 0;
+    padding-inline-start: 32px;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink-2);
+  }
+
+  .limits li:first-child {
+    border-top: 1px solid var(--line);
+  }
+
+  .limits li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 4px;
+    top: 27px;
+    width: 12px;
+    height: 2px;
+    background: var(--muted);
+    border-radius: 2px;
+  }
+
+  /* FAQ */
+  .faq-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+    gap: clamp(32px, 6vw, 80px);
+    align-items: start;
+  }
+
+  .faq {
+    border-top: 1px solid var(--line);
+  }
+
+  .faq details {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .faq summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 22px 0;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .faq summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq summary h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .faq summary:hover h3 {
+    color: var(--accent);
+  }
+
+  .faq :global(.faq-icon) {
+    flex: none;
+    color: var(--muted);
+    transition: transform 0.2s ease;
+  }
+
+  .faq details[open] :global(.faq-icon) {
+    transform: rotate(45deg);
+  }
+
+  .faq details p {
+    padding-bottom: 24px;
+    max-width: 64ch;
+    color: var(--ink-2);
+  }
+
+  /* Closing */
+  .closing {
+    padding-block: 0 var(--section);
+  }
+
+  .closing-panel {
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    padding: clamp(40px, 7vw, 80px) clamp(20px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--surface);
+    text-align: center;
+  }
+
+  .closing-panel .lead {
+    margin-bottom: 16px;
+  }
+
+  /* Responsive */
+  @media (max-width: 1023px) {
+    .hero-grid,
+    .formats-grid,
+    .limits-grid,
+    .faq-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .features {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 640px) {
+    .features {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .formats > div {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 4px;
+    }
+
+    /* Separators look stray when the line wraps; rely on spacing instead. */
+    .hero-meta > span + span::before {
+      display: none;
+    }
+  }
+</style>

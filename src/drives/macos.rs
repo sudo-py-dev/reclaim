@@ -277,7 +277,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             size,
             kind: if whole { "Entire drive" } else { "Volume" }.into(),
             location: if locked {
-                "Locked — unlock in Disk Utility first".into()
+                "Locked: unlock in Disk Utility first".into()
             } else if let Some(point) = mount {
                 format!("Mounted at {point}")
             } else if in_use {

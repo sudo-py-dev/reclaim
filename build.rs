@@ -7,7 +7,7 @@ fn main() {
     winresource::WindowsResource::new()
         .set_icon("assets/icons/reclaim.ico")
         .set("ProductName", "Reclaim")
-        .set("FileDescription", "Reclaim — File Recovery")
+        .set("FileDescription", "Reclaim - File Recovery")
         .compile()
         .expect("compile Windows application icon and version metadata");
 }

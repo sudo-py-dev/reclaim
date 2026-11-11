@@ -1,0 +1,146 @@
+---
+import AppWindow from './AppWindow.astro';
+import ScreenPicture from './ScreenPicture.astro';
+import { dirOf, useDict, type Locale } from '../i18n';
+import { SCREEN_WIDTH, screenImage, type Rect } from '../lib/screens';
+
+/**
+ * The hero screenshot plus two close-up cards cut from the real app UI:
+ * the file inspector and the "read-only" note. Crops reuse the same images.
+ */
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = useDict(locale);
+const rtl = dirOf(locale) === 'rtl';
+const [sources, results] = await Promise.all([screenImage(locale, 'sources'), screenImage(locale, 'results')]);
+
+function crop(rect: Rect, scale: number) {
+  const x = rtl ? SCREEN_WIDTH - rect.x - rect.w : rect.x;
+  return [
+    `--cw:${Math.round(rect.w * scale)}px`,
+    `--ch:${Math.round(rect.h * scale)}px`,
+    `--iw:${Math.round(SCREEN_WIDTH * scale)}px`,
+    `--ix:${Math.round(-x * scale)}px`,
+    `--iy:${Math.round(-rect.y * scale)}px`,
+  ].join(';');
+}
+
+const inspector = crop({ x: 872, y: 130, w: 264, h: 240 }, 0.72);
+const readOnly = crop({ x: 16, y: 648, w: 200, h: 88 }, 0.95);
+---
+
+<div class="hero-shot">
+  <AppWindow locale={locale} class="main">
+    <ScreenPicture
+      image={sources}
+      alt={t.hero.shotDrives}
+      sizes="(min-width: 1120px) 620px, (min-width: 1024px) 55vw, calc(100vw - 32px)"
+      eager
+    />
+  </AppWindow>
+
+  <div class="card card-inspector" style={inspector} aria-hidden="true">
+    <ScreenPicture image={results} alt="" sizes="440px" />
+  </div>
+  <div class="card card-readonly" style={readOnly} aria-hidden="true">
+    <ScreenPicture image={sources} alt="" sizes="440px" />
+  </div>
+</div>
+
+<style>
+  .hero-shot {
+    position: relative;
+    padding-block: 24px 40px;
+  }
+
+  .hero-shot :global(.main) {
+    animation: rise-window 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.15s both;
+  }
+
+  .card {
+    position: absolute;
+    width: var(--cw);
+    height: var(--ch);
+    overflow: hidden;
+    direction: ltr;
+    border: 1px solid var(--frame-line);
+    border-radius: 12px;
+    background: var(--frame-bg);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .card :global(picture) {
+    position: absolute;
+    left: var(--ix);
+    top: var(--iy);
+    display: block;
+    width: var(--iw);
+  }
+
+  .card :global(img) {
+    display: block;
+    width: 100%;
+    max-width: none;
+    height: auto;
+  }
+
+  .card-inspector {
+    bottom: 0;
+    inset-inline-start: -64px;
+    animation: pop 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 0.65s both;
+  }
+
+  .card-readonly {
+    top: -6px;
+    inset-inline-end: -32px;
+    animation: pop 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 0.85s both;
+  }
+
+  @keyframes rise-window {
+    from {
+      opacity: 0;
+      transform: translateY(28px) scale(0.985);
+    }
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.94);
+    }
+  }
+
+  @media (max-width: 1180px) {
+    .card-readonly {
+      inset-inline-end: -8px;
+    }
+    .card-inspector {
+      inset-inline-start: -16px;
+    }
+  }
+
+  @media (max-width: 1023px) {
+    .card-readonly {
+      display: none;
+    }
+    .card-inspector {
+      inset-inline-start: auto;
+      inset-inline-end: -8px;
+      bottom: -12px;
+      transform-origin: bottom right;
+      scale: 0.8;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .hero-shot {
+      padding-block: 8px 0;
+    }
+    .card-inspector {
+      display: none;
+    }
+  }
+</style>

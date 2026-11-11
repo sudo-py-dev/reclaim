@@ -1,0 +1,121 @@
+---
+import Icon from './Icon.astro';
+import { useDict, type Locale } from '../i18n';
+
+interface Props {
+  locale: Locale;
+}
+const t = useDict(Astro.props.locale);
+---
+
+<dialog class="lightbox" data-lightbox aria-label={t.ui.zoom}>
+  <button type="button" class="close" data-close aria-label={t.ui.close}>
+    <Icon name="plus" size={22} />
+  </button>
+  <img alt="" width="1160" height="780" />
+</dialog>
+
+<script>
+  const dialog = document.querySelector<HTMLDialogElement>('[data-lightbox]');
+  const img = dialog?.querySelector('img');
+  const dark = window.matchMedia('(prefers-color-scheme: dark)');
+
+  if (dialog && img) {
+    document.addEventListener('click', (event) => {
+      const trigger = (event.target as Element).closest('[data-zoom]');
+      if (!trigger) return;
+      const picture = trigger.closest('.viewport')?.querySelector<HTMLElement>('picture[data-full-light]');
+      if (!picture) return;
+      // Pick the screenshot currently shown (tours swap between several).
+      const visible =
+        [...(trigger.closest('.viewport')?.querySelectorAll<HTMLElement>('picture[data-full-light]') ?? [])].find(
+          (p) => !p.closest('[hidden]') && getComputedStyle(p).opacity !== '0',
+        ) ?? picture;
+      img.src = (dark.matches ? visible.dataset.fullDark : visible.dataset.fullLight) ?? '';
+      img.alt = visible.querySelector('img')?.alt ?? '';
+      dialog.showModal();
+    });
+
+    dialog.addEventListener('click', (event) => {
+      // Clicking the dark backdrop or the close button closes it.
+      if (event.target === dialog || (event.target as Element).closest('[data-close]')) dialog.close();
+    });
+  }
+</script>
+
+<style>
+  .lightbox {
+    width: min(1240px, calc(100vw - 32px));
+    max-width: none;
+    max-height: calc(100dvh - 32px);
+    padding: 0;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    overflow: visible;
+  }
+
+  .lightbox[open] {
+    animation: zoom-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .lightbox::backdrop {
+    background: rgb(8 10 14 / 0.72);
+    backdrop-filter: blur(6px);
+  }
+
+  .lightbox[open]::backdrop {
+    animation: fade 0.24s ease;
+  }
+
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: calc(100dvh - 32px);
+    object-fit: contain;
+    border-radius: 14px;
+    box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6);
+  }
+
+  .close {
+    position: absolute;
+    top: -14px;
+    inset-inline-end: -14px;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+  }
+
+  .close :global(svg) {
+    transform: rotate(45deg);
+  }
+
+  @media (max-width: 640px) {
+    .close {
+      top: -48px;
+      inset-inline-end: 0;
+    }
+  }
+
+  @keyframes zoom-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+</style>

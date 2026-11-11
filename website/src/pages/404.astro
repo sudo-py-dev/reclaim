@@ -1,0 +1,63 @@
+---
+import Base from '../layouts/Base.astro';
+import { LANGUAGE_NAMES, LOCALES, localePath, useDict } from '../i18n';
+
+const t = useDict('en');
+---
+
+<Base locale="en" page={null} title={t.meta.notFoundTitle} description={t.notFound.body} noindex>
+  <section class="nf">
+    <div class="wrap">
+      <p class="code">404</p>
+      <h1>{t.notFound.title}</h1>
+      <p class="lead">{t.notFound.body}</p>
+      <a class="btn btn-primary" href="/">{t.notFound.back}</a>
+      <ul role="list" class="langs">
+        {
+          LOCALES.filter((l) => l !== 'en').map((l) => (
+            <li>
+              <a href={localePath(l)} lang={l} hreflang={l}>
+                {LANGUAGE_NAMES[l]}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .nf {
+    padding-block: clamp(80px, 14vw, 160px);
+  }
+
+  .code {
+    margin-bottom: 12px;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 1.4rem + 2.6vw, 3rem);
+  }
+
+  .lead {
+    margin: 16px 0 32px;
+  }
+
+  .langs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin: 40px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.9375rem;
+  }
+
+  .langs a {
+    color: var(--muted);
+  }
+</style>
