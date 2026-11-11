@@ -172,7 +172,7 @@ scan or export is running. A manual check is always available at the top of
 Settings. Checking does not disable recovery controls; installation does.
 Background failures do not display an error notice or trigger repeated retries.
 
-An available release appears in a non-modal floating notice above the main page.
+An available release appears in a centered dialog over a dimmed backdrop on the main page.
 Later remembers the dismissed version in the per-user update cache, including
 across restarts; a different release can show a new notice. Dismissal keeps
 installation and release notes available in Settings. What's new expands bounded,
