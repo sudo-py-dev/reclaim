@@ -193,12 +193,26 @@ component Card inherits Rectangle { clip: true; background: Palette.surface; bor
 
 // One button component: filled for the single primary action of a page, outlined otherwise,
 // borderless (`quiet`) for low-emphasis actions.
+// Rotate the path coordinates: the software renderer does not implement item rotation.
+component RefreshSpin inherits Path {
+    private property <angle> phase: mod(animation-tick() / 1ms, 700) / 700 * 360deg;
+    pure function rx(x: float, y: float) -> float { return 12 + (x - 12) * cos(root.phase) - (y - 12) * sin(root.phase); }
+    pure function ry(x: float, y: float) -> float { return 12 + (x - 12) * sin(root.phase) + (y - 12) * cos(root.phase); }
+    viewbox-width: 24; viewbox-height: 24;
+    fill: transparent; stroke-width: 1.3px; stroke-line-cap: round; stroke-line-join: round;
+    MoveTo { x: root.rx(20, 7); y: root.ry(20, 7); }
+    ArcTo { radius-x: 9; radius-y: 9; large-arc: true; sweep: false; x: root.rx(21, 16); y: root.ry(21, 16); }
+    MoveTo { x: root.rx(20, 2); y: root.ry(20, 2); }
+    LineTo { x: root.rx(20, 8); y: root.ry(20, 8); }
+    LineTo { x: root.rx(14, 8); y: root.ry(14, 8); }
+}
 component Action inherits Rectangle {
     in property <string> text;
     in property <image> icon;
     in property <bool> primary;
     in property <bool> quiet;
     in property <bool> enabled: true;
+    in property <bool> spinning;
     callback clicked();
     height: Metrics.control; min-width: 64px; horizontal-stretch: 0;
     preferred-width: caption.preferred-width + (root.icon.width > 0 ? 26px : 0px) + 30px;
@@ -213,7 +227,7 @@ component Action inherits Rectangle {
     background: primary ? (touch.pressed ? Palette.primary-pressed : touch.has-hover ? Palette.primary-hover : Palette.primary)
         : touch.pressed ? Palette.line : touch.has-hover ? Palette.subtle : quiet ? transparent : Palette.surface;
     animate background { duration: 120ms; }
-    opacity: enabled ? 1 : 0.45;
+    opacity: enabled || spinning ? 1 : 0.45;
     focus := FocusScope { enabled: root.enabled;
         key-pressed(event) => {
             if event.text == Key.Space || event.text == Key.Return { root.clicked(); return accept; }
@@ -221,7 +235,10 @@ component Action inherits Rectangle {
         }
     }
     Row { padding-left: 14px; padding-right: 14px; spacing: 8px;
-        if root.icon.width > 0 : Image { source: root.icon; width: 18px; height: 18px; colorize: root.primary ? white : Palette.accent; }
+        if root.icon.width > 0 : Rectangle { width: 18px; height: 18px;
+            if root.spinning : RefreshSpin { width: parent.width; height: parent.height; stroke: root.primary ? white : Palette.accent; }
+            if !root.spinning : Image { width: parent.width; height: parent.height; source: root.icon; colorize: root.primary ? white : Palette.accent; }
+        }
         caption := Label { font-size: 13px; font-weight: root.primary ? 600 : 500; min-width: 0px; horizontal-stretch: 1; overflow: elide; text: root.text; color: root.primary ? white : Palette.ink; vertical-alignment: center; }
     }
     touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
@@ -470,6 +487,11 @@ export component AppWindow inherits Window {
     in-out property <string> preview-error;
     in-out property <int> preview-token;
     in property <bool> busy;
+    in property <bool> drives-refreshing;
+    in-out property <bool> refresh-feedback;
+    Timer { interval: 700ms; running: root.refresh-feedback; triggered => { root.refresh-feedback = false; } }
+    in-out property <bool> update-check-feedback;
+    Timer { interval: 700ms; running: root.update-check-feedback; triggered => { root.update-check-feedback = false; } }
     in property <bool> can-scan;
     in property <bool> can-recover;
     // Every visible result is ticked (drives the list's "Select all" box).
@@ -568,7 +590,11 @@ export component AppWindow inherits Window {
                 Row { height: Metrics.control; cross-axis-alignment: stretch; spacing: 8px;
                     SectionLabel { text: Strings.available-sources; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; height: 1px; }
-                    Action { text: Strings.refresh; icon: @image-url("icons/refresh.svg"); enabled: !root.busy; clicked => { root.refresh(); } }
+                    Action { text: Strings.refresh; icon: @image-url("icons/refresh.svg");
+                        spinning: root.drives-refreshing || root.refresh-feedback;
+                        enabled: !root.busy && !root.drives-refreshing && !root.refresh-feedback;
+                        clicked => { root.refresh-feedback = true; root.refresh(); }
+                    }
                     Action { text: Strings.open-disk-image; icon: @image-url("icons/files.svg"); enabled: !root.busy; clicked => { root.open-image(); } }
                 }
                 // Sized to its rows so the action bar sits right under a short list;
@@ -708,7 +734,11 @@ export component AppWindow inherits Window {
                 GroupTitle { text: Strings.updates; }
                 Card { VerticalLayout {
                     SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-status;
-                        Action { enabled: !root.update-busy; text: Strings.check-for-updates; icon: @image-url("icons/refresh.svg"); clicked => { root.check-update(); } }
+                        Action { enabled: !root.update-busy && !root.update-check-feedback;
+                            spinning: (root.update-busy && !root.update-installing) || root.update-check-feedback;
+                            text: Strings.check-for-updates; icon: @image-url("icons/refresh.svg");
+                            clicked => { root.update-check-feedback = true; root.check-update(); }
+                        }
                     }
                     if root.update-available || root.update-installing : VerticalLayout { padding: 16px; padding-top: 0px; spacing: 12px;
                         if root.update-available : Row { spacing: 8px;

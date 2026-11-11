@@ -510,6 +510,7 @@ impl Reclaim {
                 .into(),
         );
         ui.set_busy(self.busy);
+        ui.set_drives_refreshing(self.drives_loading);
         ui.set_can_scan(!self.busy && self.source.is_some());
         let selected = self.selected_indices().len();
         let visible = self.visible_result_indices().len();

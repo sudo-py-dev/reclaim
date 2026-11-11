@@ -425,3 +425,84 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
         });
     }
 }
+
+#[test]
+fn refresh_buttons_animate_even_when_results_do_not_change() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            mock_time: true,
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui_text::apply(&ui);
+    let drives = Rc::new(std::cell::Cell::new(0));
+    let checks = Rc::new(std::cell::Cell::new(0));
+    let count = drives.clone();
+    ui.on_refresh(move || count.set(count.get() + 1));
+    let count = checks.clone();
+    ui.on_check_update(move || count.set(count.get() + 1));
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    for (page, label, count) in [(0, "Refresh", drives), (2, "Check for updates", checks)] {
+        ui.set_page(page);
+        ui.window().take_snapshot().unwrap();
+        let button =
+            i_slint_backend_testing::ElementHandle::find_by_accessible_label(&ui, &i18n::t(label))
+                .next()
+                .unwrap();
+        button.invoke_accessible_default_action();
+        i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+        assert_eq!(count.get(), 1);
+        assert!(!button.accessible_enabled().unwrap());
+        button.invoke_accessible_default_action();
+        assert_eq!(count.get(), 1, "coalesce repeated clicks while refreshing");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(150));
+        slint::platform::update_timers_and_animations();
+        let first = ui.window().take_snapshot().unwrap();
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(150));
+        slint::platform::update_timers_and_animations();
+        let second = ui.window().take_snapshot().unwrap();
+        assert!(
+            first.as_bytes() != second.as_bytes(),
+            "refresh icon should visibly rotate"
+        );
+        assert!(if page == 0 {
+            ui.get_refresh_feedback()
+        } else {
+            ui.get_update_check_feedback()
+        });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(401));
+        slint::platform::update_timers_and_animations();
+        assert!(
+            button.accessible_enabled().unwrap(),
+            "a quick unchanged result still gets 700ms of feedback"
+        );
+        button.invoke_accessible_default_action();
+        i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+        assert_eq!(
+            count.get(),
+            2,
+            "each subsequent press restarts the animation"
+        );
+        if page == 0 {
+            ui.set_drives_refreshing(true);
+        } else {
+            ui.set_update_busy(true);
+        }
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(701));
+        slint::platform::update_timers_and_animations();
+        assert!(
+            !button.accessible_enabled().unwrap(),
+            "keep spinning until the real request finishes"
+        );
+        if page == 0 {
+            ui.set_drives_refreshing(false);
+        } else {
+            ui.set_update_busy(false);
+        }
+        assert!(button.accessible_enabled().unwrap());
+    }
+}
