@@ -91,7 +91,7 @@ impl Default for Reclaim {
             scan_stopped: false,
             scan_error: None,
             unreadable: Vec::new(),
-            status: "Choose a drive or disk image to get started.".into(),
+            status: FIRST_RUN_STATUS.into(),
             filter: String::new(),
             category: 0,
             exporting: false,
@@ -101,6 +101,8 @@ impl Default for Reclaim {
         }
     }
 }
+/// Shown until the user picks a source; the results page hides it as noise.
+const FIRST_RUN_STATUS: &str = "Choose a drive or disk image to get started.";
 impl Reclaim {
     fn stop_operation(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -425,7 +427,7 @@ impl Reclaim {
                             }
                             Ok(()) if !self.unreadable.is_empty() => {
                                 self.scanned = self.total.max(self.scanned);
-                                "Scan finished with unreadable areas. Some files could not be checked.".into()
+                                "Scan finished with unreadable areas. Some files could not be checked. The drive may be failing: recover the files you need now and avoid repeated scans.".into()
                             }
                             Ok(()) => {
                                 self.scanned = self.total.max(self.scanned);
@@ -493,7 +495,16 @@ impl Reclaim {
         ui.set_busy(self.busy);
         ui.set_can_scan(!self.busy && self.source.is_some());
         let selected = self.selected_indices().len();
+        let visible = self.visible_result_indices().len();
         ui.set_can_recover(!self.busy && selected > 0);
+        ui.set_all_selected(visible > 0 && selected == visible);
+        ui.set_has_results(!self.results.is_empty());
+        ui.set_show_status(
+            self.busy
+                || self.scan_error.is_some()
+                || self.drives_error.is_some()
+                || self.status != FIRST_RUN_STATUS,
+        );
         let status = if let Some((offset, kind, size, _)) = self.scan_activity
             && self.busy
             && !self.cancel.load(Ordering::Relaxed)
@@ -701,8 +712,16 @@ fn file_details(file: &Found, number: usize) -> String {
     }
     lines.join("\n\n")
 }
+/// Desktop file ID (`packaging/linux/io.github.reclaim.Reclaim.desktop`). Linux
+/// desktops, Wayland ones in particular, take the window icon and taskbar
+/// grouping from the `.desktop` file whose name matches the window's app ID.
+const APP_ID: &str = "io.github.reclaim.Reclaim";
+
 fn run() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
+    // After the platform exists (AppWindow::new sets it up) and before the window
+    // is shown, which is when it is created. No effect on Windows/macOS.
+    slint::set_xdg_app_id(APP_ID)?;
     ui_text::apply(&ui);
     ui.set_language(i18n::preference() as i32);
     {
@@ -932,6 +951,22 @@ fn run() -> Result<(), slint::PlatformError> {
     result
 }
 fn main() {
+    // The privileged update step runs as root through pkexec, with no desktop
+    // session, so it is handled before any GUI, D-Bus or settings setup.
+    #[cfg(target_os = "linux")]
+    {
+        let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+        if args
+            .first()
+            .is_some_and(|a| a == reclaim::updater::INSTALL_DEB_FLAG)
+        {
+            if let Err(error) = update_runtime::run_privileged_deb_update(&args) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+    }
     diagnostics::install();
     i18n::init();
     #[cfg(target_os = "linux")]

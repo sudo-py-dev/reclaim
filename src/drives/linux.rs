@@ -240,7 +240,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             }
             .into(),
             location: if encrypted {
-                "Encrypted — unlock in Disks, then refresh".into()
+                "Encrypted: unlock in Disks, then refresh".into()
             } else if let Some(m) = mount {
                 format!("Mounted at {m}")
             } else if in_use {

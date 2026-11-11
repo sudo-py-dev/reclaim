@@ -116,7 +116,7 @@ pub fn report(summary: &str, details: &str) {
             .encode_utf16()
             .chain(Some(0))
             .collect();
-        let title: Vec<u16> = "Reclaim — launch or crash error"
+        let title: Vec<u16> = "Reclaim: launch or crash error"
             .encode_utf16()
             .chain(Some(0))
             .collect();

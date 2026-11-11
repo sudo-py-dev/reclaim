@@ -44,7 +44,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: Reclaim contributors <sudo-py-dev@users.noreply.github.com>
 Homepage: https://github.com/sudo-py-dev/reclaim
-Depends: packagekit, libc6 (>= 2.35), libgcc-s1, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-cursor0, libegl1, libgl1, libxcursor1, libxi6, libxrandr2
+Depends: pkexec | policykit-1, libc6 (>= 2.35), libgcc-s1, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-cursor0, libegl1, libgl1, libxcursor1, libxi6, libxrandr2
 Recommends: xdg-desktop-portal, xdg-desktop-portal-gtk
 Installed-Size: {sum(p.stat().st_size for p in (root / 'usr').rglob('*') if p.is_file()) // 1024 + 1}
 Description: Read-only disk image carving and file recovery

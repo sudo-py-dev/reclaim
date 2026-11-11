@@ -45,7 +45,7 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
             "Volume",
             true,
             "Volume",
-            "Encrypted — unlock in Disks, then refresh",
+            "Encrypted: unlock in Disks, then refresh",
             true,
         ),
     ] {
@@ -210,4 +210,13 @@ fn all_slint_labels_have_catalog_entries() {
     for key in ui_text::UI_MESSAGES {
         assert!(i18n::has_message(key), "missing UI message: {key}");
     }
+}
+
+#[test]
+fn linux_app_id_matches_the_packaged_desktop_entry() {
+    let entry = include_str!("../packaging/linux/io.github.reclaim.Reclaim.desktop");
+    assert!(entry.contains(&format!("Icon={APP_ID}")));
+    assert!(entry.contains(&format!("StartupWMClass={APP_ID}")));
+    let script = include_str!("../scripts/package-release.py");
+    assert!(script.contains(&format!("IDENTIFIER = '{APP_ID}'")));
 }

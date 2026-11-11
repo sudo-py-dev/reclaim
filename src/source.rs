@@ -52,7 +52,7 @@ impl<R: Read + Seek> Read for SourceReader<R> {
             if count == 0 && self.size.is_some_and(|size| self.position < size) {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "The drive stopped returning data before its reported size. Reconnect it and scan again.",
+                    "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.",
                 ));
             }
             self.position += count as u64;
@@ -79,7 +79,7 @@ impl<R: Read + Seek> Read for SourceReader<R> {
                     Ok(0) if self.size.is_some() && self.cached_len < required => {
                         return Err(io::Error::new(
                             io::ErrorKind::UnexpectedEof,
-                            "The drive stopped returning data before its reported size. Reconnect it and scan again.",
+                            "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.",
                         ));
                     }
                     Ok(0) => break,

@@ -1,0 +1,21 @@
+---
+import { Image } from 'astro:assets';
+import appIcon from '../assets/app-icon.png';
+
+/** The real Reclaim application icon, as shown in desktop launchers. */
+interface Props {
+  size?: number;
+  eager?: boolean;
+}
+const { size = 32, eager = false } = Astro.props;
+---
+
+<Image
+  src={appIcon}
+  alt=""
+  width={size}
+  height={size}
+  densities={[1, 2]}
+  loading={eager ? 'eager' : 'lazy'}
+  class="logo-mark"
+/>

@@ -153,3 +153,15 @@ jobs:
           else
             gh release create "$TAG" dist/* --verify-tag --generate-notes --title "Reclaim $TAG"
           fi
+      # Rebuild the website so its download links and version match this release.
+      # Optional: create a Deploy Hook in Vercel and save its URL as this secret.
+      - name: Refresh website
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK" ]; then
+            echo "VERCEL_DEPLOY_HOOK is not set; skipping website rebuild."
+            exit 0
+          fi
+          curl --fail --silent --show-error --retry 3 -X POST "$VERCEL_DEPLOY_HOOK" > /dev/null
+          echo "Website rebuild requested."

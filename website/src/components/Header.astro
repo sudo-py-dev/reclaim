@@ -1,0 +1,239 @@
+---
+import Icon from './Icon.astro';
+import Logo from './Logo.astro';
+import { LANGUAGE_NAMES, LOCALES, localePath, useDict, type Locale, type PageKey } from '../i18n';
+import { REPO_URL } from '../lib/release';
+
+interface Props {
+  locale: Locale;
+  page: PageKey;
+}
+
+const { locale, page } = Astro.props;
+const t = useDict(locale);
+const home = localePath(locale);
+const links = [
+  { href: `${home}#how`, label: t.nav.how },
+  { href: `${home}#features`, label: t.nav.features },
+  { href: `${home}#formats`, label: t.nav.formats },
+  { href: `${home}#faq`, label: t.nav.faq },
+];
+---
+
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href={home} aria-label={t.nav.home}>
+      <Logo size={34} eager />
+      <span>Reclaim</span>
+    </a>
+
+    <nav class="nav" aria-label={t.nav.menu}>
+      {links.map((l) => <a href={l.href}>{l.label}</a>)}
+      <a href={REPO_URL} rel="noopener">{t.nav.github}</a>
+    </nav>
+
+    <div class="actions">
+      <details class="lang" data-dropdown>
+        <summary aria-label={t.nav.language}>
+          <Icon name="globe" />
+          <span class="lang-current">{LANGUAGE_NAMES[locale]}</span>
+          <Icon name="chevron" size={14} class="chev" />
+        </summary>
+        <ul role="list">
+          {
+            LOCALES.map((l) => (
+              <li>
+                <a
+                  href={localePath(l, page)}
+                  lang={l}
+                  hreflang={l}
+                  aria-current={l === locale ? 'true' : undefined}
+                >
+                  {LANGUAGE_NAMES[l]}
+                  {l === locale && <Icon name="check" size={16} />}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </details>
+      <a class="btn btn-primary btn-sm header-dl" href={localePath(locale, 'download')}>
+        {t.nav.download}
+      </a>
+    </div>
+  </div>
+</header>
+
+<script>
+  // Close language menus on outside click or Escape.
+  const menus = document.querySelectorAll<HTMLDetailsElement>('[data-dropdown]');
+  document.addEventListener('click', (e) => {
+    menus.forEach((m) => {
+      if (m.open && !m.contains(e.target as Node)) m.open = false;
+    });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    menus.forEach((m) => {
+      if (m.open) {
+        m.open = false;
+        m.querySelector('summary')?.focus();
+      }
+    });
+  });
+</script>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(160%) blur(12px);
+    -webkit-backdrop-filter: saturate(160%) blur(12px);
+    border-bottom: 1px solid transparent;
+    view-transition-name: site-header;
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .site-header:global(.is-scrolled) {
+    border-bottom-color: var(--line);
+    box-shadow: 0 6px 20px -14px rgb(0 0 0 / 0.25);
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    height: 64px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.125rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    color: var(--ink);
+  }
+
+  .brand:hover {
+    color: var(--ink);
+  }
+
+  .nav {
+    display: flex;
+    gap: 4px;
+    margin-inline-start: 12px;
+  }
+
+  .nav a {
+    padding: 8px 12px;
+    border-radius: 8px;
+    color: var(--ink-2);
+    font-size: 0.9375rem;
+    text-decoration: none;
+  }
+
+  .nav a:hover {
+    color: var(--ink);
+    background: var(--bg-sunken);
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-inline-start: auto;
+  }
+
+  .lang {
+    position: relative;
+  }
+
+  .lang summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    color: var(--ink-2);
+    font-size: 0.9375rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .lang summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .lang summary:hover,
+  .lang[open] summary {
+    background: var(--bg-sunken);
+    color: var(--ink);
+  }
+
+  .lang :global(.chev) {
+    transition: transform 0.15s ease;
+  }
+
+  .lang[open] :global(.chev) {
+    transform: rotate(180deg);
+  }
+
+  .lang ul {
+    position: absolute;
+    inset-inline-end: 0;
+    top: calc(100% + 6px);
+    min-width: 180px;
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  .lang li a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 0.9375rem;
+  }
+
+  .lang li a:hover {
+    background: var(--bg-sunken);
+  }
+
+  .lang li a[aria-current] {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  @media (max-width: 900px) {
+    .nav {
+      display: none;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .lang-current {
+      display: none;
+    }
+    .bar {
+      gap: 12px;
+    }
+  }
+</style>

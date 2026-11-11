@@ -82,7 +82,9 @@ pub fn update(
         return Err("Automatic updates require an installed copy of Reclaim".into());
     }
     #[cfg(target_os = "linux")]
-    packagekit_preflight()?;
+    if !Path::new(PKEXEC).is_file() {
+        return Err("Automatic package updates require pkexec (polkit)".into());
+    }
     #[cfg(windows)]
     if !executable
         .parent()
@@ -100,7 +102,7 @@ pub fn update(
     #[cfg(target_os = "linux")]
     {
         phase("Installing update…");
-        install_deb(&package, false)?;
+        install_deb(release, &package)?;
         phase("Restarting Reclaim…");
         crate::native_process::spawn(&executable, &[])?;
         Ok(())
@@ -118,90 +120,83 @@ pub fn update(
 }
 
 #[cfg(target_os = "linux")]
-fn packagekit_preflight() -> Result<(), String> {
-    let connection = zbus::blocking::Connection::system().map_err(|e| e.to_string())?;
-    let daemon = zbus::blocking::Proxy::new(
-        &connection,
-        "org.freedesktop.PackageKit",
-        "/org/freedesktop/PackageKit",
-        "org.freedesktop.PackageKit",
-    )
-    .map_err(|e| e.to_string())?;
-    let _: String = daemon
-        .get_property("BackendName")
-        .map_err(|e| format!("Automatic package updates require PackageKit: {e}"))?;
-    Ok(())
-}
+const PKEXEC: &str = "/usr/bin/pkexec";
 
+/// Hands a verified package to the privileged step through the desktop's own
+/// password prompt. The staged files are untrusted to root: the elevated
+/// `/usr/bin/reclaim` checks the signature again over a private copy (see
+/// [`run_privileged_deb_update`]). Blocks until the package manager is done.
 #[cfg(target_os = "linux")]
-fn install_deb(package: &Path, simulate: bool) -> Result<(), String> {
-    let connection = zbus::blocking::Connection::system().map_err(|e| e.to_string())?;
-    let daemon = zbus::blocking::Proxy::new(
-        &connection,
-        "org.freedesktop.PackageKit",
-        "/org/freedesktop/PackageKit",
-        "org.freedesktop.PackageKit",
-    )
-    .map_err(|e| e.to_string())?;
-    let path: zbus::zvariant::OwnedObjectPath = daemon
-        .call("CreateTransaction", &())
+fn install_deb(release: &Release, package: &Path) -> Result<(), String> {
+    std::fs::write(updater::signature_path(package), &release.signature)
         .map_err(|e| e.to_string())?;
-    let transaction = zbus::blocking::Proxy::new(
-        &connection,
-        "org.freedesktop.PackageKit",
-        path,
-        "org.freedesktop.PackageKit.Transaction",
-    )
-    .map_err(|e| e.to_string())?;
-    let _: () = transaction
-        .call("SetHints", &(vec!["interactive=true", "background=false"],))
-        .map_err(|e| e.to_string())?;
-    let mut signals = transaction
-        .receive_all_signals()
-        .map_err(|e| e.to_string())?;
-    // PackageKit's SIMULATE bit is used only by the explicit integration test.
-    // Normal local installs use flags=0; the HTTPS + SHA-256 check is done first.
-    let flags = if simulate { 1u64 << 2 } else { 0 };
-    let files = vec![
-        package
-            .to_str()
-            .ok_or("Update cache path is not valid Unicode")?,
+    let package = package
+        .to_str()
+        .ok_or("Update cache path is not valid Unicode")?;
+    // Always elevate the system-installed binary, never a user-controlled one.
+    let arguments = [
+        "/usr/bin/reclaim".to_owned(),
+        updater::INSTALL_DEB_FLAG.to_owned(),
+        release.version.to_string(),
+        package.to_owned(),
     ];
-    let reply: Option<()> = transaction
-        .call_with_flags(
-            "InstallFiles",
-            zbus::proxy::MethodFlags::AllowInteractiveAuth.into(),
-            &(flags, files),
-        )
-        .map_err(|e| e.to_string())?;
-    reply.ok_or("The package service did not acknowledge the update")?;
-    let mut failure = None;
-    for signal in &mut signals {
-        match signal.header().member().map(|m| m.as_str()) {
-            Some("ErrorCode") => {
-                let (_, details): (u32, String) =
-                    signal.body().deserialize().map_err(|e| e.to_string())?;
-                failure = Some(details);
-            }
-            Some("Finished") => {
-                let (exit, _duration): (u32, u32) =
-                    signal.body().deserialize().map_err(|e| e.to_string())?;
-                return packagekit_result(exit, failure);
-            }
-            _ => {}
-        }
-    }
-    Err("The package service disconnected before the update finished".into())
+    let code = crate::native_process::spawn(Path::new(PKEXEC), &arguments)
+        .map_err(|e| format!("Could not ask for administrator permission: {e}"))?
+        .wait();
+    pkexec_result(code.ok())
 }
 
-#[cfg(any(target_os = "linux", test))]
-fn packagekit_result(exit: u32, failure: Option<String>) -> Result<(), String> {
-    if exit == 1 && failure.is_none() {
+/// The root side of [`install_deb`], run before any GUI or D-Bus setup.
+/// Only the root-only copy that [`updater::protect_deb_update`] verified is
+/// passed to apt, with a fixed environment instead of the caller's.
+#[cfg(target_os = "linux")]
+pub fn run_privileged_deb_update(args: &[std::ffi::OsString]) -> Result<(), String> {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    if unsafe { libc::geteuid() } != 0 {
+        return Err("This command is used only by Reclaim's updater".into());
+    }
+    std::env::set_current_dir("/").map_err(|e| e.to_string())?;
+    let package = updater::protect_deb_update(args)?;
+    let path = package
+        .path
+        .to_str()
+        .ok_or("Update path is not valid Unicode")?;
+    let arguments = ["install", "-y", "--", path].map(str::to_owned);
+    let environment = [
+        "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+        "DEBIAN_FRONTEND=noninteractive",
+    ]
+    .map(Into::into)
+    .into();
+    let code = crate::native_process::spawn_with_environment(
+        Path::new("/usr/bin/apt-get"),
+        &arguments,
+        environment,
+    )
+    .map_err(|e| format!("Could not start the package manager: {e}"))?
+    .wait()?;
+    // `package` (the protected copy) is removed when it goes out of scope.
+    if code == 0 {
         Ok(())
     } else {
-        Err(failure.unwrap_or_else(|| {
-            format!("Package update did not complete (status {exit}). Reclaim was left open.")
-        }))
+        Err(format!(
+            "The package manager did not install the update (status {code})"
+        ))
+    }
+}
+
+/// pkexec exits with 126 when the password prompt is dismissed and 127 when
+/// permission is refused; the elevated step exits with 1 on failure. `None`
+/// means it did not exit normally.
+#[cfg(any(target_os = "linux", test))]
+fn pkexec_result(code: Option<u32>) -> Result<(), String> {
+    match code {
+        Some(0) => Ok(()),
+        Some(126 | 127) => Err("The update was not installed: administrator permission was not given. Reclaim was left open.".into()),
+        other => Err(format!(
+            "Package update did not complete (status {}). Reclaim was left open.",
+            other.map_or_else(|| "interrupted".into(), |c| c.to_string())
+        )),
     }
 }
 
@@ -274,23 +269,9 @@ mod tests {
 
     #[test]
     fn cancellation_and_install_errors_never_request_a_restart() {
-        assert!(super::packagekit_result(1, None).is_ok());
-        assert!(super::packagekit_result(3, None).is_err());
-        assert!(super::packagekit_result(1, Some("Authorization cancelled".into())).is_err());
-    }
-    #[cfg(target_os = "linux")]
-    #[test]
-    #[ignore = "requires the host PackageKit service; does not install anything"]
-    fn live_package_service_is_available() {
-        super::packagekit_preflight().unwrap();
-    }
-    #[cfg(target_os = "linux")]
-    #[test]
-    #[ignore = "requires RECLAIM_TEST_PACKAGE; simulates only, without installing"]
-    fn live_package_install_simulation() {
-        let path = std::path::PathBuf::from(
-            std::env::var_os("RECLAIM_TEST_PACKAGE").expect("explicit package"),
-        );
-        super::install_deb(&path, true).unwrap();
+        assert!(super::pkexec_result(Some(0)).is_ok());
+        for code in [Some(1), Some(126), Some(127), None] {
+            assert!(super::pkexec_result(code).is_err(), "{code:?}");
+        }
     }
 }

@@ -117,27 +117,158 @@ pub fn check() -> Result<Option<Release>, String> {
     Ok(Some(release))
 }
 
+const UNSIGNED: &str = "This update is not signed by the Reclaim release key";
+
 /// The trusted comment the release workflow signs into every `.minisig`.
-fn signed_comment(release: &Release) -> String {
-    format!(
-        "reclaim-update file:{} version:{}",
-        release.asset, release.version
-    )
+fn trusted_comment(asset: &str, version: &semver::Version) -> String {
+    format!("reclaim-update file:{asset} version:{version}")
 }
 
-/// Decode the signature and check it was made by the release key for exactly
-/// this file and version. The file contents are verified while downloading.
-fn signed_by_release_key(release: &Release) -> Result<(PublicKey, Signature), String> {
-    const UNSIGNED: &str = "This update is not signed by the Reclaim release key";
+fn signed_comment(release: &Release) -> String {
+    trusted_comment(&release.asset, &release.version)
+}
+
+/// The Debian package's release file name; the packaging script uses the same.
+pub fn deb_asset(version: &semver::Version) -> String {
+    format!("reclaim_{version}_amd64.deb")
+}
+
+/// Decode `text` and check it was made by the release key with exactly
+/// `comment`. The file contents are verified separately, while streaming.
+fn checked_signature(text: &str, comment: &str) -> Result<(PublicKey, Signature), String> {
     let key = PublicKey::decode(TRUSTED_KEY).map_err(|_| "Invalid built-in release key")?;
-    let signature = Signature::decode(&release.signature).map_err(|_| UNSIGNED)?;
+    let signature = Signature::decode(text).map_err(|_| UNSIGNED)?;
     // Binds file name and version; the comment itself is covered by the signature.
-    if signature.trusted_comment() != signed_comment(release) {
+    if signature.trusted_comment() != comment {
         return Err(UNSIGNED.into());
     }
     // Rejects other keys and legacy (non-prehashed) signatures before any download.
     key.verify_stream(&signature).map_err(|_| UNSIGNED)?;
     Ok((key, signature))
+}
+
+/// Decode the signature and check it was made by the release key for exactly
+/// this file and version. The file contents are verified while downloading.
+fn signed_by_release_key(release: &Release) -> Result<(PublicKey, Signature), String> {
+    checked_signature(&release.signature, &signed_comment(release))
+}
+
+/// Where the signature of a staged package is kept, next to the package.
+pub fn signature_path(package: &std::path::Path) -> std::path::PathBuf {
+    let mut path = package.as_os_str().to_owned();
+    path.push(".minisig");
+    path.into()
+}
+
+/// The command-line flag of the privileged Debian install step.
+pub const INSTALL_DEB_FLAG: &str = "--install-deb-update";
+
+/// A verified package in a root-only folder, removed again when dropped.
+#[cfg(target_os = "linux")]
+pub struct ProtectedPackage {
+    _dir: tempfile::TempDir,
+    pub path: std::path::PathBuf,
+}
+
+/// The checks of the privileged half of a Debian update, run as root through
+/// `pkexec` as `/usr/bin/reclaim --install-deb-update <version> <package>`.
+/// The caller confirms it runs as root and hands only [`ProtectedPackage::path`]
+/// to the package manager.
+///
+/// Everything the unprivileged app staged is untrusted here: the package and
+/// its signature sit in a folder the user (and so any program running as the
+/// user) can change after the app checked them. So the signature is checked
+/// again with the built-in key, and the bytes are copied into a root-only
+/// folder while being verified. Only versions newer than the installed one
+/// are accepted, so an older signed package cannot be used to downgrade.
+#[cfg(target_os = "linux")]
+pub fn protect_deb_update(args: &[std::ffi::OsString]) -> Result<ProtectedPackage, String> {
+    if args.len() != 3 || args[0] != INSTALL_DEB_FLAG {
+        return Err("This command is used only by Reclaim's updater".into());
+    }
+    let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+    let version = args[1]
+        .to_str()
+        .and_then(|v| semver::Version::parse(v).ok())
+        .filter(|v| v.pre.is_empty() && v.build.is_empty() && *v > current)
+        .ok_or("Not a newer Reclaim version")?;
+    let package = std::path::Path::new(&args[2]);
+    let mut text = String::new();
+    regular_file(&signature_path(package))?
+        .take(MAX_SIGNATURE + 1)
+        .read_to_string(&mut text)
+        .map_err(|_| UNSIGNED)?;
+    if text.len() as u64 > MAX_SIGNATURE {
+        return Err(UNSIGNED.into());
+    }
+    let asset = deb_asset(&version);
+    let (key, signature) = checked_signature(&text, &trusted_comment(&asset, &version))?;
+    // An explicit system folder: never honor TMPDIR from the invoking user.
+    let dir = protected_dir(std::path::Path::new("/var/tmp"))?;
+    let path = dir.path().join(&asset);
+    copy_verified_package(package, &path, &key, &signature)?;
+    Ok(ProtectedPackage { _dir: dir, path })
+}
+
+/// Opens `path` only if it is a regular file, so a planted FIFO or device
+/// cannot stall or feed the privileged step.
+#[cfg(target_os = "linux")]
+fn regular_file(path: &std::path::Path) -> Result<std::fs::File, String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    // Non-blocking, so opening a FIFO returns at once and is refused below.
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| format!("Could not open the update: {e}"))?;
+    let is_file = file.metadata().is_ok_and(|m| m.is_file());
+    is_file
+        .then_some(file)
+        .ok_or_else(|| "The staged update is not a regular file".into())
+}
+
+/// A new folder inside `parent` that only its owner (root, when elevated) can use.
+#[cfg(target_os = "linux")]
+fn protected_dir(parent: &std::path::Path) -> Result<tempfile::TempDir, String> {
+    use std::os::unix::fs::PermissionsExt;
+    tempfile::Builder::new()
+        .prefix("reclaim-update-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in(parent)
+        .map_err(|e| format!("Could not prepare the update: {e}"))
+}
+
+/// Copies `source` into a new file at `protected`, verifying the signature
+/// over exactly the bytes written. Fails if `protected` already exists.
+#[cfg(target_os = "linux")]
+fn copy_verified_package(
+    source: &std::path::Path,
+    protected: &std::path::Path,
+    key: &PublicKey,
+    signature: &Signature,
+) -> Result<(), String> {
+    let mut dest = std::fs::File::create_new(protected).map_err(|e| e.to_string())?;
+    let mut verifier = key.verify_stream(signature).map_err(|_| UNSIGNED)?;
+    let mut reader = regular_file(source)?.take(MAX_BINARY + 1);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut size = 0u64;
+    loop {
+        let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if count == 0 {
+            break;
+        }
+        size += count as u64;
+        if size > MAX_BINARY {
+            return Err("Update exceeds expected size".into());
+        }
+        verifier.update(&buffer[..count]);
+        dest.write_all(&buffer[..count])
+            .map_err(|e| e.to_string())?;
+    }
+    verifier
+        .finalize()
+        .map_err(|_| "Update signature verification failed")?;
+    dest.sync_all().map_err(|e| e.to_string())
 }
 
 fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, String> {
@@ -285,7 +416,7 @@ fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Op
             Some("/usr/bin/reclaim" | "/bin/reclaim")
         )
     {
-        Some(format!("reclaim_{version}_amd64.deb"))
+        Some(deb_asset(version))
     } else if cfg!(target_os = "macos")
         && executable
             .ancestors()
@@ -648,6 +779,86 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
             .push(serde_json::json!({"name": "test.minisig",
                 "browser_download_url": "https://evil.example/test.minisig"}));
         assert!(parse_release(&json, "test").is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn privileged_copy_is_private_verified_and_independent_of_the_source() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = tempfile::tempdir().unwrap();
+        let dir = protected_dir(scratch.path()).unwrap();
+        assert_eq!(
+            dir.path().metadata().unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let (key, signature) =
+            checked_signature(SIGNED_ABC, "reclaim-update file:test version:99.0.0").unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("test");
+        let protected = dir.path().join("test");
+        // A package swapped after the app verified it is caught.
+        std::fs::write(&source, b"swapped before elevation").unwrap();
+        assert!(copy_verified_package(&source, &protected, &key, &signature).is_err());
+        // An existing file (e.g. a planted one) is never written through.
+        assert!(copy_verified_package(&source, &protected, &key, &signature).is_err());
+        std::fs::remove_file(&protected).unwrap();
+        std::fs::write(&source, b"abc").unwrap();
+        copy_verified_package(&source, &protected, &key, &signature).unwrap();
+        // Later changes to the user's copy do not reach the protected one.
+        std::fs::write(&source, b"swapped after verification").unwrap();
+        assert_eq!(std::fs::read(&protected).unwrap(), b"abc");
+        // Not a regular file: refused without reading or blocking.
+        for path in [source_dir.path(), std::path::Path::new("/dev/zero")] {
+            assert!(regular_file(path).is_err(), "{}", path.display());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn privileged_step_refuses_wrong_arguments_versions_and_signatures() {
+        use std::ffi::OsString;
+        let call = |a: &[&str]| {
+            protect_deb_update(&a.iter().map(OsString::from).collect::<Vec<_>>()).map(|_| ())
+        };
+        assert!(call(&[]).is_err());
+        assert!(call(&[INSTALL_DEB_FLAG, "99.0.0"]).is_err());
+        assert!(call(&["--other", "99.0.0", "/tmp/x"]).is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join(deb_asset(&"99.0.0".parse().unwrap()));
+        std::fs::write(&package, b"abc").unwrap();
+        let path = package.to_str().unwrap();
+        // Unsigned, then signed for another file: refused.
+        assert!(call(&[INSTALL_DEB_FLAG, "99.0.0", path]).is_err());
+        std::fs::write(signature_path(&package), SIGNED_ABC).unwrap();
+        assert!(call(&[INSTALL_DEB_FLAG, "99.0.0", path]).is_err());
+        // Not newer than this build, or not a plain release version: refused.
+        for version in [
+            env!("CARGO_PKG_VERSION"),
+            "0.0.1",
+            "99.0.0-rc.1",
+            "99.0.0+x",
+            "v99.0.0",
+        ] {
+            assert!(
+                call(&[INSTALL_DEB_FLAG, version, path]).is_err(),
+                "{version}"
+            );
+        }
+        assert!(
+            checked_signature(
+                SIGNED_ABC,
+                &trusted_comment("test", &"1.0.0".parse().unwrap())
+            )
+            .is_err()
+        );
+        assert_eq!(
+            deb_asset(&"1.2.3".parse().unwrap()),
+            "reclaim_1.2.3_amd64.deb"
+        );
+        assert_eq!(
+            signature_path(std::path::Path::new("/a/reclaim_1.2.3_amd64.deb")),
+            std::path::PathBuf::from("/a/reclaim_1.2.3_amd64.deb.minisig")
+        );
     }
 
     #[test]

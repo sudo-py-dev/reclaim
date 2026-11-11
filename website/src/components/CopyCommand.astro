@@ -1,0 +1,93 @@
+---
+import Icon from './Icon.astro';
+
+interface Props {
+  command: string;
+  copy: string;
+  copied: string;
+  /** Keep the text in sync with the newest .deb (see ReleaseRefresh). */
+  deb?: boolean;
+}
+
+const { command, copy, copied, deb = false } = Astro.props;
+---
+
+<div class="cmd" dir="ltr">
+  <code data-deb-cmd={deb ? '' : undefined}>{command}</code>
+  <button type="button" class="copy" data-copy data-copied-label={copied} aria-label={copy} title={copy}>
+    <span class="icon-copy"><Icon name="copy" size={16} /></span>
+    <span class="icon-done"><Icon name="check" size={16} /></span>
+  </button>
+  <span class="visually-hidden" aria-live="polite" data-copy-status></span>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const box = button.closest('.cmd');
+      const text = box?.querySelector('code')?.textContent ?? '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        return;
+      }
+      button.classList.add('done');
+      const status = box?.querySelector('[data-copy-status]');
+      if (status) status.textContent = button.dataset.copiedLabel ?? '';
+      setTimeout(() => {
+        button.classList.remove('done');
+        if (status) status.textContent = '';
+      }, 1800);
+    });
+  });
+</script>
+
+<style>
+  .cmd {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 6px 6px 6px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--code-bg);
+  }
+
+  code {
+    flex: 1;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .copy {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .copy:hover {
+    background: var(--surface);
+    color: var(--ink);
+  }
+
+  .icon-done,
+  .copy.done .icon-copy {
+    display: none;
+  }
+
+  .copy.done .icon-done {
+    display: block;
+    color: var(--accent);
+  }
+</style>

@@ -1,0 +1,81 @@
+---
+import Icon from './Icon.astro';
+import { useDict, type Locale } from '../i18n';
+
+interface Props {
+  locale: Locale;
+  id?: string;
+}
+
+const { locale, id = 'warn-title' } = Astro.props;
+const t = useDict(locale);
+const cases = [t.warn.external, t.warn.internal];
+---
+
+<aside class="warn" aria-labelledby={id}>
+  <Icon name="alert" size={22} class="warn-icon" />
+  <div>
+    <h2 id={id}>{t.warn.title}</h2>
+    <p class="body">{t.warn.body}</p>
+    <ul role="list">
+      {
+        cases.map((c) => (
+          <li>
+            <strong>{c.lead}:</strong> {c.text}
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</aside>
+
+<style>
+  .warn {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 22px 24px;
+    border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line));
+    border-radius: var(--radius-lg);
+    background: var(--warn-soft);
+  }
+
+  .warn :global(.warn-icon) {
+    flex: none;
+    margin-top: 2px;
+    color: var(--warn);
+  }
+
+  h2 {
+    font-size: 1.0625rem;
+    letter-spacing: -0.01em;
+    margin-bottom: 6px;
+  }
+
+  .body {
+    color: var(--ink-2);
+  }
+
+  ul {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0 0;
+    padding: 14px 0 0;
+    border-top: 1px solid color-mix(in srgb, var(--warn) 22%, transparent);
+    list-style: none;
+    color: var(--ink-2);
+    font-size: 0.96875rem;
+  }
+
+  strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  @media (max-width: 640px) {
+    .warn {
+      padding: 18px;
+      gap: 12px;
+    }
+  }
+</style>
