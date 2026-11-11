@@ -58,6 +58,12 @@ export global Strings {
     in-out property <string> supported-formats: "Supported formats";
     in-out property <string> photos-documents-archives-audio-video: "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, and NTFS volumes.";
     in-out property <string> check-for-updates: "Check for updates";
+    in-out property <string> updates: "Updates";
+    in-out property <string> whats-new: "What’s new";
+    in-out property <string> later: "Later";
+    in-out property <string> hide-details: "Hide details";
+    in-out property <string> update-when-ready: "You can keep working and update later.";
+    in-out property <string> no-release-notes: "No release notes.";
     in-out property <string> project-website: "Project website";
     in-out property <string> built-with-rust-and-slint: "Built with Rust and Slint · MIT licensed application";
     in-out property <string> stop: "Stop";
@@ -482,6 +488,10 @@ export component AppWindow inherits Window {
     in property <string> update-status;
     in property <string> update-notes;
     in property <bool> update-busy;
+    in property <bool> update-installing;
+    in property <bool> update-notice;
+    in property <string> update-title;
+    in-out property <bool> update-details-open;
     in property <bool> update-available;
     in property <string> update-label;
     in property <float> update-progress;
@@ -489,6 +499,7 @@ export component AppWindow inherits Window {
     callback change-language(int);
     callback open-project();
     callback apply-update();
+    callback dismiss-update();
     callback open-image(); callback refresh(); callback select-drive(int); callback scan(); callback stop();
     callback recover(); callback toggle-file(int); callback inspect(int); callback select-all(bool); callback filter(); callback check-update();
     Row { cross-axis-alignment: stretch;
@@ -535,6 +546,24 @@ export component AppWindow inherits Window {
                 Body { text: root.page == 0 ? Strings.choose-a-drive-or-disk : root.page == 1 ? Strings.inspect-candidates-choose-your-files : Strings.appearance-updates-and-a-little; }
             }
             // Sources: pick a drive, then start the scan.
+            if root.update-notice && !root.busy && !root.update-installing && root.page != 2 : Card {
+                vertical-stretch: 0;
+                VerticalLayout { padding: 12px; spacing: 8px;
+                    Row { spacing: 12px;
+                        IconTile { icon: @image-url("icons/download.svg"); }
+                        VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 3px;
+                            Label { text: root.update-title; color: Palette.ink; font-size: 13px; font-weight: 600; wrap: word-wrap; }
+                            Body { text: Strings.update-when-ready; font-size: 12px; }
+                        }
+                    }
+                    Row { spacing: 8px;
+                        Action { text: Strings.whats-new; quiet: true; clicked => { root.page = 2; root.update-details-open = true; } }
+                        Rectangle { horizontal-stretch: 1; }
+                        Action { text: Strings.later; quiet: true; clicked => { root.dismiss-update(); } }
+                        Action { text: root.update-label; primary: true; enabled: !root.update-busy; clicked => { root.apply-update(); } }
+                    }
+                }
+            }
             if root.page == 0 : VerticalLayout { vertical-stretch: 1; spacing: 12px;
                 Row { height: Metrics.control; cross-axis-alignment: stretch; spacing: 8px;
                     SectionLabel { text: Strings.available-sources; vertical-alignment: center; }
@@ -676,6 +705,27 @@ export component AppWindow inherits Window {
             // Settings & help: preferences, then guidance, then version and project details.
             // The scroll area reaches 16px into the page padding so its scrollbar never covers a card.
             if root.page == 2 : Rectangle { vertical-stretch: 1; ScrollView { x: 0px; y: 0px; width: parent.width + 16px; height: parent.height; VerticalLayout { padding-right: 16px; spacing: 8px; alignment: start;
+                GroupTitle { text: Strings.updates; }
+                Card { VerticalLayout {
+                    SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-status;
+                        Action { enabled: !root.update-busy; text: Strings.check-for-updates; icon: @image-url("icons/refresh.svg"); clicked => { root.check-update(); } }
+                    }
+                    if root.update-available || root.update-installing : VerticalLayout { padding: 16px; padding-top: 0px; spacing: 12px;
+                        if root.update-available : Row { spacing: 8px;
+                            Action { text: root.update-details-open ? Strings.hide-details : Strings.whats-new; quiet: true; clicked => { root.update-details-open = !root.update-details-open; } }
+                            Rectangle { horizontal-stretch: 1; }
+                            Action { text: root.update-label; primary: true; enabled: !root.busy && !root.update-busy; clicked => { root.apply-update(); } }
+                        }
+                        if root.update-details-open : VerticalLayout { spacing: 8px;
+                            Label { text: Strings.whats-new; color: Palette.ink; font-size: 13px; font-weight: 600; }
+                            ScrollView { height: min(180px, max(72px, release-notes.preferred-height + 4px)); vertical-stretch: 0;
+                                release-notes := Label { x: 0px; y: 0px; width: parent.width - 16px; height: self.preferred-height; vertical-alignment: top; text: root.update-notes != "" ? root.update-notes : Strings.no-release-notes; color: Palette.secondary; font-size: 13px; wrap: word-wrap; }
+                            }
+                        }
+                        if root.update-installing : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * clamp(root.update-progress, 0, 1); background: Palette.primary; animate width { duration: 200ms; } } }
+                    }
+                } }
+                Rectangle { height: 8px; }
                 GroupTitle { text: Strings.general; }
                 Card { VerticalLayout {
                     SettingRow { icon: @image-url("icons/globe.svg"); title: Strings.language;
@@ -704,15 +754,6 @@ export component AppWindow inherits Window {
                 Rectangle { height: 8px; }
                 GroupTitle { text: Strings.about; }
                 Card { VerticalLayout {
-                    SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-status;
-                        if root.update-available : Action { text: root.update-label; primary: true; enabled: !root.busy && !root.update-busy; clicked => { root.apply-update(); } }
-                        Action { enabled: !root.update-busy; text: Strings.check-for-updates; icon: @image-url("icons/refresh.svg"); clicked => { root.check-update(); } }
-                    }
-                    if root.update-notes != "" || root.update-busy : VerticalLayout { padding: 16px; padding-top: 0px; spacing: 12px;
-                        if root.update-notes != "" : Body { text: root.update-notes; }
-                        if root.update-busy : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * root.update-progress; background: Palette.primary; animate width { duration: 200ms; } } }
-                    }
-                    RowDivider { }
                     SettingRow { icon: @image-url("../assets/icons/reclaim-64.png"); full-colour-icon: true; title: Strings.reclaim; detail: Strings.built-with-rust-and-slint;
                         Action { text: Strings.project-website; icon: @image-url("icons/external.svg"); clicked => { root.open-project(); } }
                     }

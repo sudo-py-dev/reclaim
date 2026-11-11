@@ -909,17 +909,27 @@ fn run() -> Result<(), slint::PlatformError> {
             }
         });
     }
-    let updates = Rc::new(RefCell::new(updates::Updates::default()));
+    let updates = Rc::new(RefCell::new(updates::Updates::new()));
     {
         let updates = updates.clone();
         ui.on_check_update(move || updates.borrow_mut().check());
     }
     {
         let updates = updates.clone();
+        ui.on_dismiss_update(move || updates.borrow_mut().dismiss());
+    }
+    {
+        let updates = updates.clone();
         let state = state.clone();
+        let weak = ui.as_weak();
         ui.on_apply_update(move || {
             if !state.borrow().busy {
                 updates.borrow_mut().apply();
+                if updates.borrow().installing()
+                    && let Some(ui) = weak.upgrade()
+                {
+                    ui.set_page(2);
+                }
             }
         });
     }
@@ -928,6 +938,7 @@ fn run() -> Result<(), slint::PlatformError> {
         let state = state.clone();
         let weak = ui.as_weak();
         let last_language = std::cell::Cell::new(i18n::preference());
+        let started = std::time::Instant::now();
         timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(100),
@@ -940,16 +951,22 @@ fn run() -> Result<(), slint::PlatformError> {
                         s.sync_ui(&ui);
                     }
                     let mut updates = updates.borrow_mut();
-                    let was_updating = updates.busy();
+                    if !s.busy && started.elapsed() >= Duration::from_secs(30) {
+                        updates.check_automatically();
+                    }
+                    let was_updating = updates.installing();
                     updates.poll();
-                    if was_updating != updates.busy() {
+                    if was_updating != updates.installing() {
                         s.sync_ui(&ui);
                     }
                     ui.set_update_status(i18n::t(&updates.status).into());
                     ui.set_update_notes(updates.notes.clone().into());
                     ui.set_update_busy(updates.busy());
+                    ui.set_update_installing(updates.installing());
+                    ui.set_update_notice(updates.notice_visible);
+                    ui.set_update_title(updates.title().into());
                     ui.set_update_progress(updates.progress);
-                    if updates.busy() {
+                    if updates.installing() {
                         ui.set_can_scan(false);
                         ui.set_can_recover(false);
                     }

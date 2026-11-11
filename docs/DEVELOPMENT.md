@@ -164,3 +164,17 @@ platform's packaging tools listed in the README.
 The release workflow also uses `cargo xtask validate-tag`, `bundle`, and
 `checksums`; update signatures remain a separate, verified release step.
 CI formats, tests, and lints the tooling crate on all desktop platforms.
+
+## Update notifications
+
+Reclaim makes one quiet update check per session, after 30 seconds and while no
+scan or export is running. A manual check is always available at the top of
+Settings. Checking does not disable recovery controls; installation does.
+Background failures do not display an error notice or trigger repeated retries.
+
+An available release appears as a non-modal banner without taking keyboard
+focus. Later remembers the dismissed version in the per-user update cache,
+including across restarts; a different release can show a new notice. Dismissal
+keeps installation and release notes available in Settings. Release notes are
+collapsed until requested, rendered as bounded plain text, and scroll when long.
+Downloading, installation, and restarting require the explicit update action.
