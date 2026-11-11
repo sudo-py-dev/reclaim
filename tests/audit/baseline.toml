@@ -8,7 +8,7 @@
 "src/allocation.rs" = 6
 "src/detection.rs" = 19
 "src/drives/linux.rs" = 7
-"src/drives/macos.rs" = 2
+"src/drives/macos.rs" = 0
 "src/drives/windows.rs" = 9
 "src/formats/cfb.rs" = 9
 "src/formats/gzip.rs" = 6

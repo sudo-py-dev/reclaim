@@ -12,6 +12,8 @@ const REVIEWED_ADVISORIES: &[(&str, &str, &str)] = &[
     ("RUSTSEC-2026-0370", "zvariant", "5.15.1"),
     ("RUSTSEC-2026-0371", "zbus_names", "4.3.5"),
     ("RUSTSEC-2026-0372", "zvariant_derive", "5.15.1"),
+    ("RUSTSEC-2026-0441", "pin-utils", "0.1.1"),
+    ("RUSTSEC-2026-0192", "ttf-parser", "0.25.1"),
 ];
 
 /// Crates that provide broken cryptography or launch other programs.

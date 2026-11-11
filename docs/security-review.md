@@ -102,7 +102,7 @@ findings, not reported exploitable vulnerabilities.
 and the supported Miri checks for pushes, pull requests, manual runs, and weekly
 runs. Action references are pinned to verified immutable hashes, tool releases
 and nightly compilers are pinned, and workflow permissions are read-only. The dependency job
-accepts only the three reviewed maintenance notices until the deadline;
+accepts only the reviewed maintenance notices until the deadline;
 all other advisory failures remain blocking. Both nightly jobs pin
 `nightly-2026-10-23` (compiler commit `7189d39d9`), which passed the local
 checks. The moving 2026-10-31 nightly produced E0391 in `zvariant_utils`
@@ -111,7 +111,7 @@ on GitHub before its remote result can be confirmed.
 
 `deny.toml` rejects unknown Git/registry sources, wildcard dependencies, yanked
 versions, stale offline advisory databases, and unmaintained packages outside
-the three reviewed, version-bound, expiring exceptions. See
+the reviewed, version-bound, expiring exceptions. See
 `fuzz/README.md` for the reproducible fuzzing commands and scope limits. Local
 machine-readable audit/policy reports and test logs are under
 `target/security-reports/` (ignored build artifacts).
@@ -125,3 +125,30 @@ completed 318 inputs in 125 seconds. A fixed-fixture replay and then the final
 full sanitizer run succeeded outside that sandbox, without changing kernel
 settings or disabling leak detection. No application fix or crash suppression
 was needed for that tooling limitation.
+
+
+## CI dependency review, 2026-11-11
+
+The desktop build matrix passed its tests, but cargo-deny found two additional
+maintenance notices in the locked Slint 1.18.1 dependency graph:
+
+- [RUSTSEC-2026-0441](https://rustsec.org/advisories/RUSTSEC-2026-0441):
+  `pin-utils 0.1.1`, required by `spin_on 0.1.1` in `slint-build` and
+  `slint-macros`. Upstream must replace its pinning macros with maintained
+  alternatives such as `core::pin::pin!`.
+- [RUSTSEC-2026-0192](https://rustsec.org/advisories/RUSTSEC-2026-0192):
+  `ttf-parser 0.25.1`, required by `owned_ttf_parser` / `ab_glyph` through
+  winit's `sctk-adwaita` window decorations. Migration to a maintained font
+  parser belongs in that dependency stack.
+
+Both advisories are informational unmaintained notices with no patched version.
+The exact locked versions are temporarily accepted until 2026-12-15, with
+version and expiry enforcement in `tests/audit/supply_chain.rs`. Vulnerability,
+yanked-crate, unknown-source, and all other advisory checks remain blocking.
+
+Slint's winit backend also unconditionally depends on `webbrowser 1.2.7` for
+its platform `open_url` implementation. The cargo-deny ban now permits only
+`i-slint-backend-winit` as its immediate wrapper; other dependents remain
+banned. Reclaim does not invoke this URL helper, and the project audit still
+bans a direct `webbrowser` dependency. This exception does not authorize
+application code to launch browser helpers.

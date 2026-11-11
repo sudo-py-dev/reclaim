@@ -353,11 +353,12 @@ fn whole_disk(device: &str) -> Option<&str> {
     if !valid_id(id) {
         return None;
     }
-    let digits = id["disk".len()..]
+    let digits = id
+        .strip_prefix("disk")?
         .bytes()
         .take_while(u8::is_ascii_digit)
         .count();
-    Some(&id[.."disk".len() + digits])
+    id.get(.."disk".len() + digits)
 }
 
 pub fn destination(source: &std::path::Path, folder: &std::path::Path) -> Destination {
@@ -410,5 +411,8 @@ mod tests {
         assert_eq!(whole_disk("/dev/disk3s1s1"), Some("disk3"));
         assert_eq!(whole_disk("/dev/sda"), None);
         assert_eq!(whole_disk("disk3"), None);
+        for device in ["/dev/disk", "/dev/diské", "/dev/disk3sé", "/dev/disk٣"] {
+            assert_eq!(whole_disk(device), None);
+        }
     }
 }

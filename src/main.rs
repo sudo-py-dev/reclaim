@@ -26,7 +26,9 @@ mod ui {
 use reclaim::i18n;
 use reclaim::{Event, Found};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
-use std::{cell::RefCell, io::Write, rc::Rc};
+#[cfg(target_os = "linux")]
+use std::io::Write;
+use std::{cell::RefCell, rc::Rc};
 use std::{
     path::PathBuf,
     sync::{
