@@ -3583,7 +3583,7 @@ dependencies = [
 
 [[package]]
 name = "reclaim"
-version = "0.1.11"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "core-foundation-sys",
@@ -3602,6 +3602,7 @@ dependencies = [
  "slint-build",
  "sys-locale",
  "tempfile",
+ "tiny-xlib",
  "ureq",
  "windows-sys 0.61.2",
  "winresource",
