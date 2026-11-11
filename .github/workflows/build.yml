@@ -6,10 +6,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-# A newer push to the same branch or PR cancels the run it replaces.
+# A newer push to a PR cancels the run it replaces. Every commit on main gets its
+# own group so it is always checked in full; one merge never cancels another.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
@@ -21,7 +22,7 @@ jobs:
         os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -56,7 +57,7 @@ jobs:
           cp assets/fonts/DejaVu-LICENSE.txt dist/Reclaim.app/Contents/Resources/
           codesign --force --sign - dist/Reclaim.app
           ditto -c -k --keepParent dist/Reclaim.app dist/Reclaim-macOS.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: reclaim-${{ runner.os }}
           path: |
