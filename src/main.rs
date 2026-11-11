@@ -91,7 +91,7 @@ impl Default for Reclaim {
             scan_stopped: false,
             scan_error: None,
             unreadable: Vec::new(),
-            status: "Choose a drive or disk image to get started.".into(),
+            status: FIRST_RUN_STATUS.into(),
             filter: String::new(),
             category: 0,
             exporting: false,
@@ -101,6 +101,8 @@ impl Default for Reclaim {
         }
     }
 }
+/// Shown until the user picks a source; the results page hides it as noise.
+const FIRST_RUN_STATUS: &str = "Choose a drive or disk image to get started.";
 impl Reclaim {
     fn stop_operation(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -493,7 +495,16 @@ impl Reclaim {
         ui.set_busy(self.busy);
         ui.set_can_scan(!self.busy && self.source.is_some());
         let selected = self.selected_indices().len();
+        let visible = self.visible_result_indices().len();
         ui.set_can_recover(!self.busy && selected > 0);
+        ui.set_all_selected(visible > 0 && selected == visible);
+        ui.set_has_results(!self.results.is_empty());
+        ui.set_show_status(
+            self.busy
+                || self.scan_error.is_some()
+                || self.drives_error.is_some()
+                || self.status != FIRST_RUN_STATUS,
+        );
         let status = if let Some((offset, kind, size, _)) = self.scan_activity
             && self.busy
             && !self.cancel.load(Ordering::Relaxed)
