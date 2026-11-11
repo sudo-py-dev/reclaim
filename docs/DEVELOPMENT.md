@@ -26,7 +26,7 @@ On Ubuntu, install the native GUI development dependencies first:
 
 ```sh
 sudo apt-get update
-sudo apt-get install libx11-dev libxi-dev libxrandr-dev libxcursor-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+sudo apt-get install libfontconfig-dev
 ```
 
 To build an executable without launching the app:

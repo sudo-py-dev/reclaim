@@ -3587,6 +3587,7 @@ dependencies = [
  "slint-build",
  "sys-locale",
  "tempfile",
+ "tiny-xlib",
  "ureq",
  "windows-sys 0.61.2",
  "winresource",
