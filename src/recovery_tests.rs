@@ -3,18 +3,16 @@ use std::io::Write;
 
 #[test]
 fn recovery_exports_only_selected_files_matching_current_filters() {
-    for (case, category, query, expected) in [
-        (0, 1, "", vec!["photo.png"]),
-        (1, 3, "", vec!["backup.zip"]),
-        (2, 0, "PHOTO", vec!["photo.png"]),
-        (3, 3, "photo", vec![]),
-        (4, 0, "", vec!["backup.zip", "photo.png"]),
-        (5, 2, "", vec![]),
+    for (category, query, expected) in [
+        (1, "", vec!["photo.png"]),
+        (3, "", vec!["backup.zip"]),
+        (0, "PHOTO", vec!["photo.png"]),
+        (3, "photo", vec![]),
+        (0, "", vec!["backup.zip", "photo.png"]),
+        (2, "", vec![]),
     ] {
-        let directory = std::env::temp_dir().join(format!(
-            "reclaim-filter-export-{}-{case}",
-            std::process::id()
-        ));
+        let directory_temp = tempfile::tempdir().unwrap();
+        let directory = directory_temp.path().join("filter-export");
         std::fs::create_dir_all(&directory).unwrap();
         let source = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
         let mut app = Reclaim::default();
@@ -49,7 +47,7 @@ fn recovery_exports_only_selected_files_matching_current_filters() {
                 .receiver
                 .as_ref()
                 .unwrap()
-                .recv_timeout(std::time::Duration::from_secs(5))
+                .recv_timeout(Duration::from_secs(5))
                 .unwrap();
             assert!(matches!(result, Message::Export(Ok(count)) if count == expected.len()));
         }
@@ -62,7 +60,6 @@ fn recovery_exports_only_selected_files_matching_current_filters() {
         for name in actual {
             assert_eq!(std::fs::read(directory.join(name)).unwrap(), b"data");
         }
-        std::fs::remove_dir_all(directory).unwrap();
     }
 }
 

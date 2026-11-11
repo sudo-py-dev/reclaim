@@ -1,3 +1,8 @@
+#![expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "fixture helpers fail the test by panicking"
+)]
 use reclaim::{Event, Found, Validation, recover_reader, recover_unique, scan_reader};
 use std::{
     io::{self, Cursor, Read, Seek, SeekFrom},
@@ -91,7 +96,8 @@ fn original_unicode_name_and_sector_fixups_recover_exactly() {
     assert_eq!(found[0].recovery_name(123), "r\u{e9}sum\u{e9}.txt");
     assert_eq!(found[0].validation, Validation::MetadataChecked);
     assert_eq!(found[0].resident_data.as_deref(), Some(contents.as_slice()));
-    let dir = std::env::temp_dir().join(format!("reclaim-ntfs-{}", std::process::id()));
+    let dir_temp = tempfile::tempdir().unwrap();
+    let dir = dir_temp.path().join("ntfs");
     std::fs::create_dir_all(&dir).unwrap();
     let one = recover_unique(&mut Unreadable, &dir, &found[0], 1).unwrap();
     let two = recover_unique(&mut Unreadable, &dir, &found[0], 1).unwrap();
@@ -101,7 +107,6 @@ fn original_unicode_name_and_sector_fixups_recover_exactly() {
     );
     assert_eq!(std::fs::read(&one).unwrap(), contents);
     assert_eq!(std::fs::read(&two).unwrap(), contents);
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -138,11 +143,10 @@ fn empty_files_and_portable_original_names() {
     let found = scan(&record("CON.txt", b"", 0, false));
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].recovery_name(1), "_CON.txt");
-    let path =
-        std::env::temp_dir().join(format!("reclaim-empty-resident-{}.txt", std::process::id()));
+    let path_temp = tempfile::tempdir().unwrap();
+    let path = path_temp.path().join("empty-resident.txt");
     recover_reader(&mut Unreadable, &path, &found[0]).unwrap();
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
-    std::fs::remove_file(path).unwrap();
 }
 
 #[test]

@@ -5,7 +5,7 @@ Install the real Rust fuzzing tool and nightly compiler:
 ```sh
 cargo install --locked --version 0.13.2 cargo-fuzz
 rustup toolchain install nightly --profile minimal --component rust-src
-python3 fuzz/check_lock.py
+cargo test --locked --test audit fuzz_harness
 python3 fuzz/seed_corpus.py
 cargo +nightly fuzz run scan --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=2048 -dict=fuzz/scan.dict
 ```
@@ -37,7 +37,7 @@ bounds and incremental Ogg framing using the shared production limit and result
 type. It does not replace the full scanner target or test file export.
 
 ```sh
-python3 fuzz/check_lock.py
+cargo test --locked --test audit fuzz_harness
 python3 fuzz/seed_corpus.py
 cargo +nightly fuzz run containers --fuzz-dir fuzz/containers --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=1024 -dict=fuzz/scan.dict
 ```

@@ -278,6 +278,7 @@ pub(super) fn exfat(
     if length < needed || length > MAX_MAP as u64 {
         return Err(invalid("Invalid exFAT bitmap length"));
     }
+    // audit-allow(DOS-ALLOC): needed is at most length, which is checked against MAX_MAP.
     let mut bytes = Vec::with_capacity(needed as usize);
     let mut bitmap_clusters = Vec::new();
     let mut current = start;

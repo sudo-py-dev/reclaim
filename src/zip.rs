@@ -6,10 +6,10 @@ use std::{
 };
 const MAX_END: u64 = u32::MAX as u64 + 65557;
 fn short(bytes: &[u8], at: usize) -> u64 {
-    u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap()) as u64
+    crate::bytes::u16_le(bytes, at) as u64
 }
 fn long(bytes: &[u8], at: usize) -> u64 {
-    u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as u64
+    crate::bytes::u32_le(bytes, at) as u64
 }
 fn read<const N: usize>(
     input: &mut (impl Read + Seek),
@@ -110,9 +110,11 @@ fn walk(input: &mut (impl Read + Seek), start: u64, cancel: &AtomicBool) -> io::
         if data_end > directory {
             return Ok(Inspection::Invalid);
         }
+        // audit-allow(DOS-ALLOC): name_len comes from a 16-bit field, at most 64 KiB.
         let mut name = vec![0; name_len];
         input.read_exact(&mut name)?;
         input.seek(SeekFrom::Start(start + at + 46))?;
+        // audit-allow(DOS-ALLOC): name_len comes from a 16-bit field, at most 64 KiB.
         let mut central_name = vec![0; name_len];
         input.read_exact(&mut central_name)?;
         if name != central_name {

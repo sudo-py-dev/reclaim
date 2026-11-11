@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod allocation;
+mod bytes;
 mod detection;
 mod formats;
 use detection::{CandidateEnd, LIMIT};
@@ -20,7 +21,6 @@ use std::{
 };
 
 /// Formats currently recognized by the scanner, grouped for the interface.
-pub const FORMAT_SUMMARY: &str = "Small NTFS resident files · JPEG · PNG · GIF · BMP · WebP · QOI · ICO · PDF · Office · OpenDocument · EPUB · ZIP · 7z · RAR5 · CAB · TAR · GZIP · XAR/PKG · JAR · APK · EXE/DLL · ELF · MSI/MSP/MST · DEB · RPM · DEX · OLE · WAV · AIFF · AU · AVI · Ogg · SQLite";
 pub const FILE_CATEGORIES: &[&str] = &[
     "All files",
     "Pictures",
@@ -356,12 +356,12 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
                     if !matches!(kind, b"WAVE" | b"WEBP" | b"AVI ") {
                         return CandidateEnd::Invalid;
                     }
-                    u32::from_le_bytes(bytes[4..8].try_into().unwrap())
+                    bytes::u32_le(bytes, 4)
                 } else {
                     if !matches!(kind, b"AIFF" | b"AIFC") {
                         return CandidateEnd::Invalid;
                     }
-                    u32::from_be_bytes(bytes[4..8].try_into().unwrap())
+                    bytes::u32_be(bytes, 4)
                 };
                 if n < 4 {
                     return CandidateEnd::Invalid;
@@ -372,7 +372,7 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
                 if bytes.len() < 24 {
                     return CandidateEnd::More;
                 }
-                let read = |i| u32::from_be_bytes(bytes[i..i + 4].try_into().unwrap());
+                let read = |i| bytes::u32_be(bytes, i);
                 let (offset, data) = (read(4), read(8));
                 // Unknown-length AU streams cannot be bounded reliably in a disk image.
                 if offset < 24 || data == u32::MAX || data == 0 || read(16) == 0 || read(20) == 0 {
@@ -387,15 +387,15 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
                 if bytes[6..10] != [0; 4] {
                     return CandidateEnd::Invalid;
                 }
-                let n = u32::from_le_bytes(bytes[2..6].try_into().unwrap());
+                let n = bytes::u32_le(bytes, 2);
                 if n < 14 {
                     return CandidateEnd::Invalid;
                 }
                 if bytes.len() < 18 {
                     return CandidateEnd::More;
                 }
-                let dib = u32::from_le_bytes(bytes[14..18].try_into().unwrap());
-                let pixel_offset = u32::from_le_bytes(bytes[10..14].try_into().unwrap());
+                let dib = bytes::u32_le(bytes, 14);
+                let pixel_offset = bytes::u32_le(bytes, 10);
                 if !matches!(dib, 12 | 40 | 52 | 56 | 64 | 108 | 124)
                     || u64::from(dib) + 14 > u64::from(n)
                     || u64::from(pixel_offset) < u64::from(dib) + 14
@@ -452,7 +452,7 @@ fn valid_zip(bytes: &[u8], eocd: usize) -> bool {
         return false;
     }
     let short = |p| u16::from_le_bytes([bytes[p], bytes[p + 1]]) as usize;
-    let long = |p| u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+    let long = |p| bytes::u32_le(bytes, p) as usize;
     if eocd + 22 + short(eocd + 20) != bytes.len() {
         return false;
     }
@@ -530,7 +530,7 @@ fn zip_kind(bytes: &[u8]) -> &'static str {
     let eocd = search_start + relative;
     // valid_zip already checked the complete directory and local name ranges.
     let u16_at = |p| u16::from_le_bytes([bytes[p], bytes[p + 1]]) as usize;
-    let u32_at = |p| u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+    let u32_at = |p| bytes::u32_le(bytes, p) as usize;
     let count = u16_at(eocd + 10);
     let mut cursor = u32_at(eocd + 16);
     const PACKAGE_NAMES: &[&[u8]] = &[
@@ -961,7 +961,10 @@ pub fn recover_reader(
     {
         output.seek(SeekFrom::Start(0))?;
         let mut bytes = Vec::new();
-        output.read_to_end(&mut bytes)?;
+        output
+            .by_ref()
+            .take(found.size.saturating_add(1))
+            .read_to_end(&mut bytes)?;
         let checked = validation::validate(found.kind, &bytes, &AtomicBool::new(false));
         let resident_metadata = found.validation == Validation::MetadataChecked
             && found.resident_data.is_some()
@@ -1018,7 +1021,8 @@ mod tests {
 
     #[test]
     fn carve_boundary_and_recover_without_overwrite() {
-        let dir = std::env::temp_dir().join(format!("reclaim-test-{}", std::process::id()));
+        let dir_temp = tempfile::tempdir().unwrap();
+        let dir = dir_temp.path().join("test");
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("image.bin");
         let out = dir.join("out.pdf");
@@ -1040,11 +1044,11 @@ mod tests {
         assert_eq!(std::fs::read(&out).unwrap(), b"%PDF-1.7\nhello\n%%EOF");
         assert!(recover(&source, &out, &results[0]).is_err());
         assert_eq!(std::fs::read(&source).unwrap(), bytes);
-        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn all_supported_signatures() {
-        let path = std::env::temp_dir().join(format!("reclaim-formats-{}", std::process::id()));
+        let path_temp = tempfile::tempdir().unwrap();
+        let path = path_temp.path().join("formats");
         let mut bytes = Vec::new();
         for content in [
             include_bytes!("../tests/fixtures/real.jpg").as_slice(),
@@ -1066,11 +1070,11 @@ mod tests {
         })
         .unwrap();
         assert_eq!(kinds, vec!["jpg", "png", "pdf", "gif", "gif"]);
-        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn cancellation_and_incomplete_candidates() {
-        let p = std::env::temp_dir().join(format!("reclaim-incomplete-{}", std::process::id()));
+        let p_temp = tempfile::tempdir().unwrap();
+        let p = p_temp.path().join("incomplete");
         std::fs::write(&p, b"%PDF-1.7 unfinished").unwrap();
         for cancelled in [false, true] {
             let mut count = 0;
@@ -1082,11 +1086,11 @@ mod tests {
             .unwrap();
             assert_eq!(count, 0);
         }
-        std::fs::remove_file(p).unwrap();
     }
     #[test]
     fn length_based_formats_and_zip_comment() {
-        let path = std::env::temp_dir().join(format!("reclaim-lengths-{}", std::process::id()));
+        let path_temp = tempfile::tempdir().unwrap();
+        let path = path_temp.path().join("lengths");
         let mut wav = b"RIFF".to_vec();
         wav.extend_from_slice(&16u32.to_le_bytes());
         wav.extend_from_slice(b"WAVEfmt data!");
@@ -1109,11 +1113,11 @@ mod tests {
                 ("zip", zip.len() as u64)
             ]
         );
-        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn tiny_candidate_at_end_and_failed_export_cleanup() {
-        let dir = std::env::temp_dir().join(format!("reclaim-end-{}", std::process::id()));
+        let dir_temp = tempfile::tempdir().unwrap();
+        let dir = dir_temp.path().join("end");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("source");
         let output = dir.join("output");
@@ -1141,6 +1145,5 @@ mod tests {
         found[0].size = 100;
         assert!(recover(&path, &output, &found[0]).is_err());
         assert!(!output.exists());
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -73,17 +73,23 @@ pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::System::Threading::*;
     let application: Vec<_> = program.as_os_str().encode_wide().chain(Some(0)).collect();
-    let program_text = program.to_str().ok_or("Update path is not valid Unicode")?;
+    let program_text = program
+        .to_str()
+        .ok_or_else(|| reclaim::i18n::diagnostic("Update path is not valid Unicode"))?;
     let mut parts = vec![quote_argument(program_text)];
     for arg in arguments {
         if arg.contains('\0') {
-            return Err("Invalid update argument".into());
+            return Err(reclaim::i18n::diagnostic("Invalid update argument"));
         }
         parts.push(quote_argument(arg));
     }
     let mut command: Vec<_> = parts.join(" ").encode_utf16().chain(Some(0)).collect();
+    // audit-allow(SEC-UNINIT): Win32 documents zeroed STARTUPINFOW as the initial state.
+    // SAFETY: STARTUPINFOW is plain old data; all zero bytes is its documented initial value.
     let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
     startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    // audit-allow(SEC-UNINIT): an output structure that CreateProcessW fills in.
+    // SAFETY: PROCESS_INFORMATION is plain old data; CreateProcessW overwrites it.
     let mut process: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     // SAFETY: owned terminated strings, initialized structures, no inherited
     // handles, explicit executable path, and no shell interpretation.
@@ -104,6 +110,7 @@ pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
     if ok == 0 {
         return Err(std::io::Error::last_os_error().to_string());
     }
+    // SAFETY: CreateProcessW returned this thread handle and nothing else owns it.
     unsafe {
         windows_sys::Win32::Foundation::CloseHandle(process.hThread);
     }
@@ -119,6 +126,7 @@ pub fn spawn(_program: &Path, _arguments: &[String]) -> Result<Child, String> {
 impl Drop for Child {
     fn drop(&mut self) {
         // Reap an already-exited child; a relaunched app outlives its old parent.
+        // SAFETY: self.0 is a PID from posix_spawn, and WNOHANG allows a null status.
         unsafe {
             libc::waitpid(self.0, std::ptr::null_mut(), libc::WNOHANG);
         }
@@ -145,28 +153,35 @@ impl Child {
             if libc::WIFEXITED(status) {
                 return Ok(libc::WEXITSTATUS(status) as u32);
             }
-            Err("Update process terminated unexpectedly".into())
+            Err(reclaim::i18n::diagnostic(
+                "Update process terminated unexpectedly",
+            ))
         }
         #[cfg(windows)]
         {
             use windows_sys::Win32::System::Threading::*;
+            // SAFETY: self.0 is the live process handle this Child owns.
             if unsafe { WaitForSingleObject(self.0, INFINITE) } != 0 {
                 return Err(std::io::Error::last_os_error().to_string());
             }
             let mut code = 0;
+            // SAFETY: self.0 is the live process handle and code a valid out-pointer.
             if unsafe { GetExitCodeProcess(self.0, &mut code) } == 0 {
                 return Err(std::io::Error::last_os_error().to_string());
             }
             Ok(code)
         }
         #[cfg(not(any(target_os = "linux", windows)))]
-        Err("Native process waiting is unavailable".into())
+        Err(reclaim::i18n::diagnostic(
+            "Native process waiting is unavailable",
+        ))
     }
 }
 
 #[cfg(windows)]
 impl Drop for Child {
     fn drop(&mut self) {
+        // SAFETY: Child owns this process handle and closes it exactly once.
         unsafe {
             windows_sys::Win32::Foundation::CloseHandle(self.0);
         }

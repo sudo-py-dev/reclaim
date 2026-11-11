@@ -40,6 +40,7 @@ fn open(path: &str) -> Option<File> {
             )
         };
         if handle != INVALID_HANDLE_VALUE {
+            // SAFETY: handle is a valid handle just returned by CreateFileW and owned by nothing else.
             return Some(unsafe { File::from_raw_handle(handle) });
         }
     }
@@ -196,6 +197,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         };
         let mut label = [0u16; 261];
         let mut filesystem = [0u16; 64];
+        // SAFETY: root is NUL-terminated and each buffer length matches its array.
         let ok = unsafe {
             GetVolumeInformationW(
                 root.as_ptr(),

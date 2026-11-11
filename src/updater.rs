@@ -5,6 +5,7 @@
 //! names the exact file and version, so a validly signed older build cannot be
 //! re-published as a newer one. The GitHub SHA-256 digest is checked as well,
 //! but on its own it only proves the file matches what the release page lists.
+use crate::i18n::diagnostic;
 use minisign_verify::{PublicKey, Signature};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -136,7 +137,8 @@ pub fn deb_asset(version: &semver::Version) -> String {
 /// Decode `text` and check it was made by the release key with exactly
 /// `comment`. The file contents are verified separately, while streaming.
 fn checked_signature(text: &str, comment: &str) -> Result<(PublicKey, Signature), String> {
-    let key = PublicKey::decode(TRUSTED_KEY).map_err(|_| "Invalid built-in release key")?;
+    let key =
+        PublicKey::decode(TRUSTED_KEY).map_err(|_| diagnostic("Invalid built-in release key"))?;
     let signature = Signature::decode(text).map_err(|_| UNSIGNED)?;
     // Binds file name and version; the comment itself is covered by the signature.
     if signature.trusted_comment() != comment {
@@ -184,14 +186,14 @@ pub struct ProtectedPackage {
 #[cfg(target_os = "linux")]
 pub fn protect_deb_update(args: &[std::ffi::OsString]) -> Result<ProtectedPackage, String> {
     if args.len() != 3 || args[0] != INSTALL_DEB_FLAG {
-        return Err("This command is used only by Reclaim's updater".into());
+        return Err(diagnostic("This command is used only by Reclaim's updater"));
     }
-    let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+    let current = current_version();
     let version = args[1]
         .to_str()
         .and_then(|v| semver::Version::parse(v).ok())
         .filter(|v| v.pre.is_empty() && v.build.is_empty() && *v > current)
-        .ok_or("Not a newer Reclaim version")?;
+        .ok_or_else(|| diagnostic("Not a newer Reclaim version"))?;
     let package = std::path::Path::new(&args[2]);
     let mut text = String::new();
     regular_file(&signature_path(package))?
@@ -220,11 +222,11 @@ fn regular_file(path: &std::path::Path) -> Result<std::fs::File, String> {
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(path)
-        .map_err(|e| format!("Could not open the update: {e}"))?;
+        .map_err(|e| diagnostic(&format!("Could not open the update: {e}")))?;
     let is_file = file.metadata().is_ok_and(|m| m.is_file());
     is_file
         .then_some(file)
-        .ok_or_else(|| "The staged update is not a regular file".into())
+        .ok_or_else(|| diagnostic("The staged update is not a regular file"))
 }
 
 /// A new folder inside `parent` that only its owner (root, when elevated) can use.
@@ -235,7 +237,7 @@ fn protected_dir(parent: &std::path::Path) -> Result<tempfile::TempDir, String> 
         .prefix("reclaim-update-")
         .permissions(std::fs::Permissions::from_mode(0o700))
         .tempdir_in(parent)
-        .map_err(|e| format!("Could not prepare the update: {e}"))
+        .map_err(|e| diagnostic(&format!("Could not prepare the update: {e}")))
 }
 
 /// Copies `source` into a new file at `protected`, verifying the signature
@@ -250,7 +252,7 @@ fn copy_verified_package(
     let mut dest = std::fs::File::create_new(protected).map_err(|e| e.to_string())?;
     let mut verifier = key.verify_stream(signature).map_err(|_| UNSIGNED)?;
     let mut reader = regular_file(source)?.take(MAX_BINARY + 1);
-    let mut buffer = [0u8; 64 * 1024];
+    let mut buffer = vec![0u8; 64 * 1024];
     let mut size = 0u64;
     loop {
         let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
@@ -271,12 +273,17 @@ fn copy_verified_package(
     dest.sync_all().map_err(|e| e.to_string())
 }
 
-fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, String> {
-    parse_release_after(
-        json,
-        asset_name,
-        &semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
+/// This build's version, from Cargo's always-numeric version parts.
+fn current_version() -> semver::Version {
+    let part = |text: &str| text.parse().unwrap_or(0);
+    semver::Version::new(
+        part(env!("CARGO_PKG_VERSION_MAJOR")),
+        part(env!("CARGO_PKG_VERSION_MINOR")),
+        part(env!("CARGO_PKG_VERSION_PATCH")),
     )
+}
+fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, String> {
+    parse_release_after(json, asset_name, &current_version())
 }
 
 fn parse_release_after(
@@ -287,14 +294,16 @@ fn parse_release_after(
     if json["draft"].as_bool() != Some(false) || json["prerelease"].as_bool() != Some(false) {
         return Ok(None);
     }
-    let tag = json["tag_name"].as_str().ok_or("Missing release version")?;
+    let tag = json["tag_name"]
+        .as_str()
+        .ok_or_else(|| diagnostic("Missing release version"))?;
     let version = semver::Version::parse(tag.trim_start_matches('v')).map_err(|e| e.to_string())?;
     if !version.pre.is_empty() || version <= *current {
         return Ok(None);
     }
     let asset = json["assets"]
         .as_array()
-        .ok_or("Missing release assets")?
+        .ok_or_else(|| diagnostic("Missing release assets"))?
         .iter()
         .find(|a| a["name"].as_str() == Some(asset_name))
         .ok_or("No update for this platform yet")?;
@@ -310,20 +319,20 @@ fn parse_release_after(
         .to_owned();
     let url = asset["browser_download_url"]
         .as_str()
-        .ok_or("Missing download URL")?;
+        .ok_or_else(|| diagnostic("Missing download URL"))?;
     if url != release_url(tag, asset_name) {
-        return Err("Unexpected release download URL".into());
+        return Err(diagnostic("Unexpected release download URL"));
     }
     let digest = asset["digest"]
         .as_str()
         .and_then(|s| s.strip_prefix("sha256:"))
         .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or("Release has no valid SHA-256 digest")?
+        .ok_or_else(|| diagnostic("Release has no valid SHA-256 digest"))?
         .to_ascii_lowercase();
     let size = asset["size"]
         .as_u64()
         .filter(|s| *s > 0 && *s <= MAX_BINARY)
-        .ok_or("Invalid update size")?;
+        .ok_or_else(|| diagnostic("Invalid update size"))?;
     let release = Release {
         version,
         asset: asset_name.into(),
@@ -375,7 +384,7 @@ fn publish_download(
 ) -> Result<(), String> {
     let parent = destination
         .parent()
-        .ok_or("Download destination has no parent folder")?;
+        .ok_or_else(|| diagnostic("Download destination has no parent folder"))?;
     let mut pending = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     verify_download_progress(reader, &mut pending, release, progress)?;
     pending.as_file().sync_all().map_err(|e| e.to_string())?;
@@ -387,7 +396,7 @@ fn publish_download(
 
 fn validate_url(release: &Release) -> Result<(), String> {
     if release.asset.is_empty() || release.asset.contains(['/', '\\', '?', '#', '%']) {
-        return Err("Unexpected release asset name".into());
+        return Err(diagnostic("Unexpected release asset name"));
     }
     let version = release.version.to_string();
     if [format!("v{version}"), version]
@@ -396,7 +405,7 @@ fn validate_url(release: &Release) -> Result<(), String> {
     {
         Ok(())
     } else {
-        Err("Unexpected release download URL".into())
+        Err(diagnostic("Unexpected release download URL"))
     }
 }
 
@@ -404,7 +413,7 @@ fn validate_url(release: &Release) -> Result<(), String> {
 fn expect_installer(release: &Release) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     if installer_name(&executable, &release.version).as_deref() != Some(&release.asset) {
-        return Err("Unexpected installer for this installation".into());
+        return Err(diagnostic("Unexpected installer for this installation"));
     }
     validate_url(release)
 }
@@ -442,7 +451,7 @@ pub fn install_with_progress(release: &Release, progress: impl Fn(u64, u64)) -> 
         return Err("This installation must be updated using the matching installer.".into());
     }
     if release.asset != asset_name() {
-        return Err("Unexpected executable update asset".into());
+        return Err(diagnostic("Unexpected executable update asset"));
     }
     validate_url(release)?;
     if cfg!(windows) {
@@ -513,7 +522,7 @@ fn verify_download_progress(
         || release.digest.len() != 64
         || !release.digest.bytes().all(|b| b.is_ascii_hexdigit())
     {
-        return Err("Invalid update metadata".into());
+        return Err(diagnostic("Invalid update metadata"));
     }
     let (key, signature) = signed_by_release_key(release)?;
     let mut verifier = key
@@ -522,7 +531,7 @@ fn verify_download_progress(
     let mut reader = reader.take(release.size + 1);
     let mut hash = Sha256::new();
     let mut size = 0;
-    let mut buffer = [0u8; 64 * 1024];
+    let mut buffer = vec![0u8; 64 * 1024];
     loop {
         let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
         if count == 0 {

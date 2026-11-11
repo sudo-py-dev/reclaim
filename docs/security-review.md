@@ -70,8 +70,8 @@ Tools installed and run locally:
 - `cargo-deny 0.20.2`: dependency sources and bans pass. The strict advisory
   check originally failed on those three maintenance advisories. They now have
   reviewed exceptions restricted to the exact locked versions, expiring on
-  2026-12-15. `scripts/check_advisory_policy.py` enforces those bounds before the
-  dependency scan. Unknown vulnerability advisories remain errors.
+  2026-12-15. The project audit (`cargo test --test audit`) enforces those bounds
+  alongside the dependency scan. Unknown vulnerability advisories remain errors.
 - `cargo-fuzz 0.13.2` with libFuzzer: the final two-minute run completed
   **334 inputs in 121 seconds**, exit status 0, with AddressSanitizer and
   LeakSanitizer enabled. No crash, address-sanitizer, or leak finding was reported.

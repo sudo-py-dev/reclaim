@@ -192,6 +192,7 @@ fn stream_read(
     if end > stream.size || end > stream.initialized || len > MAX_MAP {
         return Err(invalid("NTFS allocation metadata is not fully initialized"));
     }
+    // audit-allow(DOS-ALLOC): len is checked against MAX_MAP (64 MiB) above.
     let mut bytes = Vec::with_capacity(len);
     let mut logical = 0;
     for (lcn, clusters) in &stream.runs {

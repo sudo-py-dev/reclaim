@@ -67,3 +67,13 @@ jobs:
             README.md
             LICENSE
             assets/fonts/DejaVu-LICENSE.txt
+  supply-chain:
+    name: Supply chain (cargo-deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # Known vulnerabilities (RustSec), yanked crates, bans and sources.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans sources

@@ -38,17 +38,42 @@ default-features = false
 features = ["rustls"]
 
 [dependencies.semver]
-version = "1"
+version = "=1.0.28"
 
 [dependencies.sha2]
-version = "0.10"
+version = "=0.10.9"
 
 # Ed25519 (Minisign) update signatures; no transitive dependencies.
 [dependencies.minisign-verify]
 version = "=0.3.0"
 
 [dependencies.tempfile]
-version = "3"
+version = "=3.27.0"
+
+# Compiler-enforced half of the project audit (tests/audit checks these stay on).
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+# Panics on malformed input are a denial of service (CWE-248).
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+string_slice = "deny"
+# Every unsafe block explains why it is sound (CWE-119).
+undocumented_unsafe_blocks = "deny"
+# Leftover debug code and silenced warnings (CWE-489, CWE-1164).
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+# Resource handling (CWE-401, CWE-770).
+mem_forget = "deny"
+large_stack_arrays = "deny"
 
 [profile.release]
 opt-level = "z"
@@ -65,3 +90,9 @@ slint-build = "=1.18.1"
 
 [dev-dependencies]
 i-slint-backend-testing = { version = "=1.18.1", features = ["renderer-software"] }
+# Project audit (tests/audit): parse the source and configuration.
+proc-macro2 = { version = "=1.0.107", features = ["span-locations"] }
+quote = "=1.0.47"
+serde = "=1.0.229"
+syn = { version = "=2.0.119", features = ["full", "visit"] }
+toml = "=1.2.1"

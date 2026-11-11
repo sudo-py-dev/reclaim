@@ -69,7 +69,9 @@ pub(super) fn end(b: &[u8], cancel: &AtomicBool) -> Probe {
     if unique.len() != count || unique.iter().any(|id| difs.contains(id)) {
         return Err(CandidateEnd::Invalid);
     }
-    let mut fat = Vec::with_capacity(count * entries);
+    // Sector IDs are not validated yet, so reserve no more than the scanned
+    // bytes could hold (one entry per four bytes), never count * entries.
+    let mut fat = Vec::with_capacity(count.saturating_mul(entries).min(b.len() / 4));
     for id in &fats {
         if cancel.load(Ordering::Relaxed) {
             return Err(CandidateEnd::Invalid);

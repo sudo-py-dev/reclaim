@@ -21,21 +21,31 @@ measured; disk access and decoding can still dominate performance.
 
 ## Repeatable checks
 
-Requires Python 3.11+ and the project's Rust toolchain/dependencies.
+Everything runs with the normal Rust toolchain; there are no script dependencies.
 
 ```sh
-python3 scripts/check_project.py
-python3 scripts/check_project.py --full
-python3 scripts/check_project.py --full --previews /tmp/reclaim-previews
+cargo test --locked                      # all tests, including the project audit
+cargo test --locked --test audit         # the audit on its own
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
-The fast check parses Python scripts without executing them, rejects duplicate
-translation keys, compares catalog keys and numbered placeholder counts, rejects
-empty translations, and checks that the application version matches Cargo.lock.
-The full check also runs Python rule tests, Rust formatting, all default Rust
-tests, and Clippy with warnings treated as errors. The default Rust suite includes
-UI behavior and layout regressions. `--previews` writes headless PPM renderings.
-These audit checks run only when you invoke the script; no GitHub Actions steps were added.
+The project audit (`tests/audit`) parses the source and checks, with each rule
+tagged by CWE: `unsafe` confined to the platform layer and documented; no
+`static mut`, `transmute`, leaks or unreviewed uninitialised memory; programs
+started only by the two native launchers; no plain HTTP, TLS bypasses, weak
+hashes or committed secrets; private temporary files; explicit bounds on reads
+and allocations sized by scanned data; a ratchet on unchecked indexing; no debug
+leftovers, silenced warnings, orphan files or em dashes in user-facing text;
+every interface message translated, no dead catalog keys, matching placeholders,
+and `ui/app.slint` defaults in step with their translations; exact dependency
+versions, current advisory exceptions and a fuzz lockfile that matches
+production. A finding can be accepted only next to its code with
+`// audit-allow(RULE): reason`, and unused acceptances fail too.
+
+`Cargo.toml` sets the compiler-enforced half (`[lints]`: no `unwrap`, `expect`,
+`panic`, stray prints or undocumented `unsafe` in shipped code), and CI runs
+`cargo-deny` against the RustSec advisory database. `RECLAIM_PREVIEW_DIR` with
+`cargo test --bin reclaim slint_workspace` still writes headless UI renderings.
 
 ## Rules for future changes
 

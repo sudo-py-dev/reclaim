@@ -11,10 +11,10 @@ use std::{
 
 const MAX_RECORD: usize = 16 * 1024;
 fn short(bytes: &[u8], at: usize) -> u16 {
-    u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap())
+    crate::bytes::u16_le(bytes, at)
 }
 fn long(bytes: &[u8], at: usize) -> u32 {
-    u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+    crate::bytes::u32_le(bytes, at)
 }
 
 // FILETIME is 100-nanosecond intervals since 1601-01-01 UTC. Zero means
@@ -47,6 +47,7 @@ pub fn read_record(
     if &header[..4] != b"FILE" || !size.is_power_of_two() || !(1024..=MAX_RECORD).contains(&size) {
         return Ok(None);
     }
+    // audit-allow(DOS-ALLOC): size is a power of two within 1 KiB..=MAX_RECORD, checked above.
     let mut record = vec![0; size];
     record[..48].copy_from_slice(&header);
     if let Err(e) = input.read_exact(&mut record[48..]) {

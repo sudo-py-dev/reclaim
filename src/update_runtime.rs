@@ -37,7 +37,8 @@ fn cache_root() -> Result<PathBuf, String> {
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .map(|p| p.join("reclaim/updates"));
-    let path = base.ok_or("Could not locate the private update cache")?;
+    let path =
+        base.ok_or_else(|| reclaim::i18n::diagnostic("Could not locate the private update cache"))?;
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -132,7 +133,7 @@ fn install_deb(release: &Release, package: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let package = package
         .to_str()
-        .ok_or("Update cache path is not valid Unicode")?;
+        .ok_or_else(|| reclaim::i18n::diagnostic("Update cache path is not valid Unicode"))?;
     // Always elevate the system-installed binary, never a user-controlled one.
     let arguments = [
         "/usr/bin/reclaim".to_owned(),
@@ -153,14 +154,16 @@ fn install_deb(release: &Release, package: &Path) -> Result<(), String> {
 pub fn run_privileged_deb_update(args: &[std::ffi::OsString]) -> Result<(), String> {
     // SAFETY: geteuid has no preconditions and cannot fail.
     if unsafe { libc::geteuid() } != 0 {
-        return Err("This command is used only by Reclaim's updater".into());
+        return Err(reclaim::i18n::diagnostic(
+            "This command is used only by Reclaim's updater",
+        ));
     }
     std::env::set_current_dir("/").map_err(|e| e.to_string())?;
     let package = updater::protect_deb_update(args)?;
     let path = package
         .path
         .to_str()
-        .ok_or("Update path is not valid Unicode")?;
+        .ok_or_else(|| reclaim::i18n::diagnostic("Update path is not valid Unicode"))?;
     let arguments = ["install", "-y", "--", path].map(str::to_owned);
     let environment = [
         "PATH=/usr/sbin:/usr/bin:/sbin:/bin",

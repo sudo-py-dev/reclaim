@@ -1,3 +1,7 @@
+#![expect(
+    clippy::unwrap_used,
+    reason = "fixture helpers fail the test by panicking"
+)]
 use reclaim::{Event, Found, Validation, recover_reader, scan_reader};
 use std::{io::Cursor, sync::atomic::AtomicBool};
 
@@ -28,8 +32,8 @@ fn real_image_formats_decode_and_recover_exactly() {
         ("ico", include_bytes!("fixtures/real-dib.ico")),
         ("ico", include_bytes!("fixtures/real256.ico")),
     ];
-    let directory =
-        std::env::temp_dir().join(format!("reclaim-real-images-{}", std::process::id()));
+    let directory_temp = tempfile::tempdir().unwrap();
+    let directory = directory_temp.path().join("real-images");
     std::fs::create_dir_all(&directory).unwrap();
     for (i, (kind, bytes)) in fixtures.iter().enumerate() {
         let found = scan(bytes);
@@ -47,7 +51,6 @@ fn real_image_formats_decode_and_recover_exactly() {
         assert_eq!(recovered, *bytes);
         image::load_from_memory(&recovered).unwrap();
     }
-    std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
@@ -130,8 +133,8 @@ fn corrupted_images_are_rejected_at_scan_and_export() {
     let mut bad_crc = real.to_vec();
     bad_crc[29] ^= 1;
     assert!(scan(&bad_crc).is_empty());
-    let path =
-        std::env::temp_dir().join(format!("reclaim-corrupt-export-{}.png", std::process::id()));
+    let path_temp = tempfile::tempdir().unwrap();
+    let path = path_temp.path().join("corrupt-export.png");
     assert!(recover_reader(&mut Cursor::new(&corrupt), &path, &found[0]).is_err());
     assert!(
         !path.exists(),

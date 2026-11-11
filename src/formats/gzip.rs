@@ -53,8 +53,10 @@ impl Gzip {
             self.consumed = at;
             self.decoder = Some(flate2::Decompress::new(false));
         }
-        let decoder = self.decoder.as_mut().unwrap();
-        let mut output = [0; 32768];
+        let Some(decoder) = self.decoder.as_mut() else {
+            return Err(CandidateEnd::Invalid);
+        };
+        let mut output = vec![0; 32768];
         while !self.finished {
             if cancel.load(Ordering::Relaxed) {
                 return Err(CandidateEnd::Invalid);

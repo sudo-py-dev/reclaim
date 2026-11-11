@@ -1,0 +1,25 @@
+# Unchecked index and slice expressions (`a[i]`, `a[x..y]`) in shipped code, per
+# file. Malformed input that reaches one of them panics and stops the scan, so
+# the audit lets these numbers go down, never up. Prefer `.get()` for positions
+# that come from scanned data.
+[index]
+"src/allocation/fat.rs" = 19
+"src/allocation/ntfs.rs" = 17
+"src/allocation.rs" = 6
+"src/detection.rs" = 19
+"src/drives/linux.rs" = 7
+"src/drives/macos.rs" = 2
+"src/drives/windows.rs" = 9
+"src/formats/cfb.rs" = 9
+"src/formats/gzip.rs" = 6
+"src/formats.rs" = 36
+"src/formats/xar.rs" = 1
+"src/i18n.rs" = 2
+"src/lib.rs" = 36
+"src/main.rs" = 3
+"src/ntfs.rs" = 16
+"src/resilient.rs" = 4
+"src/source.rs" = 4
+"src/updater.rs" = 21
+"src/validation.rs" = 36
+"src/zip.rs" = 6

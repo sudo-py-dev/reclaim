@@ -4,6 +4,7 @@ use super::{Destination, Drive};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -17,11 +18,19 @@ pub fn discover() -> Result<Vec<Drive>, String> {
     .map_err(|error| format!("Could not list drives: {error}. You can still open a disk image."))
 }
 
+/// Kernel and udev text files are small; the cap keeps a misbehaving
+/// pseudo-file from exhausting memory (CWE-400).
+const MAX_SYSTEM_FILE: u64 = 8 * 1024 * 1024;
+fn read_system_file(path: impl AsRef<Path>) -> std::io::Result<String> {
+    let mut text = String::new();
+    fs::File::open(path)?
+        .take(MAX_SYSTEM_FILE)
+        .read_to_string(&mut text)?;
+    Ok(text)
+}
+
 fn read(path: impl AsRef<Path>) -> String {
-    fs::read_to_string(path)
-        .unwrap_or_default()
-        .trim()
-        .to_owned()
+    read_system_file(path).unwrap_or_default().trim().to_owned()
 }
 fn number(path: impl AsRef<Path>) -> Option<u64> {
     read(path).parse().ok()
@@ -36,10 +45,10 @@ fn unescape(value: &str, octal: bool) -> String {
         let escape = if octal && bytes[i] == b'\\' && i + 3 < bytes.len() {
             let digits = &bytes[i + 1..i + 4];
             if digits.iter().all(|b| (b'0'..=b'7').contains(b)) {
-                u16::from_str_radix(std::str::from_utf8(digits).unwrap(), 8)
-                    .ok()
-                    .filter(|n| *n <= 255)
-                    .map(|n| (n as u8, 4))
+                let value = digits
+                    .iter()
+                    .fold(0u16, |n, digit| n * 8 + u16::from(digit - b'0'));
+                u8::try_from(value).ok().map(|byte| (byte, 4))
             } else {
                 None
             }
@@ -76,7 +85,7 @@ struct Node {
 
 fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::Result<Vec<Drive>> {
     // Missing namespace metadata must not silently mark active drives unmounted.
-    let mount_text = fs::read_to_string(mounts)?;
+    let mount_text = read_system_file(mounts)?;
     let mut mounted = HashMap::<String, String>::new();
     for line in mount_text.lines() {
         let fields: Vec<_> = line.split_whitespace().collect();
@@ -303,7 +312,7 @@ fn destination_at(
     if !folder_node.exists() {
         // Btrfs and similar filesystems report an anonymous device number;
         // their mount entry still names the block device that backs them.
-        let Some(device) = fs::read_to_string(mounts).ok().and_then(|text| {
+        let Some(device) = read_system_file(mounts).ok().and_then(|text| {
             text.lines().find_map(|line| {
                 let fields: Vec<_> = line.split_whitespace().collect();
                 let separator = fields.iter().position(|f| *f == "-")?;
@@ -361,15 +370,11 @@ fn whole_disks(node: &Path) -> HashSet<PathBuf> {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
-    struct Fixture(PathBuf);
+    struct Fixture(tempfile::TempDir);
     impl Fixture {
         fn new() -> Self {
-            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-            let root = std::env::temp_dir().join(format!(
-                "reclaim-native-disks-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            ));
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().to_path_buf();
             fs::create_dir_all(root.join("sys")).unwrap();
             fs::create_dir_all(root.join("dev/disk/by-label")).unwrap();
             fs::create_dir_all(root.join("udev")).unwrap();
@@ -378,10 +383,10 @@ mod tests {
                 "1 0 0:1 / / rw - rootfs rootfs rw\n",
             )
             .unwrap();
-            Self(root)
+            Self(directory)
         }
         fn write(&self, path: &str, value: &str) {
-            let path = self.0.join(path);
+            let path = self.0.path().join(path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, value).unwrap();
         }
@@ -390,31 +395,26 @@ mod tests {
             self.write(&format!("devices/{name}/dev"), number);
             self.write(&format!("devices/{name}/queue/logical_block_size"), "4096");
             symlink(
-                self.0.join(format!("devices/{name}")),
-                self.0.join(format!("sys/{name}")),
+                self.0.path().join(format!("devices/{name}")),
+                self.0.path().join(format!("sys/{name}")),
             )
             .unwrap();
             self.write(&format!("dev/{name}"), "");
         }
         fn discover(&self) -> std::io::Result<Vec<Drive>> {
             discover_at(
-                &self.0.join("sys"),
-                &self.0.join("dev"),
-                &self.0.join("mountinfo"),
-                &self.0.join("udev"),
+                &self.0.path().join("sys"),
+                &self.0.path().join("dev"),
+                &self.0.path().join("mountinfo"),
+                &self.0.path().join("udev"),
             )
-        }
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
         }
     }
 
     #[test]
     fn recovery_folders_on_the_scanned_physical_disk_are_detected() {
         let f = Fixture::new();
-        fs::create_dir_all(f.0.join("numbers")).unwrap();
+        fs::create_dir_all(f.0.path().join("numbers")).unwrap();
         let node = |name: &str, number: &str| {
             f.write(&format!("devices/{name}/dev"), number);
             if name.contains('/') {
@@ -422,13 +422,13 @@ mod tests {
             }
             let short = name.rsplit('/').next().unwrap();
             symlink(
-                f.0.join(format!("devices/{name}")),
-                f.0.join(format!("sys/{short}")),
+                f.0.path().join(format!("devices/{name}")),
+                f.0.path().join(format!("sys/{short}")),
             )
             .unwrap();
             symlink(
-                f.0.join(format!("devices/{name}")),
-                f.0.join(format!("numbers/{number}")),
+                f.0.path().join(format!("devices/{name}")),
+                f.0.path().join(format!("numbers/{number}")),
             )
             .unwrap();
         };
@@ -439,10 +439,10 @@ mod tests {
         node("sdb/sdb1", "8:17");
         // An encrypted volume opened from the second partition of sda.
         node("dm-90", "253:90");
-        fs::create_dir_all(f.0.join("devices/dm-90/slaves")).unwrap();
+        fs::create_dir_all(f.0.path().join("devices/dm-90/slaves")).unwrap();
         symlink(
-            f.0.join("devices/sda/sda2"),
-            f.0.join("devices/dm-90/slaves/sda2"),
+            f.0.path().join("devices/sda/sda2"),
+            f.0.path().join("devices/dm-90/slaves/sda2"),
         )
         .unwrap();
         f.write(
@@ -451,9 +451,9 @@ mod tests {
         );
         let check = |source, folder| {
             destination_at(
-                &f.0.join("sys"),
-                &f.0.join("numbers"),
-                &f.0.join("mountinfo"),
+                &f.0.path().join("sys"),
+                &f.0.path().join("numbers"),
+                &f.0.path().join("mountinfo"),
                 source,
                 folder,
             )
@@ -470,10 +470,10 @@ mod tests {
 
     #[test]
     fn disk_images_are_never_overwritten_by_recovery() {
-        let image = std::env::temp_dir().join(format!("reclaim-image-{}", std::process::id()));
+        let folder = tempfile::tempdir().unwrap();
+        let image = folder.path().join("image");
         fs::write(&image, b"image").unwrap();
-        let result = destination(&image, image.parent().unwrap());
-        let _ = fs::remove_file(&image);
+        let result = destination(&image, folder.path());
         assert_eq!(result, Destination::Separate);
         assert_eq!(
             destination(Path::new("/nonexistent/reclaim-source"), Path::new("/")),
@@ -490,7 +490,11 @@ mod tests {
         f.write("devices/sdb/sdb1/size", "119000");
         f.write("devices/sdb/sdb1/dev", "8:17");
         f.write("devices/sdb/sdb1/partition", "1");
-        symlink(f.0.join("devices/sdb/sdb1"), f.0.join("sys/sdb1")).unwrap();
+        symlink(
+            f.0.path().join("devices/sdb/sdb1"),
+            f.0.path().join("sys/sdb1"),
+        )
+        .unwrap();
         f.write("dev/sdb1", "");
         f.write(
             "mountinfo",
@@ -514,8 +518,8 @@ mod tests {
         f.write("devices/nvme0n1/nvme0n1p1/dev", "259:1");
         f.write("devices/nvme0n1/nvme0n1p1/partition", "1");
         symlink(
-            f.0.join("devices/nvme0n1/nvme0n1p1"),
-            f.0.join("sys/nvme0n1p1"),
+            f.0.path().join("devices/nvme0n1/nvme0n1p1"),
+            f.0.path().join("sys/nvme0n1p1"),
         )
         .unwrap();
         f.write("dev/nvme0n1p1", "");
@@ -527,8 +531,8 @@ mod tests {
             "30 1 253:0 / /media/My\\040Photos rw - ext4 /dev/mapper/photos rw\n",
         );
         symlink(
-            f.0.join("dev/dm-0"),
-            f.0.join("dev/disk/by-label/תמונות\\x20חדשות"),
+            f.0.path().join("dev/dm-0"),
+            f.0.path().join("dev/disk/by-label/תמונות\\x20חדשות"),
         )
         .unwrap();
         f.write("udev/b259:1", "E:ID_FS_TYPE=crypto_LUKS\n");
@@ -561,14 +565,14 @@ mod tests {
         f.disk("sdc", "8:32", "18446744073709551615");
         f.disk("sdd", "8:48", "invalid");
         f.write("devices/sda/queue/logical_block_size", "123");
-        fs::remove_dir_all(f.0.join("udev")).unwrap();
-        fs::remove_dir_all(f.0.join("dev/disk")).unwrap();
+        fs::remove_dir_all(f.0.path().join("udev")).unwrap();
+        fs::remove_dir_all(f.0.path().join("dev/disk")).unwrap();
         let rows = f.discover().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].size, 1048576);
         assert_eq!(rows[0].sector_size, 512);
         assert!(!rows[0].mounted);
-        fs::remove_file(f.0.join("mountinfo")).unwrap();
+        fs::remove_file(f.0.path().join("mountinfo")).unwrap();
         assert!(f.discover().is_err());
     }
     #[test]
