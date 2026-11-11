@@ -22,6 +22,45 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
         encrypted: false,
         sector_size: 512,
     });
+    // Other kinds render their own icon and device tag in the previews.
+    for (path, name, name_is_message, kind, location, encrypted) in [
+        (
+            "/dev/nvme0n1p2",
+            "Linux system",
+            true,
+            "Volume",
+            "Mounted at /",
+            false,
+        ),
+        (
+            "/dev/sdb",
+            "Internal drive",
+            true,
+            "Entire drive",
+            "Not mounted",
+            false,
+        ),
+        (
+            "/dev/sdc1",
+            "Volume",
+            true,
+            "Volume",
+            "Encrypted — unlock in Disks, then refresh",
+            true,
+        ),
+    ] {
+        state.drives.push(drives::Drive {
+            path: path.into(),
+            name: name.into(),
+            name_is_message,
+            size: 512 << 30,
+            kind: kind.into(),
+            location: location.into(),
+            mounted: false,
+            encrypted,
+            sector_size: 512,
+        });
+    }
     state.source = Some(state.drives[0].path.clone());
     state.results = vec![
         Found {

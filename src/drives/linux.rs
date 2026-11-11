@@ -209,7 +209,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
         } else if !node.partition && !node.name.starts_with("dm-") && !node.name.starts_with("md") {
             if usb { "USB drive" } else { "Internal drive" }.into()
         } else {
-            format!("Volume {}", node.name)
+            "Volume".into()
         };
         let sector_size = number(node.sys.join("queue/logical_block_size"))
             .or_else(|| {

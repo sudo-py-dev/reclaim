@@ -1,5 +1,6 @@
 import "../assets/fonts/DejaVuSans.ttf";
 import "../assets/fonts/DejaVuSans-Bold.ttf";
+import "../assets/fonts/DejaVuSansMono.ttf";
 export global Strings {
     in-out property <string> window-title: "Reclaim — File Recovery";
     in-out property <string> language: "Language";
@@ -57,7 +58,8 @@ export global Strings {
     in-out property <string> stop: "Stop";
 }
 import { CheckBox, LineEdit, ScrollView, ListView, Palette as NativePalette } from "std-widgets.slint";
-export struct DriveItem { name: string, detail: string, size: string, available: bool }
+export enum DriveIcon { disk, usb, volume, locked }
+export struct DriveItem { name: string, device: string, icon: DriveIcon, detail: string, size: string, available: bool }
 export struct FileItem { name: string, kind: string, size: string, selected: bool, index: int }
 export global Locale { in-out property <bool> rtl; }
 
@@ -282,6 +284,32 @@ component EmptyState inherits VerticalLayout {
     Text { text: root.text; color: Palette.muted; font-size: 13px; wrap: word-wrap; horizontal-alignment: center; }
 }
 
+// What a scan is doing right now: status line, Stop, progress and any error.
+component ScanStatus inherits VerticalLayout {
+    in property <string> status;
+    in property <string> error;
+    in property <bool> busy;
+    in property <float> progress;
+    callback stop();
+    spacing: 10px;
+    Row { spacing: 12px; min-height: 28px;
+        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.error != "" ? Palette.danger : root.busy ? Palette.primary : Palette.line; }
+        Label { text: root.status; color: Palette.ink; font-size: 13px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
+        if root.busy : Action { height: 28px; text: Strings.stop; clicked => { root.stop(); } }
+    }
+    if root.busy || root.progress > 0 : Rectangle { height: 4px; background: Palette.line; border-radius: 2px; clip: true;
+        if root.busy && root.progress == 0 : Rectangle { x: (parent.width + self.width) * mod(animation-tick() / 1ms, 1800) / 1800 - self.width; width: parent.width / 4; border-radius: 2px; background: Palette.primary; }
+        Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * root.progress; background: Palette.primary; border-radius: 2px; animate width { duration: 250ms; } }
+    }
+    if root.error != "" : Label { text: root.error; color: Palette.danger; wrap: word-wrap; font-size: 12px; }
+}
+// System device name (nvme0n1p1, disk2s1, C:) set apart from human-readable labels.
+component DeviceTag inherits Rectangle {
+    in property <string> text;
+    height: 18px; width: tag.preferred-width + 10px; border-radius: 4px; background: Palette.subtle;
+    tag := Text { text: root.text; font-family: "DejaVu Sans Mono"; font-size: 11px; color: Palette.muted; }
+}
+
 export component AppWindow inherits Window {
     title: Strings.window-title;
     icon: @image-url("../assets/icons/reclaim.png");
@@ -365,20 +393,31 @@ export component AppWindow inherits Window {
                     Action { text: Strings.refresh; icon: @image-url("icons/refresh.svg"); enabled: !root.busy; clicked => { root.refresh(); } }
                     Action { text: Strings.open-disk-image; icon: @image-url("icons/files.svg"); enabled: !root.busy; clicked => { root.open-image(); } }
                 }
-                Card { vertical-stretch: 1;
+                // Sized to its rows so the action bar sits right under a short list;
+                // a long list fills the space and scrolls. Rows are 48px + 4px gaps.
+                Card { vertical-stretch: 1000; max-height: root.drives.length == 0 ? 220px : root.drives.length * 52px + 12px;
                     if root.drives.length == 0 : EmptyState { text: Strings.no-drives-found-open-a; icon: @image-url("icons/drive.svg"); }
                     if root.drives.length > 0 : ScrollView { VerticalLayout { padding: 8px; spacing: 4px; alignment: start;
                         for drive[i] in root.drives : Rectangle {
-                            height: 60px; border-radius: Metrics.radius;
+                            height: 48px; border-radius: Metrics.radius;
                             opacity: drive.available ? 1 : 0.5;
                             background: root.selected-drive == i ? Palette.selected : area.has-hover ? Palette.hover : transparent;
                             animate background { duration: 120ms; }
-                            Row { padding-left: 12px; padding-right: 16px; spacing: 12px;
-                                Rectangle { width: 36px; height: 36px; border-radius: Metrics.radius; background: root.selected-drive == i ? Palette.surface : Palette.subtle;
-                                    Image { source: @image-url("icons/drive.svg"); width: 20px; height: 20px; colorize: Palette.accent; }
+                            Row { padding-left: 8px; padding-right: 12px; spacing: 10px;
+                                Rectangle { width: 32px; height: 32px; border-radius: Metrics.radius; background: root.selected-drive == i ? Palette.surface : Palette.subtle;
+                                    Image { width: 18px; height: 18px; colorize: drive.icon == DriveIcon.locked ? Palette.muted : Palette.accent;
+                                        source: drive.icon == DriveIcon.usb ? @image-url("icons/usb.svg")
+                                            : drive.icon == DriveIcon.volume ? @image-url("icons/volume.svg")
+                                            : drive.icon == DriveIcon.locked ? @image-url("icons/lock.svg")
+                                            : @image-url("icons/drive.svg");
+                                    }
                                 }
-                                VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 2px; alignment: center;
-                                    Label { text: drive.name; color: Palette.ink; font-size: 14px; font-weight: 600; overflow: elide; }
+                                VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 1px; alignment: center;
+                                    Row { spacing: 6px;
+                                        Label { text: drive.name; color: Palette.ink; font-size: 14px; font-weight: 600; overflow: elide; min-width: 0px; horizontal-stretch: 0; }
+                                        if drive.device != "" : DeviceTag { text: drive.device; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                    }
                                     Label { text: drive.detail; color: Palette.muted; font-size: 12px; overflow: elide; }
                                 }
                                 Label { text: drive.size; color: Palette.muted; font-size: 13px; vertical-alignment: center; }
@@ -399,12 +438,19 @@ export component AppWindow inherits Window {
                         }
                     } }
                 }
-                Card { vertical-stretch: 0; Row { padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 16px;
-                    VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 4px; alignment: center;
-                        SectionLabel { text: Strings.selected-source; }
-                        Label { text: root.source; color: root.can-scan || root.busy ? Palette.ink : Palette.muted; font-size: 14px; overflow: elide; }
+                Rectangle { vertical-stretch: 1; }
+                // One action bar: what will be scanned, the button that scans it, and,
+                // only while something runs or failed, the scan status.
+                Card { vertical-stretch: 0; VerticalLayout { padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 12px;
+                    Row { spacing: 16px;
+                        VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 4px; alignment: center;
+                            SectionLabel { text: Strings.selected-source; }
+                            Label { text: root.source; color: root.can-scan || root.busy ? Palette.ink : Palette.muted; font-size: 14px; overflow: elide; }
+                        }
+                        Action { height: 40px; text: Strings.start-scanning; icon: @image-url("icons/search.svg"); primary: true; enabled: root.can-scan; clicked => { root.scan(); } }
                     }
-                    Action { height: 40px; text: Strings.start-scanning; icon: @image-url("icons/search.svg"); primary: true; enabled: root.can-scan; clicked => { root.scan(); } }
+                    if root.busy || root.error != "" : Divider {}
+                    if root.busy || root.error != "" : ScanStatus { status: root.status; error: root.error; busy: root.busy; progress: root.progress; stop => { root.stop(); } }
                 } }
             }
             // Recovered files: filter, inspect, select, recover.
@@ -502,20 +548,11 @@ export component AppWindow inherits Window {
                     }
                 } }
             } } }
-            // Status strip: what the app is doing right now, with progress and Stop while a scan runs.
+            // Status strip for Recovered files. Sources shows status inside its action bar;
             // Settings has nothing to do with scanning, so it only appears there while a scan runs or failed.
-            if root.page != 2 || root.busy || root.error != "" : Card { vertical-stretch: 0; VerticalLayout { padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 10px;
-                Row { spacing: 12px; min-height: 28px;
-                    Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.error != "" ? Palette.danger : root.busy ? Palette.primary : Palette.line; }
-                    Label { text: root.status; color: Palette.ink; font-size: 13px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
-                    if root.busy : Action { height: 28px; text: Strings.stop; clicked => { root.stop(); } }
-                }
-                if root.busy || root.progress > 0 : Rectangle { height: 4px; background: Palette.line; border-radius: 2px; clip: true;
-                    if root.busy && root.progress == 0 : Rectangle { x: (parent.width + self.width) * mod(animation-tick() / 1ms, 1800) / 1800 - self.width; width: parent.width / 4; border-radius: 2px; background: Palette.primary; }
-                    Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * root.progress; background: Palette.primary; border-radius: 2px; animate width { duration: 250ms; } }
-                }
-                if root.error != "" : Label { text: root.error; color: Palette.danger; wrap: word-wrap; font-size: 12px; }
-            } }
+            if root.page == 1 || (root.page == 2 && (root.busy || root.error != "")) : Card { vertical-stretch: 0;
+                ScanStatus { padding: 12px; padding-left: 16px; padding-right: 16px; status: root.status; error: root.error; busy: root.busy; progress: root.progress; stop => { root.stop(); } }
+            }
         }
     }
 }
