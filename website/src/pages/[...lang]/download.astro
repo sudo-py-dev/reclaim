@@ -37,8 +37,10 @@ const p = t.download.platforms;
 >
   <section class="intro">
     <div class="wrap">
-      <div class="app-icon"><Logo size={80} eager /></div>
-      <h1>{t.download.title}</h1>
+      <div class="download-heading">
+        <div class="app-icon"><Logo size={48} eager /></div>
+        <h1>{t.download.title}</h1>
+      </div>
       <p class="lead">{t.download.lead}</p>
       <p class="version">
         <span>{versionPre}<strong data-release-version>{release.version}</strong>{versionPost}</span>
@@ -159,14 +161,21 @@ cargo run --release --locked</code></pre>
 
 <style>
   .intro {
-    padding-block: clamp(48px, 8vw, 96px) 40px;
+    padding-block: clamp(24px, 4vw, 48px) 24px;
+  }
+
+  .download-heading {
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
 
   .app-icon {
-    margin-bottom: 28px;
+    flex: 0 0 auto;
   }
 
   h1 {
+    min-width: 0;
     font-size: clamp(2.25rem, 1.5rem + 3vw, 3.25rem);
     letter-spacing: -0.03em;
   }
