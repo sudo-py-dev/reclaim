@@ -179,6 +179,3 @@ installation and release notes available in Settings. What's new expands bounded
 scrollable Markdown blocks in the notice and Settings. Links and HTML are displayed
 as text and are not opened or executed. Downloading, installation, and restarting
 require the explicit update action.
-
-
-<!-- /coderabbit-ai-generated:v1 -->
