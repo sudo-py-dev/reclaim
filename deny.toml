@@ -12,13 +12,16 @@ version = 2
 yanked = "deny"
 unmaintained = "all"
 maximum-db-staleness = "P7D"
-# AccessKit still requires the zbus 5 wire/name crates merged into zbus 6.
+# AccessKit still requires the zbus 5 wire/name crates merged into zbus 6;
+# Slint's build/window stack also requires pin-utils and ttf-parser.
 # These informational notices are reviewed in docs/security-review.md and expire
-# on 2026-12-15 via scripts/check_advisory_policy.py. Vulnerabilities still fail.
+# on 2026-12-15, enforced by the project audit (tests/audit). Vulnerabilities still fail.
 ignore = [
     { id = "RUSTSEC-2026-0370", reason = "Expires 2026-12-15. zvariant 5 remains required by AccessKit; migrate when its zbus 6 adapter is available." },
     { id = "RUSTSEC-2026-0371", reason = "Expires 2026-12-15. zbus_names 4 remains required by AccessKit and zbus 5; pending coordinated upstream migration." },
     { id = "RUSTSEC-2026-0372", reason = "Expires 2026-12-15. zvariant_derive 5 is the matching macro crate for AccessKit's required zvariant 5." },
+    { id = "RUSTSEC-2026-0441", reason = "Expires 2026-12-15. pin-utils 0.1.1 is required by spin_on in Slint 1.18.1 build tools; pending upstream migration to core::pin::pin!." },
+    { id = "RUSTSEC-2026-0192", reason = "Expires 2026-12-15. ttf-parser 0.25.1 is required by ab_glyph through winit's sctk-adwaita decorations; pending upstream font parser migration." },
 ]
 unused-ignored-advisory = "deny"
 
@@ -32,7 +35,8 @@ reason = "Windows cleanup launches cmd.exe; use native filesystem updates."
 
 [[bans.deny]]
 name = "webbrowser"
-reason = "Browser helpers are not part of the native API runtime policy."
+wrappers = ["i-slint-backend-winit"]
+reason = "Only Slint's required backend may depend on this helper; application code must use native APIs."
 
 [[bans.deny]]
 name = "open"

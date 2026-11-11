@@ -34,8 +34,10 @@ pub fn open_installer(path: &std::path::Path) -> Result<(), String> {
             )
         };
         launch(url)
-            .ok_or("Could not create installer file URL")?
-            .map_err(|status| format!("Could not open installer: {status}"))?;
+            .ok_or_else(|| reclaim::i18n::diagnostic("Could not create installer file URL"))?
+            .map_err(|status| {
+                reclaim::i18n::diagnostic(&format!("Could not open installer: {status}"))
+            })?;
     }
     Ok(())
 }
@@ -100,7 +102,7 @@ fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> Result<(), 
     // until the portal responds (disconnecting early can cancel its dialog).
     let sender = connection
         .unique_name()
-        .ok_or("Desktop session has no connection name")?
+        .ok_or_else(|| reclaim::i18n::diagnostic("Desktop session has no connection name"))?
         .as_str()
         .trim_start_matches(':')
         .replace('.', "_");
@@ -141,9 +143,9 @@ fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> Result<(), 
     if handle.as_str() != request_path {
         return Err("The desktop returned an unexpected open request. Try opening the link or file manually.".into());
     }
-    let response = responses
-        .next()
-        .ok_or("The desktop link or file request ended without a response")?;
+    let response = responses.next().ok_or_else(|| {
+        reclaim::i18n::diagnostic("The desktop link or file request ended without a response")
+    })?;
     let (status, _): (u32, HashMap<String, zbus::zvariant::OwnedValue>) =
         response.body().deserialize().map_err(|e| e.to_string())?;
     if status != 0 {
@@ -156,13 +158,14 @@ fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> Result<(), 
 /// Open an HTTPS link using the desktop's native URL handler, without helpers.
 pub fn open_url(url: &str) -> Result<(), String> {
     if !url.starts_with("https://") || url.contains(['\0', '\r', '\n']) {
-        return Err("Only HTTPS links can be opened.".into());
+        return Err(reclaim::i18n::diagnostic("Only HTTPS links can be opened."));
     }
     #[cfg(target_os = "linux")]
     portal_open(None, Some(url))?;
     #[cfg(windows)]
-    shell_open(std::ffi::OsStr::new(url))
-        .map_err(|code| format!("Could not open browser (Windows error {code})."))?;
+    shell_open(std::ffi::OsStr::new(url)).map_err(|code| {
+        reclaim::i18n::diagnostic(&format!("Could not open browser (Windows error {code})."))
+    })?;
     #[cfg(target_os = "macos")]
     {
         // SAFETY: live UTF-8 bytes; the +1 reference is handed to `launch`.
@@ -176,10 +179,14 @@ pub fn open_url(url: &str) -> Result<(), String> {
             )
         };
         launch(native_url)
-            .ok_or("Could not create browser URL.")?
-            .map_err(|status| format!("Could not open browser: {status}"))?;
+            .ok_or_else(|| reclaim::i18n::diagnostic("Could not create browser URL."))?
+            .map_err(|status| {
+                reclaim::i18n::diagnostic(&format!("Could not open browser: {status}"))
+            })?;
     }
     #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
-    return Err("Opening browser links is unavailable on this platform.".into());
+    return Err(reclaim::i18n::diagnostic(
+        "Opening browser links is unavailable on this platform.",
+    ));
     Ok(())
 }

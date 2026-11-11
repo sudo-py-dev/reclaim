@@ -27,14 +27,13 @@ pub fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Validat
         "bmp" => {
             bytes.len() >= 18
                 && &bytes[..2] == b"BM"
-                && u32::from_le_bytes(bytes[2..6].try_into().unwrap()) as usize == bytes.len()
+                && crate::bytes::u32_le(bytes, 2) as usize == bytes.len()
         }
         "webp" => {
             bytes.len() >= 12
                 && &bytes[..4] == b"RIFF"
                 && &bytes[8..12] == b"WEBP"
-                && u64::from(u32::from_le_bytes(bytes[4..8].try_into().unwrap())) + 8
-                    == bytes.len() as u64
+                && u64::from(crate::bytes::u32_le(bytes, 4)) + 8 == bytes.len() as u64
         }
         _ => true,
     };
@@ -127,7 +126,7 @@ pub fn png_end(bytes: &[u8]) -> CandidateEnd {
         if bytes.len() < p + 8 {
             return More;
         }
-        let len = u32::from_be_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+        let len = crate::bytes::u32_be(bytes, p) as usize;
         let Some(end) = p
             .checked_add(12)
             .and_then(|p| p.checked_add(len))
@@ -145,7 +144,7 @@ pub fn png_end(bytes: &[u8]) -> CandidateEnd {
         if bytes.len() < end {
             return More;
         }
-        let expected = u32::from_be_bytes(bytes[end - 4..end].try_into().unwrap());
+        let expected = crate::bytes::u32_be(bytes, end - 4);
         if crc32fast::hash(&bytes[p + 4..end - 4]) != expected {
             return Invalid;
         }
@@ -314,12 +313,13 @@ pub fn ico_end(bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {
     if bytes.len() < directory {
         return More;
     }
+    // audit-allow(DOS-ALLOC): count is checked to be 1..=256 above.
     let mut ranges = Vec::with_capacity(count);
     for entry in bytes[6..directory].as_chunks::<16>().0 {
-        let planes = u16::from_le_bytes(entry[4..6].try_into().unwrap());
-        let bits = u16::from_le_bytes(entry[6..8].try_into().unwrap());
-        let size = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
-        let offset = u32::from_le_bytes(entry[12..16].try_into().unwrap()) as usize;
+        let planes = crate::bytes::u16_le(entry, 4);
+        let bits = crate::bytes::u16_le(entry, 6);
+        let size = crate::bytes::u32_le(entry, 8) as usize;
+        let offset = crate::bytes::u32_le(entry, 12) as usize;
         let Some(end) = offset.checked_add(size).filter(|n| *n <= LIMIT) else {
             return Invalid;
         };
@@ -334,10 +334,7 @@ pub fn ico_end(bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {
         if bytes.len() >= offset + 16 {
             let payload = &bytes[offset..];
             if !payload.starts_with(b"\x89PNG\r\n\x1a\n")
-                && !matches!(
-                    u32::from_le_bytes(payload[..4].try_into().unwrap()),
-                    12 | 40 | 108 | 124
-                )
+                && !matches!(crate::bytes::u32_le(payload, 0), 12 | 40 | 108 | 124)
             {
                 return Invalid;
             }
@@ -352,7 +349,9 @@ pub fn ico_end(bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {
     {
         return Invalid;
     }
-    let end = sorted.last().unwrap().1;
+    let Some(&(_, end)) = sorted.last() else {
+        return Invalid;
+    };
     if bytes.len() < end {
         return More;
     }
@@ -366,31 +365,31 @@ pub fn ico_end(bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {
         if payload.starts_with(b"\x89PNG\r\n\x1a\n") {
             if !matches!(png_end(payload),Complete(n) if n == payload.len())
                 || payload.len() < 24
-                || u32::from_be_bytes(payload[16..20].try_into().unwrap()) != width
-                || u32::from_be_bytes(payload[20..24].try_into().unwrap()) != height
+                || crate::bytes::u32_be(payload, 16) != width
+                || crate::bytes::u32_be(payload, 20) != height
             {
                 return Invalid;
             }
         } else {
-            let header = u32::from_le_bytes(payload[..4].try_into().unwrap());
+            let header = crate::bytes::u32_le(payload, 0);
             let (w, h) = if header == 12 {
                 (
-                    u32::from(u16::from_le_bytes(payload[4..6].try_into().unwrap())),
-                    u32::from(u16::from_le_bytes(payload[6..8].try_into().unwrap())),
+                    u32::from(crate::bytes::u16_le(payload, 4)),
+                    u32::from(crate::bytes::u16_le(payload, 6)),
                 )
             } else {
                 (
-                    u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-                    u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+                    crate::bytes::u32_le(payload, 4),
+                    crate::bytes::u32_le(payload, 8),
                 )
             };
             if w != width || h != height * 2 {
                 return Invalid;
             }
             let (planes_at, bits_at) = if header == 12 { (8, 10) } else { (12, 14) };
-            let planes = u16::from_le_bytes(payload[planes_at..planes_at + 2].try_into().unwrap());
-            let bits = u16::from_le_bytes(payload[bits_at..bits_at + 2].try_into().unwrap());
-            let declared_bits = u16::from_le_bytes(entry[6..8].try_into().unwrap());
+            let planes = crate::bytes::u16_le(payload, planes_at);
+            let bits = crate::bytes::u16_le(payload, bits_at);
+            let declared_bits = crate::bytes::u16_le(entry, 6);
             if planes != 1 || (declared_bits != 0 && declared_bits != bits) {
                 return Invalid;
             }

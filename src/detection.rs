@@ -21,7 +21,7 @@ pub(crate) fn sqlite_end(bytes: &[u8]) -> CandidateEnd {
         return Invalid;
     }
     let short = |p| u16::from_be_bytes([bytes[p], bytes[p + 1]]) as usize;
-    let long = |p| u32::from_be_bytes(bytes[p..p + 4].try_into().unwrap());
+    let long = |p| crate::bytes::u32_be(bytes, p);
     let page = match short(16) {
         1 => 65536,
         n => n,
@@ -158,7 +158,7 @@ impl Ogg {
                 return Invalid;
             }
             let flags = header[5];
-            let long = |p| u32::from_le_bytes(header[p..p + 4].try_into().unwrap());
+            let long = |p| crate::bytes::u32_le(header, p);
             let serial = long(14);
             let sequence = long(18);
             let segments_end = at + 27 + usize::from(header[26]);
@@ -189,7 +189,9 @@ impl Ogg {
             } else if flags & 2 != 0 {
                 return Invalid;
             }
-            let stream = self.streams.get_mut(&serial).unwrap();
+            let Some(stream) = self.streams.get_mut(&serial) else {
+                return Invalid;
+            };
             if stream.ended
                 || sequence != stream.next_sequence
                 || (flags & 1 != 0) != stream.continued

@@ -31,13 +31,13 @@ fn check(cancel: &AtomicBool) -> io::Result<()> {
     }
 }
 fn u16at(b: &[u8], p: usize) -> u64 {
-    u16::from_le_bytes(b[p..p + 2].try_into().unwrap()) as u64
+    crate::bytes::u16_le(b, p) as u64
 }
 fn u32at(b: &[u8], p: usize) -> u64 {
-    u32::from_le_bytes(b[p..p + 4].try_into().unwrap()) as u64
+    crate::bytes::u32_le(b, p) as u64
 }
 fn u64at(b: &[u8], p: usize) -> u64 {
-    u64::from_le_bytes(b[p..p + 8].try_into().unwrap())
+    crate::bytes::u64_le(b, p)
 }
 fn product(a: u64, b: u64) -> io::Result<u64> {
     a.checked_mul(b)
@@ -56,6 +56,7 @@ fn read_at(
         ));
     }
     input.seek(SeekFrom::Start(at))?;
+    // audit-allow(DOS-ALLOC): len is checked against MAX_MAP (64 MiB) above.
     let mut bytes = vec![0; len];
     for chunk in bytes.chunks_mut(65536) {
         check(cancel)?;
@@ -241,7 +242,8 @@ pub(crate) fn scan(
                         bytes,
                     });
                 }
-                crate::Event::UnusedSpace { .. } => unreachable!(),
+                // The full-source scan of a free extent never reports unused space.
+                crate::Event::UnusedSpace { .. } => {}
             },
             length.min(1024 * 1024) as usize,
         )?;

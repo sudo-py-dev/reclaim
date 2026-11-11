@@ -54,7 +54,8 @@ fn catalog(language: Language) -> &'static BTreeMap<String, String> {
         ($file:literal) => {{
             static C: OnceLock<BTreeMap<String, String>> = OnceLock::new();
             C.get_or_init(|| {
-                serde_json::from_str(include_str!($file)).expect("valid translation catalog")
+                // Catalogs are checked by the audit; a broken one falls back to English.
+                serde_json::from_str(include_str!($file)).unwrap_or_default()
             })
         }};
     }
@@ -109,6 +110,7 @@ fn settings_path() -> Option<PathBuf> {
     let root = std::env::var_os("APPDATA").map(PathBuf::from);
     #[cfg(target_os = "macos")]
     let root =
+        // audit-allow(I18N-MISSING): a folder path, not interface text.
         std::env::var_os("HOME").map(|p| PathBuf::from(p).join("Library/Application Support"));
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let root = std::env::var_os("XDG_CONFIG_HOME")
@@ -150,52 +152,70 @@ pub fn set_preference(value: Preference) -> io::Result<()> {
     Ok(())
 }
 
-fn fields(template: &str) -> Vec<(usize, usize, &str)> {
-    let mut result = Vec::new();
-    let mut at = 0;
-    while let Some(start) = template[at..].find('{') {
-        let start = at + start;
-        let Some(end) = template[start..].find('}') else {
+/// A message template split into literal text and `{field}` placeholders.
+#[derive(Clone, Copy)]
+enum Part<'a> {
+    Text(&'a str),
+    Field(&'a str),
+}
+
+fn parts(template: &str) -> Vec<Part<'_>> {
+    let mut parts = Vec::new();
+    let mut rest = template;
+    while let Some((before, after)) = rest.split_once('{') {
+        let Some((field, tail)) = after.split_once('}') else {
             break;
         };
-        let end = start + end + 1;
-        result.push((start, end, &template[start + 1..end - 1]));
-        at = end;
-    }
-    result
-}
-fn capture<'a>(template: &str, text: &'a str) -> Option<Vec<&'a str>> {
-    let tokens = fields(template);
-    if tokens.is_empty() {
-        return None;
-    }
-    let mut at = 0;
-    let mut source = 0;
-    let mut values = Vec::new();
-    for (i, (start, end, _)) in tokens.iter().enumerate() {
-        let literal = &template[source..*start];
-        if !text[at..].starts_with(literal) {
-            return None;
+        if !before.is_empty() {
+            parts.push(Part::Text(before));
         }
-        at += literal.len();
-        let next = tokens
-            .get(i + 1)
-            .map(|(n, _, _)| *n)
-            .unwrap_or(template.len());
-        let after = &template[*end..next];
-        let count = if after.is_empty() {
-            text.len() - at
-        } else {
-            text[at..].find(after)?
-        };
-        values.push(&text[at..at + count]);
-        at += count;
-        source = *end;
+        parts.push(Part::Field(field));
+        rest = tail;
     }
-    if text[at..] != template[source..] {
+    if !rest.is_empty() {
+        parts.push(Part::Text(rest));
+    }
+    parts
+}
+
+fn field_names<'a>(parts: &[Part<'a>]) -> Vec<&'a str> {
+    parts
+        .iter()
+        .filter_map(|part| match part {
+            Part::Field(name) => Some(*name),
+            Part::Text(_) => None,
+        })
+        .collect()
+}
+
+/// The values a formatted `text` supplied for each field of `template`, or
+/// `None` when the text was not produced from it. A field takes everything up to
+/// the literal that follows it, or the rest of the text when none follows.
+fn capture<'a>(template: &str, text: &'a str) -> Option<Vec<&'a str>> {
+    let parts = parts(template);
+    if field_names(&parts).is_empty() {
         return None;
     }
-    Some(values)
+    let mut rest = text;
+    let mut values = Vec::new();
+    let mut iter = parts.iter().peekable();
+    while let Some(part) = iter.next() {
+        match part {
+            Part::Text(literal) => rest = rest.strip_prefix(literal)?,
+            Part::Field(_) => {
+                let (value, remainder) = match iter.peek() {
+                    Some(Part::Text(after)) => {
+                        let (value, _) = rest.split_once(after)?;
+                        rest.split_at_checked(value.len())?
+                    }
+                    _ => (rest, ""),
+                };
+                values.push(value);
+                rest = remainder;
+            }
+        }
+    }
+    rest.is_empty().then_some(values)
 }
 pub fn t(text: &str) -> String {
     translate(text, language(), 0)
@@ -213,23 +233,44 @@ pub fn isolate(text: &str) -> String {
 pub fn message(key: &str, values: &[&str]) -> String {
     let template = t(key);
     let mut output = String::new();
-    let mut at = 0;
-    for (start, end, token) in fields(&template) {
-        output.push_str(&template[at..start]);
-        if let Some(value) = token
-            .parse::<usize>()
-            .ok()
-            .and_then(|index| values.get(index))
-        {
-            output.push_str(&isolate(value));
-        } else {
-            output.push_str(&template[start..end]);
+    for part in parts(&template) {
+        match part {
+            Part::Text(text) => output.push_str(text),
+            Part::Field(token) => match token.parse::<usize>().ok().and_then(|i| values.get(i)) {
+                Some(value) => output.push_str(&isolate(value)),
+                None => {
+                    output.push('{');
+                    output.push_str(token);
+                    output.push('}');
+                }
+            },
         }
-        at = end;
     }
-    output.push_str(&template[at..]);
     output
 }
+/// Technical detail for an error: kept in English, never a catalog key, and
+/// shown after a translated summary (see [`explain`]). Marking it this way is
+/// what tells the project audit the text is deliberately untranslated.
+pub fn diagnostic(text: &str) -> String {
+    text.to_owned()
+}
+
+/// Whether `text` is a catalog message, alone or with its fields filled in.
+pub fn is_message(text: &str) -> bool {
+    en().contains_key(text) || patterns().iter().any(|key| capture(key, text).is_some())
+}
+
+/// `detail` as the user should see it: unchanged when it is already a catalog
+/// message, otherwise placed into `summary` (an English key with one `{0}`
+/// field) so the lead sentence is translated and the technical part is not.
+pub fn explain(summary: &str, detail: String) -> String {
+    if is_message(&detail) {
+        detail
+    } else {
+        summary.replacen("{0}", &detail, 1)
+    }
+}
+
 /// Catalog coverage for first-party UI messages.
 pub fn has_message(key: &str) -> bool {
     en().contains_key(key)
@@ -259,7 +300,7 @@ fn translate(text: &str, language: Language, depth: usize) -> String {
         if matches!(
             key.as_str(),
             "{} files" | "{} file" | "{} selected" | "{} selected (one)"
-        ) && values[0].parse::<usize>().is_err()
+        ) && values.first().is_none_or(|n| n.parse::<usize>().is_err())
         {
             continue;
         }
@@ -280,26 +321,28 @@ fn translate(text: &str, language: Language, depth: usize) -> String {
         let Some(translated) = translated else {
             continue;
         };
-        let tokens = fields(key);
-        let output_tokens = fields(translated);
-        let mut used = HashMap::new();
+        // Fields may be reordered by a translation; repeated names fill in order.
+        let names = field_names(&parts(key));
+        let mut used: HashMap<&str, usize> = HashMap::new();
         let mut output = String::new();
-        let mut at = 0;
-        for (start, end, token) in output_tokens {
-            output.push_str(&translated[at..start]);
-            let index = used.entry(token).or_insert(0usize);
-            if let Some((i, _)) = tokens
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, _, t))| *t == token)
-                .nth(*index)
-            {
-                output.push_str(&translate(values[i], language, depth + 1));
+        for part in parts(translated) {
+            match part {
+                Part::Text(text) => output.push_str(text),
+                Part::Field(token) => {
+                    let nth = used.entry(token).or_insert(0);
+                    let value = names
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, name)| **name == token)
+                        .nth(*nth)
+                        .and_then(|(i, _)| values.get(i));
+                    if let Some(value) = value {
+                        output.push_str(&translate(value, language, depth + 1));
+                    }
+                    *nth += 1;
+                }
             }
-            *index += 1;
-            at = end;
         }
-        output.push_str(&translated[at..]);
         return output;
     }
     text.into()
@@ -349,11 +392,8 @@ mod tests {
             );
             for (key, translation) in translations {
                 assert!(!translation.trim().is_empty());
-                let mut source: Vec<_> = fields(key).into_iter().map(|(_, _, key)| key).collect();
-                let mut target: Vec<_> = fields(translation)
-                    .into_iter()
-                    .map(|(_, _, key)| key)
-                    .collect();
+                let mut source = field_names(&parts(key));
+                let mut target = field_names(&parts(translation));
                 source.sort();
                 target.sort();
                 assert_eq!(
@@ -378,8 +418,12 @@ mod tests {
                 translate("/media/user/Photos", language, 0),
                 "/media/user/Photos"
             );
-            let error = translate("Scan failed: Invalid source offset", language, 0);
-            assert!(!error.contains("Scan failed"));
+            let error = translate(
+                "Could not read this volume: Invalid source offset",
+                language,
+                0,
+            );
+            assert!(!error.contains("Could not read"));
             assert!(error.contains(&translate("Invalid source offset", language, 0)));
             assert!(translate("2 files", language, 0).contains('2'));
             with_language(language, || {
@@ -395,8 +439,12 @@ mod tests {
         assert_eq!(translate("2 files", Language::Hebrew, 0), "2 קבצים");
         assert_eq!(translate("1 files", Language::Hebrew, 0), "1 קובץ");
         assert_eq!(
-            translate("Scan failed: Invalid source offset", Language::Hebrew, 0),
-            "הסריקה נכשלה: מיקום הנתונים במקור אינו תקין"
+            translate(
+                "Could not read this volume: Invalid source offset",
+                Language::Hebrew,
+                0
+            ),
+            "לא ניתן לקרוא את אמצעי האחסון הזה: מיקום הנתונים במקור אינו תקין"
         );
         assert_eq!(
             translate("/media/user/Photos", Language::Hebrew, 0),

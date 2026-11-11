@@ -22,6 +22,7 @@ impl<R: Read + Seek> SourceReader<R> {
             ));
         }
         let window_size = if alignment == 1 { 0 } else { 1024 * 1024 };
+        // audit-allow(DOS-ALLOC): at most 1 MiB plus an alignment checked to be <= 64 KiB.
         let cache = vec![0; window_size + alignment];
         let cache_start = (alignment - (cache.as_ptr() as usize % alignment)) % alignment;
         Ok(Self {
@@ -97,7 +98,10 @@ impl<R: Read + Seek> Read for SourceReader<R> {
             }
             self.cached_at = Some(aligned);
         }
-        let start = (self.position - self.cached_at.unwrap()) as usize;
+        let Some(cached_at) = self.cached_at else {
+            return Ok(0);
+        };
+        let start = (self.position - cached_at) as usize;
         let count = bytes.len().min(self.cached_len.saturating_sub(start));
         if count == 0 {
             return Ok(0);
@@ -206,23 +210,19 @@ mod tests {
     #[test]
     fn an_unreadable_nonempty_device_is_an_error_not_an_empty_scan() {
         for alignment in [1, 512, 4096] {
-            let mut reader = SourceReader::new(
-                std::io::Cursor::new(Vec::<u8>::new()),
-                alignment,
-                Some(4096),
-            )
-            .unwrap();
+            let mut reader =
+                SourceReader::new(io::Cursor::new(Vec::<u8>::new()), alignment, Some(4096))
+                    .unwrap();
             assert_eq!(
                 reader.read(&mut [0; 128]).unwrap_err().kind(),
                 io::ErrorKind::UnexpectedEof
             );
         }
-        let mut empty =
-            SourceReader::new(std::io::Cursor::new(Vec::<u8>::new()), 1, Some(0)).unwrap();
+        let mut empty = SourceReader::new(io::Cursor::new(Vec::<u8>::new()), 1, Some(0)).unwrap();
         assert_eq!(empty.read(&mut [0; 128]).unwrap(), 0);
     }
 
-    struct SectorDevice(std::io::Cursor<Vec<u8>>);
+    struct SectorDevice(io::Cursor<Vec<u8>>);
     impl Read for SectorDevice {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
             assert!(self.0.position().is_multiple_of(4096));
@@ -242,8 +242,7 @@ mod tests {
         let content = b"%PDF-1.7\nexample\n%%EOF";
         bytes[4093..4093 + content.len()].copy_from_slice(content);
         let mut reader =
-            SourceReader::new(SectorDevice(std::io::Cursor::new(bytes)), 4096, Some(12288))
-                .unwrap();
+            SourceReader::new(SectorDevice(io::Cursor::new(bytes)), 4096, Some(12288)).unwrap();
         let mut found = Vec::new();
         crate::scan_reader(
             &mut reader,
@@ -257,10 +256,10 @@ mod tests {
         .unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].offset, 4093);
-        let out = std::env::temp_dir().join(format!("reclaim-aligned-{}.pdf", std::process::id()));
+        let out_temp = tempfile::tempdir().unwrap();
+        let out = out_temp.path().join("aligned.pdf");
         crate::recover_reader(&mut reader, &out, &found[0]).unwrap();
         assert_eq!(std::fs::read(&out).unwrap(), content);
-        std::fs::remove_file(out).unwrap();
         assert!(reader.seek(SeekFrom::Current(-100000)).is_err());
     }
 }

@@ -90,10 +90,10 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-Run the project-specific Python rules with `python3 scripts/check_project.py`
-(Python 3.11+), or add `--full` to run Python tests and the Rust checks above.
-Use `--previews /tmp/reclaim-previews` to also save headless UI renderings.
-See [the code and UI audit](CODE_UI_AUDIT.md) for findings, project rules, and limits.
+`cargo test` includes the project audit in `tests/audit` (security rules tagged
+by CWE, translation coverage and dead keys, supply-chain policy). Run it alone
+with `cargo test --locked --test audit`. See [the code and UI audit](CODE_UI_AUDIT.md)
+for what it checks and how to accept a reviewed finding.
 
 Tests cover signature boundaries, image validation, NTFS records, filtered exports, collision protection, sector-aligned reads, native Linux metadata fixtures, cancellation, and Slint page rendering in both themes.
 

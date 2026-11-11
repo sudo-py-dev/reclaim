@@ -109,7 +109,10 @@ impl Updates {
                                 .unwrap_or_default();
                             self.release = release;
                         }
-                        Err(e) => self.status = e,
+                        Err(e) => {
+                            self.status =
+                                reclaim::i18n::explain("Could not check for updates: {0}", e);
+                        }
                     }
                 }
                 Message::Progress(done, total) => self.progress = done as f32 / total.max(1) as f32,
@@ -127,7 +130,10 @@ impl Updates {
                                 "Update finished. Close and reopen Reclaim if needed.".into();
                             self.release = None;
                         }
-                        Err(e) => self.status = e,
+                        Err(e) => {
+                            self.status =
+                                reclaim::i18n::explain("The update could not be installed: {0}", e);
+                        }
                     }
                 }
             }

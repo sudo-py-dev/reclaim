@@ -45,6 +45,7 @@ unsafe extern "C" {
 struct Object(u32);
 impl Drop for Object {
     fn drop(&mut self) {
+        // SAFETY: self owns exactly one IOKit reference and releases it once.
         unsafe {
             IOObjectRelease(self.0);
         }
@@ -54,31 +55,40 @@ struct Cf(CFTypeRef);
 impl Drop for Cf {
     fn drop(&mut self) {
         if !self.0.is_null() {
+            // SAFETY: self.0 is a non-null CF object owned by this wrapper.
             unsafe {
                 CFRelease(self.0);
             }
         }
     }
 }
+/// A CFString for a registry or dictionary key; null if the key contains NUL.
 fn cf_string(text: &str) -> Cf {
-    let value = CString::new(text).expect("constant CF key has no NUL");
+    let Ok(value) = CString::new(text) else {
+        return Cf(ptr::null());
+    };
     Cf(
+        // SAFETY: value is a NUL-terminated UTF-8 C string that outlives the call.
         unsafe { CFStringCreateWithCString(ptr::null(), value.as_ptr(), kCFStringEncodingUTF8) }
             .cast(),
     )
 }
 fn string(value: CFTypeRef) -> Option<String> {
+    // SAFETY: value is a non-null CF object borrowed for the duration of the call.
     if value.is_null() || unsafe { CFGetTypeID(value) != CFStringGetTypeID() } {
         return None;
     }
     let value = value.cast();
+    // SAFETY: value was checked above to be a CFString.
     let length = unsafe {
         CFStringGetMaximumSizeForEncoding(CFStringGetLength(value), kCFStringEncodingUTF8)
     };
     if !(0..=1024 * 1024).contains(&length) {
         return None;
     }
+    // audit-allow(DOS-ALLOC): length is checked to be at most 1 MiB just above.
     let mut bytes = vec![0i8; length as usize + 1];
+    // SAFETY: bytes is writable for exactly bytes.len() bytes, the length passed.
     if unsafe {
         CFStringGetCString(
             value,
@@ -91,6 +101,7 @@ fn string(value: CFTypeRef) -> Option<String> {
         return None;
     }
     Some(
+        // SAFETY: CFStringGetCString succeeded, so bytes holds a NUL-terminated string.
         unsafe { CStr::from_ptr(bytes.as_ptr()) }
             .to_string_lossy()
             .into_owned(),
@@ -98,13 +109,16 @@ fn string(value: CFTypeRef) -> Option<String> {
 }
 fn boolean(value: CFTypeRef) -> bool {
     !value.is_null()
+        // SAFETY: the type ID is checked before value is read as a CFBoolean.
         && unsafe { CFGetTypeID(value) == CFBooleanGetTypeID() && CFBooleanGetValue(value.cast()) }
 }
 fn number(value: CFTypeRef) -> Option<u64> {
+    // SAFETY: value is a non-null CF object borrowed for the duration of the call.
     if value.is_null() || unsafe { CFGetTypeID(value) != CFNumberGetTypeID() } {
         return None;
     }
     let mut number = 0i64;
+    // SAFETY: value is a CFNumber (checked above) and number is a valid i64 out-pointer.
     let ok = unsafe {
         CFNumberGetValue(
             value.cast(),
@@ -116,6 +130,10 @@ fn number(value: CFTypeRef) -> Option<u64> {
 }
 fn property(entry: u32, key: &str) -> Cf {
     let key = cf_string(key);
+    if key.0.is_null() {
+        return Cf(ptr::null());
+    }
+    // SAFETY: entry is a live registry entry and key a valid CFString; Cf owns the result.
     Cf(unsafe { IORegistryEntryCreateCFProperty(entry, key.0.cast(), ptr::null(), 0) })
 }
 fn field(dictionary: CFDictionaryRef, key: &str) -> CFTypeRef {
@@ -123,6 +141,10 @@ fn field(dictionary: CFDictionaryRef, key: &str) -> CFTypeRef {
         return ptr::null();
     }
     let key = cf_string(key);
+    if key.0.is_null() {
+        return ptr::null();
+    }
+    // SAFETY: dictionary is non-null and key a valid CFString; the value is borrowed, not retained.
     unsafe { CFDictionaryGetValue(dictionary, key.0) }
 }
 fn valid_id(id: &str) -> bool {
@@ -135,6 +157,7 @@ fn valid_id(id: &str) -> bool {
 }
 fn registry_id(object: u32) -> Option<u64> {
     let mut id = 0;
+    // SAFETY: object is a live registry entry and id a valid out-pointer.
     (unsafe { IORegistryEntryGetRegistryEntryID(object, &mut id) } == 0).then_some(id)
 }
 fn ancestors(object: u32) -> Vec<u64> {
@@ -143,6 +166,7 @@ fn ancestors(object: u32) -> Vec<u64> {
     let mut owned = None;
     for _ in 0..128 {
         let mut parent = 0;
+        // SAFETY: current is a live entry, the plane name is a static C string, parent is an out-pointer.
         if unsafe { IORegistryEntryGetParentEntry(current, c"IOService".as_ptr(), &mut parent) }
             != 0
         {
@@ -165,8 +189,11 @@ pub fn discover() -> Result<Vec<Drive>, String> {
     let mut capacity = 64usize;
     let mount_entries = loop {
         let mut entries: Vec<libc::statfs> = (0..capacity)
+            // audit-allow(SEC-UNINIT): output buffers that getfsstat fills in.
+            // SAFETY: statfs is plain old data, for which all zero bytes is a valid value.
             .map(|_| unsafe { std::mem::zeroed() })
             .collect();
+        // SAFETY: entries is writable for its full byte size, which is the size passed.
         let count = unsafe {
             libc::getfsstat(
                 entries.as_mut_ptr(),
@@ -192,35 +219,42 @@ pub fn discover() -> Result<Vec<Drive>, String> {
     let mounts: HashMap<String, String> = mount_entries
         .iter()
         .map(|mount| {
+            // SAFETY: the kernel fills f_mntfromname with a NUL-terminated name.
             let from = unsafe { CStr::from_ptr(mount.f_mntfromname.as_ptr()) }
                 .to_string_lossy()
                 .into_owned();
+            // SAFETY: the kernel fills f_mntonname with a NUL-terminated name.
             let to = unsafe { CStr::from_ptr(mount.f_mntonname.as_ptr()) }
                 .to_string_lossy()
                 .into_owned();
             (from, to)
         })
         .collect();
+    // SAFETY: the class name is a static C string.
     let matching = unsafe { IOServiceMatching(c"IOMedia".as_ptr()) };
     if matching.is_null() {
         return Err("macOS could not inspect drives. Open a raw disk image instead.".into());
     }
     let mut iterator = 0;
     // IOKit consumes the matching dictionary even on failure.
+    // SAFETY: matching is a fresh dictionary that IOKit consumes; iterator is an out-pointer.
     if unsafe { IOServiceGetMatchingServices(0, matching, &mut iterator) } != 0 {
         return Err("macOS could not inspect drives. Open a raw disk image instead.".into());
     }
     let iterator = Object(iterator);
+    // SAFETY: a null allocator selects the default allocator.
     let session = Cf(unsafe { DASessionCreate(ptr::null()) });
     let mut rows = Vec::new();
     let mut topology = Vec::new();
     let mut seen = HashSet::new();
     loop {
+        // SAFETY: iterator owns a live IOKit iterator.
         let entry = unsafe { IOIteratorNext(iterator.0) };
         if entry == 0 {
             break;
         }
         let entry = Object(entry);
+        // audit-allow(I18N-MISSING): an IOKit registry property name.
         let Some(id) = string(property(entry.0, "BSD Name").0).filter(|id| valid_id(id)) else {
             continue;
         };
@@ -230,15 +264,19 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         if !seen.insert(id.clone()) {
             continue;
         }
-        let bsd_name = CString::new(id.clone()).unwrap();
+        let Ok(bsd_name) = CString::new(id.clone()) else {
+            continue;
+        };
         let disk = Cf(if session.0.is_null() {
             ptr::null()
         } else {
+            // SAFETY: session is non-null and bsd_name is a NUL-terminated C string.
             unsafe { DADiskCreateFromBSDName(ptr::null(), session.0, bsd_name.as_ptr()) }
         });
         let description = Cf(if disk.0.is_null() {
             ptr::null()
         } else {
+            // SAFETY: disk is a non-null DADisk owned by Cf.
             unsafe { DADiskCopyDescription(disk.0) }.cast()
         });
         let dictionary = description.0.cast();
@@ -263,8 +301,10 @@ pub fn discover() -> Result<Vec<Drive>, String> {
                 .map(|(_, point)| point.clone());
         }
         let url = field(dictionary, "DAVolumePath");
+        // SAFETY: url is a non-null CF object borrowed from a live dictionary.
         if mount.is_none() && !url.is_null() && unsafe { CFGetTypeID(url) == CFURLGetTypeID() } {
             let value =
+                // SAFETY: url was checked to be a CFURL; the copied path is owned by Cf.
                 Cf(unsafe { CFURLCopyFileSystemPath(url.cast(), kCFURLPOSIXPathStyle) }.cast());
             mount = string(value.0);
         }
@@ -313,11 +353,12 @@ fn whole_disk(device: &str) -> Option<&str> {
     if !valid_id(id) {
         return None;
     }
-    let digits = id["disk".len()..]
+    let digits = id
+        .strip_prefix("disk")?
         .bytes()
         .take_while(u8::is_ascii_digit)
         .count();
-    Some(&id[.."disk".len() + digits])
+    id.get(.."disk".len() + digits)
 }
 
 pub fn destination(source: &std::path::Path, folder: &std::path::Path) -> Destination {
@@ -333,11 +374,14 @@ pub fn destination(source: &std::path::Path, folder: &std::path::Path) -> Destin
     ) else {
         return Destination::Unknown;
     };
+    // audit-allow(SEC-UNINIT): an output structure that statfs fills in.
+    // SAFETY: statfs is plain old data, for which all zero bytes is a valid value.
     let mut mount: libc::statfs = unsafe { std::mem::zeroed() };
     // SAFETY: folder is NUL-terminated and mount is a writable statfs.
     if unsafe { libc::statfs(folder.as_ptr(), &mut mount) } != 0 {
         return Destination::Unknown;
     }
+    // SAFETY: the kernel fills f_mntfromname with a NUL-terminated name.
     let from = unsafe { CStr::from_ptr(mount.f_mntfromname.as_ptr()) }.to_string_lossy();
     // APFS volumes sit in a synthesized container whose physical store has a
     // different number, so differing identifiers do not prove separation.
@@ -367,5 +411,8 @@ mod tests {
         assert_eq!(whole_disk("/dev/disk3s1s1"), Some("disk3"));
         assert_eq!(whole_disk("/dev/sda"), None);
         assert_eq!(whole_disk("disk3"), None);
+        for device in ["/dev/disk", "/dev/diské", "/dev/disk3sé", "/dev/disk٣"] {
+            assert_eq!(whole_disk(device), None);
+        }
     }
 }

@@ -17,16 +17,16 @@ fn need(bytes: &[u8], end: usize) -> Result<(), CandidateEnd> {
     }
 }
 fn le16(b: &[u8], p: usize) -> usize {
-    u16::from_le_bytes(b[p..p + 2].try_into().unwrap()) as usize
+    crate::bytes::u16_le(b, p) as usize
 }
 fn le32(b: &[u8], p: usize) -> usize {
-    u32::from_le_bytes(b[p..p + 4].try_into().unwrap()) as usize
+    crate::bytes::u32_le(b, p) as usize
 }
 fn be32(b: &[u8], p: usize) -> usize {
-    u32::from_be_bytes(b[p..p + 4].try_into().unwrap()) as usize
+    crate::bytes::u32_be(b, p) as usize
 }
 fn le64(b: &[u8], p: usize) -> u64 {
-    u64::from_le_bytes(b[p..p + 8].try_into().unwrap())
+    crate::bytes::u64_le(b, p)
 }
 fn span(offset: u64, size: u64) -> Result<usize, CandidateEnd> {
     offset
@@ -96,7 +96,8 @@ pub(crate) fn end(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Candi
                 state => Err(state),
             },
             "xar" | "pkg" => xar::inspect(bytes, cancel).map(|(size, _)| size),
-            _ => unreachable!(),
+            // Only the kinds listed above reach this function.
+            _ => Err(CandidateEnd::Invalid),
         }
     };
     Some(match result {
@@ -257,7 +258,7 @@ fn elf(b: &[u8]) -> Probe {
         if little {
             le16(b, p)
         } else {
-            u16::from_be_bytes(b[p..p + 2].try_into().unwrap()) as usize
+            crate::bytes::u16_be(b, p) as usize
         }
     };
     let u32at = |p| if little { le32(b, p) } else { be32(b, p) };
@@ -266,7 +267,7 @@ fn elf(b: &[u8]) -> Probe {
             if little {
                 le64(b, p)
             } else {
-                u64::from_be_bytes(b[p..p + 8].try_into().unwrap())
+                crate::bytes::u64_be(b, p)
             }
         } else {
             u32at(p) as u64
@@ -460,7 +461,7 @@ fn rpm(b: &[u8]) -> Probe {
         let value = if width == 4 {
             be32(b, data + off) as u64
         } else {
-            u64::from_be_bytes(b[data + off..data + off + 8].try_into().unwrap())
+            crate::bytes::u64_be(b, data + off)
         };
         if size.is_some_and(|old| old != value) {
             return Err(CandidateEnd::Invalid);

@@ -11,7 +11,15 @@ struct FileLogger;
 static LOGGER: FileLogger = FileLogger;
 
 fn append(path: &Path, message: &str) -> std::io::Result<()> {
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    // Never follow a symlink planted where the log should be (CWE-59).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
+    }
+    let mut file = options.open(path)?;
     writeln!(
         file,
         "{} {message}",
@@ -43,13 +51,45 @@ pub fn write(message: &str) {
     }
 }
 
+/// Per-user log folders, most preferred first. Unix never falls back to the
+/// shared temporary directory, where another account could plant the folder
+/// or a symlink in it (CWE-377, CWE-59). `LOCALAPPDATA` also lets tests redirect it.
+fn log_directories() -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        directories.push(PathBuf::from(local).join("Reclaim/logs"));
+    }
+    #[cfg(windows)]
+    // audit-allow(SEC-TEMP): Windows keeps %TEMP% inside the user's own profile.
+    directories.push(std::env::temp_dir().join("Reclaim/logs"));
+    #[cfg(not(windows))]
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    directories.extend(home.map(|home| home.join("Library/Logs/Reclaim")));
+    #[cfg(not(any(windows, target_os = "macos")))]
+    directories.extend(
+        std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.map(|home| home.join(".local/state")))
+            .map(|state| state.join("reclaim/logs")),
+    );
+    directories
+}
+
+fn create_private_dir(directory: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(directory)
+}
+
 pub fn install() {
-    let preferred = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("Reclaim/logs");
-    for directory in [preferred, std::env::temp_dir().join("Reclaim/logs")] {
-        if std::fs::create_dir_all(&directory).is_err() {
+    for directory in log_directories() {
+        if create_private_dir(&directory).is_err() {
             continue;
         }
         let path = directory.join("reclaim.log");
@@ -60,6 +100,7 @@ pub fn install() {
         if append(
             &path,
             &format!(
+                // audit-allow(I18N-MISSING): a line in the diagnostic log, not interface text.
                 "Starting Reclaim {} on {} {}",
                 env!("CARGO_PKG_VERSION"),
                 std::env::consts::OS,
@@ -78,7 +119,7 @@ pub fn install() {
     std::panic::set_hook(Box::new(|info| {
         let details = format!("{info}\n{}", std::backtrace::Backtrace::force_capture());
         report(
-            "Reclaim encountered an unexpected error and must close.",
+            &reclaim::i18n::t("Reclaim encountered an unexpected error and must close."),
             &details,
         );
     }));
@@ -91,17 +132,21 @@ pub fn install() {
     }
 }
 
+/// Log a fatal problem and show it. `summary` is already translated; `details`
+/// is technical and stays in its original language.
 pub fn report(summary: &str, details: &str) {
+    use reclaim::i18n;
     write(&format!("ERROR: {summary}\n{details}"));
     let location = LOG_PATH
         .get()
-        .map(|path| format!("\n\nDiagnostic log: {}", path.display()))
-        .unwrap_or_else(|| "\n\nThe diagnostic log could not be written.".into());
+        .map(|path| i18n::message("Diagnostic log: {0}", &[&path.display().to_string()]))
+        .unwrap_or_else(|| i18n::t("The diagnostic log could not be written."));
     let display_details: String = details.chars().take(2000).collect();
-    let message = format!(
-        "{summary}\n\n{display_details}{location}\n\nIf this is a virtual machine, install or update its graphics drivers / Guest Additions."
+    let hint = i18n::t(
+        "If this is a virtual machine, install or update its graphics drivers or guest additions.",
     );
-    eprintln!("{message}");
+    let message = [summary, &display_details, &location, &hint].join("\n\n");
+    let _ = writeln!(std::io::stderr(), "{message}");
     #[cfg(windows)]
     {
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -116,7 +161,7 @@ pub fn report(summary: &str, details: &str) {
             .encode_utf16()
             .chain(Some(0))
             .collect();
-        let title: Vec<u16> = "Reclaim: launch or crash error"
+        let title: Vec<u16> = reclaim::i18n::t("Reclaim could not continue")
             .encode_utf16()
             .chain(Some(0))
             .collect();
@@ -134,6 +179,10 @@ pub fn report(summary: &str, details: &str) {
     }
 }
 
+/// # Safety
+///
+/// Called only by Windows as the unhandled-exception filter, with a pointer
+/// that is either null or valid for the duration of the call.
 #[cfg(windows)]
 unsafe extern "system" fn native_exception(
     exception: *const windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
@@ -147,11 +196,13 @@ unsafe extern "system" fn native_exception(
         if record.is_null() {
             0
         } else {
+            // SAFETY: a non-null record inside the supplied exception is valid here too.
             unsafe { (*record).ExceptionCode }
         }
     };
     report(
-        "Reclaim stopped because of a Windows exception.",
+        &reclaim::i18n::t("Reclaim stopped because of a Windows exception."),
+        // audit-allow(I18N-MISSING): technical detail shown after the translated summary.
         &format!("Exception code: 0x{code:08X}"),
     );
     windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_EXECUTE_HANDLER

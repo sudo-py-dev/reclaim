@@ -101,6 +101,7 @@ pub fn load(
         input
             .seek(SeekFrom::Start(found.offset))
             .map_err(|e| e.to_string())?;
+        // audit-allow(DOS-ALLOC): previews are refused above 32 MiB at the top of this function.
         let mut bytes = vec![0; found.size as usize];
         input.read_exact(&mut bytes).map_err(|e| e.to_string())?;
         std::borrow::Cow::Owned(bytes)

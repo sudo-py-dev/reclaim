@@ -1,8 +1,13 @@
+#![expect(
+    clippy::unwrap_used,
+    reason = "fixture helpers fail the test by panicking"
+)]
 use reclaim::{Event, Found, recover, scan};
 use std::sync::atomic::AtomicBool;
 
-fn carve_and_check(label: &str, fixtures: &[(&str, Vec<u8>)]) {
-    let dir = std::env::temp_dir().join(format!("reclaim-{label}-{}", std::process::id()));
+fn carve_and_check(fixtures: &[(&str, Vec<u8>)]) {
+    let dir_temp = tempfile::tempdir().unwrap();
+    let dir = dir_temp.path().join("work");
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("source.img");
     let mut image = vec![0; 1024 * 1024 - 2];
@@ -58,7 +63,6 @@ fn carve_and_check(label: &str, fixtures: &[(&str, Vec<u8>)]) {
             );
         }
     }
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -79,7 +83,6 @@ fn zip_packages_have_correct_extensions_and_no_duplicate_local_entries() {
         ("apk", include_bytes!("fixtures/package.apk")),
     ];
     carve_and_check(
-        "packages",
         &fixtures
             .iter()
             .map(|(k, b)| (*k, b.to_vec()))
@@ -107,22 +110,20 @@ fn media_sizes_and_multiple_icon_images() {
     }
     au.extend_from_slice(b"data");
     let ico = include_bytes!("fixtures/real.ico").to_vec();
-    carve_and_check(
-        "media",
-        &[
-            ("webp", include_bytes!("fixtures/real.webp").to_vec()),
-            ("avi", chunk_container(b"RIFF", b"AVI ", true)),
-            ("aiff", chunk_container(b"FORM", b"AIFF", false)),
-            ("aifc", chunk_container(b"FORM", b"AIFC", false)),
-            ("au", au),
-            ("ico", ico),
-        ],
-    );
+    carve_and_check(&[
+        ("webp", include_bytes!("fixtures/real.webp").to_vec()),
+        ("avi", chunk_container(b"RIFF", b"AVI ", true)),
+        ("aiff", chunk_container(b"FORM", b"AIFF", false)),
+        ("aifc", chunk_container(b"FORM", b"AIFC", false)),
+        ("au", au),
+        ("ico", ico),
+    ]);
 }
 
 #[test]
 fn reject_truncation_bad_sizes_and_bogus_zip_directory() {
-    let dir = std::env::temp_dir().join(format!("reclaim-reject-{}", std::process::id()));
+    let dir_temp = tempfile::tempdir().unwrap();
+    let dir = dir_temp.path().join("reject");
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("bad.img");
     let mut data = chunk_container(b"RIFF", b"WEBP", true);
@@ -153,7 +154,6 @@ fn reject_truncation_bad_sizes_and_bogus_zip_directory() {
     })
     .unwrap();
     assert_eq!(count, 0);
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -170,11 +170,11 @@ fn scanning_and_recovery_use_an_existing_authorized_reader() {
     })
     .unwrap();
     assert_eq!(found.len(), 1);
-    let output = std::env::temp_dir().join(format!("reclaim-reader-{}.docx", std::process::id()));
+    let output_temp = tempfile::tempdir().unwrap();
+    let output = output_temp.path().join("reader.docx");
     reclaim::recover_reader(&mut reader, &output, &found[0]).unwrap();
     assert_eq!(std::fs::read(&output).unwrap(), bytes);
     assert_eq!(reader.into_inner(), bytes);
-    std::fs::remove_file(output).unwrap();
 }
 
 #[test]

@@ -1,3 +1,7 @@
+#![expect(
+    clippy::unwrap_used,
+    reason = "fixture helpers fail the test by panicking"
+)]
 use reclaim::{Event, Found, Validation, recover_reader, scan_reader};
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::sync::atomic::AtomicBool;

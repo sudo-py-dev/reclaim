@@ -11,9 +11,9 @@ struct Record {
 }
 pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), CandidateEnd> {
     need(b, 28)?;
-    let header = u16::from_be_bytes(b[4..6].try_into().unwrap()) as usize;
-    let compressed = u64::from_be_bytes(b[8..16].try_into().unwrap());
-    let unpacked = u64::from_be_bytes(b[16..24].try_into().unwrap());
+    let header = crate::bytes::u16_be(b, 4) as usize;
+    let compressed = crate::bytes::u64_be(b, 8);
+    let unpacked = crate::bytes::u64_be(b, 16);
     if !b.starts_with(b"xar!")
         || header < 28
         || le16(b, 6) != 0x100
@@ -69,17 +69,16 @@ pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), Ca
                 });
             }
             Event::Text(text) => {
-                if stack.len() >= 2 {
-                    let tag = &stack.last().unwrap().name;
-                    let parent = stack.len() - 2;
+                if let [.., parent, top] = stack.as_mut_slice() {
+                    let tag = &top.name;
                     if (matches!(tag.as_slice(), b"offset" | b"length")
                         || (tag == b"size"
                             && matches!(
-                                stack[parent].name.as_slice(),
+                                parent.name.as_slice(),
                                 b"checksum" | b"signature" | b"x-signature"
                             )))
                         && matches!(
-                            stack[parent].name.as_slice(),
+                            parent.name.as_slice(),
                             b"data" | b"ea" | b"checksum" | b"signature" | b"x-signature"
                         )
                     {
@@ -88,10 +87,10 @@ pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), Ca
                             .and_then(|s| s.parse::<u64>().ok())
                             .ok_or(CandidateEnd::Invalid)?;
                         if tag == b"offset" {
-                            if stack[parent].offset.replace(value).is_some() {
+                            if parent.offset.replace(value).is_some() {
                                 return Err(CandidateEnd::Invalid);
                             }
-                        } else if stack[parent].length.replace(value).is_some() {
+                        } else if parent.length.replace(value).is_some() {
                             return Err(CandidateEnd::Invalid);
                         }
                     } else if tag == b"name"
