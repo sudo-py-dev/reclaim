@@ -108,6 +108,9 @@ fn bundle(binary: &Path, output: &Path, asset: &str) -> Result {
         ),
     ] {
         let options = zip::write::SimpleFileOptions::default()
+            // Keep the explicit Unix modes on every build host. A DOS creator
+            // header makes ZIP readers synthesize 0664 instead of reading 0755.
+            .system(zip::System::Unix)
             .compression_method(zip::CompressionMethod::Deflated)
             .unix_permissions(mode);
         archive.start_file(name, options)?;
@@ -150,6 +153,14 @@ mod tests {
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes)?;
         assert_eq!(bytes, b"release executable");
+        drop(entry);
+        assert_eq!(
+            archive
+                .by_name("LICENSE")?
+                .unix_mode()
+                .map(|mode| mode & 0o777),
+            Some(0o644)
+        );
         checksums(&output)?;
         let checksum = fs::read_to_string(output.join("reclaim-linux-x86_64.sha256"))?;
         assert_eq!(
