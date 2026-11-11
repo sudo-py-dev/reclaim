@@ -701,8 +701,16 @@ fn file_details(file: &Found, number: usize) -> String {
     }
     lines.join("\n\n")
 }
+/// Desktop file ID (`packaging/linux/io.github.reclaim.Reclaim.desktop`). Linux
+/// desktops, Wayland ones in particular, take the window icon and taskbar
+/// grouping from the `.desktop` file whose name matches the window's app ID.
+const APP_ID: &str = "io.github.reclaim.Reclaim";
+
 fn run() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
+    // After the platform exists (AppWindow::new sets it up) and before the window
+    // is shown, which is when it is created. No effect on Windows/macOS.
+    slint::set_xdg_app_id(APP_ID)?;
     ui_text::apply(&ui);
     ui.set_language(i18n::preference() as i32);
     {
