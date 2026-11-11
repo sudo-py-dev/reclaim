@@ -15,14 +15,14 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          workspaces: tools
       - name: Validate version tag
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os, re
-          version = re.search(r'^version = "([^"]+)"', open('Cargo.toml').read(), re.M)[1]
-          assert os.environ['GITHUB_REF'] == 'refs/tags/v' + version, 'Run this workflow on the matching vX.Y.Z tag'
-          PY
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: cargo xtask validate-tag "$RELEASE_REF"
   validate:
     needs: version
     uses: ./.github/workflows/build.yml
@@ -60,15 +60,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          workspaces: |
+            .
+            tools
       - name: Linux dependencies
         if: runner.os == 'Linux'
         timeout-minutes: 5
-        # Only fontconfig headers are needed: X11, Wayland and xkbcommon load at
-        # runtime. Skipping apt when they are present avoids flaky package mirrors.
         run: |
-          if pkg-config --exists fontconfig; then
-            echo "fontconfig headers already installed"
-          else
+          if ! pkg-config --exists fontconfig; then
             sudo apt-get -o Acquire::Retries=3 update
             sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends libfontconfig-dev
           fi
@@ -79,36 +79,23 @@ jobs:
           TARGET: ${{ matrix.target }}
           ASSET: ${{ matrix.asset }}
         run: |
-          mkdir -p dist bundle
           binary="target/$TARGET/release/reclaim"
           if [[ "$RUNNER_OS" == Windows ]]; then binary="$binary.exe"; fi
-          cp "$binary" "dist/$ASSET"
-          if [[ "$RUNNER_OS" == macOS ]]; then codesign --force --sign - "dist/$ASSET"; fi
-          cp "dist/$ASSET" bundle/
-          cp LICENSE assets/fonts/DejaVu-LICENSE.txt bundle/
-          python - <<'PY'
-          import os, pathlib, zipfile, hashlib
-          asset = os.environ['ASSET']
-          with zipfile.ZipFile('dist/' + asset + '.zip', 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-              for path in pathlib.Path('bundle').iterdir():
-                  z.write(path, path.name)
-          PY
+          if [[ "$RUNNER_OS" == macOS ]]; then codesign --force --sign - "$binary"; fi
+          cargo xtask bundle "$binary" dist "$ASSET"
       - name: Ensure Inno Setup is available
         if: runner.os == 'Windows'
         shell: bash
         run: choco install innosetup --yes --no-progress
       - name: Build native installer
         shell: bash
-        run: python scripts/package-release.py "${{ matrix.platform }}" --binary "dist/${{ matrix.asset }}" --arch "${{ matrix.arch }}"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ASSET: ${{ matrix.asset }}
+          ARCH: ${{ matrix.arch }}
+        run: cargo xtask package "$PLATFORM" --binary "dist/$ASSET" --arch "$ARCH"
       - name: Checksum all downloads
-        shell: bash
-        run: |
-          python - <<'PY'
-          import pathlib, hashlib
-          for path in pathlib.Path('dist').glob('*'):
-              if path.is_file() and not path.name.endswith('.sha256'):
-                  path.with_name(path.name + '.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n')
-          PY
+        run: cargo xtask checksums dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.asset }}
@@ -133,8 +120,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - name: Install signing tool
         run: cargo install rsign2 --version =0.6.7 --locked
-      # Reclaim installs only updates signed by this key. The trusted comment binds
-      # each signature to its file name and version, so it cannot be reused.
       - name: Sign every download with the release key
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
@@ -166,8 +151,6 @@ jobs:
           else
             gh release create "$TAG" dist/* --verify-tag --generate-notes --title "Reclaim $TAG"
           fi
-      # Rebuild the website so its download links and version match this release.
-      # Optional: create a Deploy Hook in Vercel and save its URL as this secret.
       - name: Refresh website
         env:
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}

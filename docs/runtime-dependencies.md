@@ -20,5 +20,5 @@ autolaunch, and fallback address lists are rejected before starting the GUI.
 
 Clippy rejects first-party process-command creation, and cargo-deny bans
 self-replace, webbrowser, and open helper dependencies. Development and release
-packaging still use Cargo, Rust security tools, Python, and platform packaging
+packaging use the separate Rust tooling crate (`cargo xtask`), Rust security tools, and native platform packaging
 tools. They are not invoked by the installed application.

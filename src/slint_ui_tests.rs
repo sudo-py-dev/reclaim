@@ -217,8 +217,8 @@ fn linux_app_id_matches_the_packaged_desktop_entry() {
     let entry = include_str!("../packaging/linux/io.github.reclaim.Reclaim.desktop");
     assert!(entry.contains(&format!("Icon={APP_ID}")));
     assert!(entry.contains(&format!("StartupWMClass={APP_ID}")));
-    let script = include_str!("../scripts/package-release.py");
-    assert!(script.contains(&format!("IDENTIFIER = '{APP_ID}'")));
+    let tooling = include_str!("../tools/src/main.rs");
+    assert!(tooling.contains(&format!("IDENTIFIER: &str = \"{APP_ID}\"")));
 }
 
 #[test]

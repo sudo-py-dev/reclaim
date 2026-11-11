@@ -153,13 +153,12 @@ const SKIP_DIRS: &[&str] = &[
     "dist",
     ".astro",
     ".vercel",
-    "__pycache__",
     "corpus",
     "artifacts",
 ];
 const TEXT_EXTENSIONS: &[&str] = &[
-    "rs", "slint", "toml", "json", "md", "yml", "yaml", "py", "ts", "astro", "mjs", "css", "html",
-    "txt", "iss", "plist", "desktop", "pub", "svg",
+    "rs", "slint", "toml", "json", "md", "yml", "yaml", "ts", "astro", "mjs", "css", "html", "txt",
+    "iss", "plist", "desktop", "pub", "svg",
 ];
 
 impl Workspace {

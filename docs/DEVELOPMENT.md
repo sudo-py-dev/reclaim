@@ -143,3 +143,24 @@ Each result has a file-type badge and an information action. The details dialog 
 ## Automatic drive refresh
 
 A background worker rechecks the native drive inventory about every two seconds. Only changed inventories (including mount/unlock metadata) wake the UI. Manual Refresh requests use the same worker. Bounded update/request channels prevent an update backlog; dropping the monitor disconnects the worker. Existing selection is retained while its device remains present; removed selections are cleared, and disk-image selections are unaffected. Transient discovery errors retain the last successful list. Inventory updates do not restart scans or discard their results/authorized handles.
+
+## Repository tooling
+
+`cargo xtask` builds the independent `tools/` crate, without the desktop UI.
+It replaces the former scripting tools:
+
+```sh
+cargo xtask fixtures
+cargo xtask seed-corpus
+cargo xtask package linux --binary target/release/reclaim
+```
+
+`fixtures` regenerates the project-owned framing data in `tests/fixtures/formats`.
+Compression output can differ between encoder versions while preserving the
+same decoded data. `seed-corpus` copies small checked-in fixtures and creates
+NTFS/PDF seeds for both fuzz harnesses. Installer packaging requires the native
+platform's packaging tools listed in the README.
+
+The release workflow also uses `cargo xtask validate-tag`, `bundle`, and
+`checksums`; update signatures remain a separate, verified release step.
+CI formats, tests, and lints the tooling crate on all desktop platforms.

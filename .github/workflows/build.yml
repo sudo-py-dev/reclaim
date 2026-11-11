@@ -30,6 +30,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          workspaces: |
+            .
+            tools
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         timeout-minutes: 5
@@ -44,8 +48,12 @@ jobs:
           fi
       - run: cargo fmt --all -- --check
         if: runner.os == 'Linux'
+      - run: cargo fmt --manifest-path tools/Cargo.toml -- --check
+        if: runner.os == 'Linux'
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path tools/Cargo.toml
+      - run: cargo clippy --locked --manifest-path tools/Cargo.toml --all-targets -- -D warnings
   supply-chain:
     name: Supply chain (cargo-deny)
     runs-on: ubuntu-latest
@@ -55,6 +63,12 @@ jobs:
       # Known vulnerabilities (RustSec), yanked crates, bans and sources.
       - uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
         with:
+          command: check advisories bans sources
+      - name: Tooling dependencies
+        uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
+        with:
+          manifest-path: tools/Cargo.toml
+          arguments: --config tools/deny.toml
           command: check advisories bans sources
   website:
     name: Website checks

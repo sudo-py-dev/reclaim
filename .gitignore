@@ -1,4 +1,5 @@
 /target/
+/tools/target/
 /dist/
 /.agents/
 /.aws/
@@ -12,5 +13,3 @@
 /recovered/
 .DS_Store
 Thumbs.db
-
-__pycache__/
