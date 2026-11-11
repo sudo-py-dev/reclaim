@@ -40,6 +40,10 @@ version = "1"
 [dependencies.sha2]
 version = "0.10"
 
+# Ed25519 (Minisign) update signatures; no transitive dependencies.
+[dependencies.minisign-verify]
+version = "=0.3.0"
+
 [dependencies.tempfile]
 version = "3"
 

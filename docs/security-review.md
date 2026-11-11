@@ -20,6 +20,17 @@ It is a focused source review, not a security certification.
 - Update URLs must match the exact project, release tag, and platform asset.
   Download verification independently enforces size and digest bounds, including
   when callers construct public release metadata directly.
+- Updates install only when a Minisign (Ed25519) signature made by the release
+  key verifies over the downloaded bytes. The public key is compiled in from
+  `packaging/update-signing.pub`; the signed trusted comment must read
+  `reclaim-update file:<asset> version:<version>`, so a signature cannot be
+  moved to another file or reused to re-publish an older build. Unsigned or
+  mismatched releases are not offered. The release workflow refuses to publish
+  without the `UPDATE_SIGNING_KEY` secret.
+- Downloaded installers live in private `pending-*` folders in the per-user
+  cache. They are deleted after installing, on any failure, or (for installers
+  still running when Reclaim exits) on the next launch. Cleanup never follows
+  symbolic links and only removes `pending-*` folders.
 
 ## Verification
 
@@ -35,8 +46,13 @@ and invalid update sizes including u64::MAX.
 
 - Native Windows/macOS discovery still needs unsafe OS FFI. Those paths were
   inspected but were not built or exercised on this Linux host.
-- Updates trust GitHub HTTPS and GitHub-provided SHA-256 metadata. This does not
-  provide independent publisher signatures if the release account is compromised.
+- Update signatures protect against a compromised release page or token, but
+  not against theft of the signing key itself. Keep the private key offline and
+  in the repository secret only; rotating it requires shipping a release signed
+  with the old key that contains the new public key.
+- Update signing is separate from OS code signing (Windows Authenticode, Apple
+  Developer ID). Those certificates are not configured, so Windows SmartScreen
+  and macOS Gatekeeper still treat a fresh download as unsigned.
 - Use an output/config directory controlled by the user. Atomic publication
   does not protect against an attacker who can rename ancestor directories or
   modify files with the same account's privileges.

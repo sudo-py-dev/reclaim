@@ -76,16 +76,7 @@ impl Updates {
                 })
                 .map(|()| None)
             } else if updater::installer_download(&release).is_some() {
-                (|| {
-                    let Some(path) = rfd::FileDialog::new()
-                        .set_file_name(&release.asset)
-                        .save_file()
-                    else {
-                        return Ok(None);
-                    };
-                    updater::download_installer(&release, &path, progress)?;
-                    Ok(Some(path))
-                })()
+                crate::update_runtime::stage_installer(&release, progress).map(Some)
             } else {
                 updater::install_with_progress(&release, progress).map(|()| None)
             };

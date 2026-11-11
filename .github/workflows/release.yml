@@ -100,10 +100,38 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging/update-signing.pub
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install signing tool
+        run: cargo install rsign2 --version =0.6.7 --locked
+      # Reclaim installs only updates signed by this key. The trusted comment binds
+      # each signature to its file name and version, so it cannot be reused.
+      - name: Sign every download with the release key
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::error::The UPDATE_SIGNING_KEY secret is not set; refusing to publish unsigned updates."
+            exit 1
+          fi
+          key="$RUNNER_TEMP/update-signing.key"
+          trap 'rm -f "$key"' EXIT
+          (umask 077; printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key")
+          version="${TAG#v}"
+          for file in dist/*; do
+            case "$file" in *.sha256|*.minisig) continue ;; esac
+            name="$(basename "$file")"
+            rsign sign -W -s "$key" -t "reclaim-update file:$name version:$version" -x "$file.minisig" "$file"
+            rsign verify -q -p packaging/update-signing.pub -x "$file.minisig" "$file"
+          done
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
