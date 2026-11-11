@@ -1,11 +1,14 @@
-name: Desktop builds
+name: Desktop checks
 # Pull requests are checked once via `pull_request`; `push` covers main only,
 # so a push to a PR branch no longer runs the whole matrix twice.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "23 6 * * 1"
   workflow_dispatch:
+  workflow_call:
 # A newer push to a PR cancels the run it replaces. Every commit on main gets its
 # own group so it is always checked in full; one merge never cancels another.
 concurrency:
@@ -22,11 +25,11 @@ jobs:
         os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         timeout-minutes: 5
@@ -39,41 +42,34 @@ jobs:
             sudo apt-get -o Acquire::Retries=3 update
             sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends libfontconfig-dev
           fi
-      - run: cargo fmt --check
+      - run: cargo fmt --all -- --check
+        if: runner.os == 'Linux'
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo build --locked --release
-      - name: Package macOS application
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p dist/Reclaim.app/Contents/MacOS
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
-          cargo build --locked --release --target aarch64-apple-darwin
-          cargo build --locked --release --target x86_64-apple-darwin
-          lipo -create target/aarch64-apple-darwin/release/reclaim target/x86_64-apple-darwin/release/reclaim -output dist/Reclaim.app/Contents/MacOS/reclaim
-          cp packaging/macos/Info.plist dist/Reclaim.app/Contents/
-          mkdir -p dist/Reclaim.app/Contents/Resources
-          cp assets/icons/reclaim.icns dist/Reclaim.app/Contents/Resources/
-          cp assets/fonts/DejaVu-LICENSE.txt dist/Reclaim.app/Contents/Resources/
-          codesign --force --sign - dist/Reclaim.app
-          ditto -c -k --keepParent dist/Reclaim.app dist/Reclaim-macOS.zip
-      - uses: actions/upload-artifact@v7
-        with:
-          name: reclaim-${{ runner.os }}
-          path: |
-            target/release/reclaim
-            target/release/reclaim.exe
-            dist/Reclaim-macOS.zip
-            README.md
-            LICENSE
-            assets/fonts/DejaVu-LICENSE.txt
   supply-chain:
     name: Supply chain (cargo-deny)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Known vulnerabilities (RustSec), yanked crates, bans and sources.
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
         with:
           command: check advisories bans sources
+  website:
+    name: Website checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build

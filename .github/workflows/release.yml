@@ -3,10 +3,31 @@ on:
   push:
     tags: ['v[0-9]*']
   workflow_dispatch:
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
+  version:
+    name: Validate release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate version tag
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, re
+          version = re.search(r'^version = "([^"]+)"', open('Cargo.toml').read(), re.M)[1]
+          assert os.environ['GITHUB_REF'] == 'refs/tags/v' + version, 'Run this workflow on the matching vX.Y.Z tag'
+          PY
+  validate:
+    needs: version
+    uses: ./.github/workflows/build.yml
   build:
+    needs: validate
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -34,19 +55,11 @@ jobs:
             asset: reclaim-macos-x86_64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - name: Validate version tag
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os, re
-          version = re.search(r'^version = "([^"]+)"', open('Cargo.toml').read(), re.M)[1]
-          assert os.environ['GITHUB_REF'] == 'refs/tags/v' + version, 'Run this workflow on the matching vX.Y.Z tag'
-          PY
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
       - name: Linux dependencies
         if: runner.os == 'Linux'
         timeout-minutes: 5
@@ -59,7 +72,6 @@ jobs:
             sudo apt-get -o Acquire::Retries=3 update
             sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends libfontconfig-dev
           fi
-      - run: cargo test --locked
       - run: cargo build --locked --release --target ${{ matrix.target }}
       - name: Package portable executable and licenses
         shell: bash
@@ -97,11 +109,12 @@ jobs:
               if path.is_file() and not path.name.endswith('.sha256'):
                   path.with_name(path.name + '.sha256').write_text(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n')
           PY
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.asset }}
           path: dist/*
           if-no-files-found: error
+          retention-days: 7
   publish:
     needs: build
     runs-on: ubuntu-latest
@@ -109,15 +122,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           sparse-checkout: packaging/update-signing.pub
           sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: dist
           merge-multiple: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - name: Install signing tool
         run: cargo install rsign2 --version =0.6.7 --locked
       # Reclaim installs only updates signed by this key. The trusted comment binds

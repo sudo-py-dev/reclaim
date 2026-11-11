@@ -220,3 +220,113 @@ fn linux_app_id_matches_the_packaged_desktop_entry() {
     let script = include_str!("../scripts/package-release.py");
     assert!(script.contains(&format!("IDENTIFIER = '{APP_ID}'")));
 }
+
+#[test]
+fn recovery_scrollbar_keeps_controls_clear_and_reaches_the_last_file() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.set_page(1);
+    ui.set_files(ModelRc::new(VecModel::from(
+        (0..200)
+            .map(|index| FileItem {
+                name: format!("candidate-{index:04}.png").into(),
+                kind: "PNG".into(),
+                size: "2 KiB".into(),
+                selected: true,
+                index,
+            })
+            .collect::<Vec<_>>(),
+    )));
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    for (code, rtl) in [("en", false), ("he", true)] {
+        ui.global::<Locale>().set_rtl(rtl);
+        for dark in [false, true] {
+            ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+            ui.window().take_snapshot().unwrap();
+            let list = i_slint_backend_testing::ElementHandle::find_by_element_id(
+                &ui,
+                "AppWindow::files-view",
+            )
+            .next()
+            .expect("recovered file list");
+            let position = list.absolute_position();
+            let size = list.size();
+            let rail = slint::LogicalPosition::new(
+                position.x + if rtl { 7.0 } else { size.width - 7.0 },
+                position.y + size.height / 2.0,
+            );
+            ui.window()
+                .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                    position: rail,
+                    button: slint::platform::PointerEventButton::Left,
+                });
+            ui.window()
+                .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                    position: rail,
+                    button: slint::platform::PointerEventButton::Left,
+                });
+            ui.window()
+                .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                    text: slint::platform::Key::End.into(),
+                });
+            ui.window()
+                .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                    text: slint::platform::Key::End.into(),
+                });
+            let snapshot = ui.window().take_snapshot().unwrap();
+            let last = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                &ui,
+                "candidate-0199.png",
+            )
+            .find(|element| {
+                let y = element.absolute_position().y;
+                y >= position.y && y < position.y + size.height
+            });
+            let last = last.expect("last file reachable by keyboard");
+            let last_position = last.absolute_position();
+            assert!(
+                last_position.y + last.size().height <= position.y + size.height + 1.0,
+                "the last row must be fully visible"
+            );
+            let previous = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                &ui,
+                "candidate-0198.png",
+            )
+            .next()
+            .expect("previous visible file");
+            assert!(
+                (last_position.y - previous.absolute_position().y - 52.0).abs() < 1.0,
+                "list rows must remain spaced and virtualized"
+            );
+            if rtl {
+                assert!(last_position.x >= position.x + 14.0, "RTL scrollbar gutter");
+            } else {
+                assert!(
+                    last_position.x + last.size().width <= position.x + size.width - 14.0,
+                    "LTR scrollbar gutter"
+                );
+            }
+            if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                std::fs::create_dir_all(&directory).unwrap();
+                image::save_buffer(
+                    format!(
+                        "{directory}/scroll-{code}-{}.png",
+                        if dark { "dark" } else { "light" }
+                    ),
+                    snapshot.as_bytes(),
+                    snapshot.width(),
+                    snapshot.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+        }
+    }
+}

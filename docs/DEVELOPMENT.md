@@ -106,7 +106,22 @@ RECLAIM_PREVIEW_DIR=/tmp/reclaim-previews cargo test --locked --bin reclaim slin
 
 The previews are PNG images rendered from the actual Slint components using its software renderer. They do not test native window management, authentication prompts, or real-device recovery.
 
-[Desktop CI](../.github/workflows/build.yml) runs tests, formatting, Clippy, and release builds on Linux, Windows, and macOS. It also packages a universal Intel/Apple Silicon macOS app with ad-hoc signing. Developer ID signing and notarization are not configured. Windows/macOS cross-target checks have passed locally; hardware and native desktop testing remain necessary.
+[Desktop CI](../.github/workflows/build.yml) runs locked tests (including the UI
+and project audit) and Clippy with warnings as errors on Linux, Windows, and
+macOS. Formatting runs once on Linux. Separate jobs check dependency advisories,
+bans and sources, and install the website's locked dependencies, type-check it,
+and build it. Checks run on pull requests, main, and weekly; newer commits cancel
+older PR runs. Third-party actions are pinned to immutable revisions.
+
+Tests compile the app and UI in the test profile; PR checks do not perform a
+second optimized build, package installers, or upload executable artifacts.
+The [release workflow](../.github/workflows/release.yml) calls the same validation
+workflow before building optimized binaries and native installers for all four
+shipping targets. Only releases upload artifacts, sign updates, and publish
+GitHub downloads. Release runs are serialized per tag and artifacts expire after
+seven days. macOS binaries use ad-hoc signing; Developer ID signing and
+notarization are not configured. Native desktop and hardware testing remain
+necessary; headless tests do not replace them.
 
 ## License and credits
 

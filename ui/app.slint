@@ -62,7 +62,7 @@ export global Strings {
     in-out property <string> built-with-rust-and-slint: "Built with Rust and Slint · MIT licensed application";
     in-out property <string> stop: "Stop";
 }
-import { CheckBox, LineEdit, ScrollView, ListView, Palette as NativePalette } from "std-widgets.slint";
+import { CheckBox, LineEdit, ScrollView, ListView as NativeListView, Palette as NativePalette } from "std-widgets.slint";
 export enum DriveIcon { disk, usb, volume, locked }
 export struct DriveItem { name: string, device: string, icon: DriveIcon, detail: string, size: string, available: bool }
 export struct FileItem { name: string, kind: string, size: string, selected: bool, index: int }
@@ -96,6 +96,83 @@ export global Palette {
 global Metrics {
     out property <length> control: 36px;
     out property <length> radius: 8px;
+}
+
+// A reserved gutter keeps the scrollbar clear of row controls in both directions.
+// Flickable retains Slint's wheel/touch scrolling and ListView virtualization.
+component FileScrollView {
+    out property <length> visible-width <=> viewport.width;
+    out property <length> visible-height <=> viewport.height;
+    in-out property <length> content-width <=> viewport.content-width;
+    in-out property <length> content-height <=> viewport.content-height;
+    in-out property <length> content-x <=> viewport.content-x;
+    in-out property <length> content-y <=> viewport.content-y;
+    private property <length> maximum: max(0px, root.content-height - viewport.height);
+    private property <length> thumb-height: min(rail.height, max(32px, rail.height * viewport.height / max(1px, root.content-height)));
+    private property <length> travel: max(0px, rail.height - root.thumb-height);
+    min-width: 50px; min-height: 50px;
+    horizontal-stretch: 1; vertical-stretch: 1;
+    preferred-width: 100%; preferred-height: 100%;
+    forward-focus: keyboard;
+
+    keyboard := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.DownArrow { root.content-y = max(-root.maximum, root.content-y - 52px); return accept; }
+            if event.text == Key.UpArrow { root.content-y = min(0px, root.content-y + 52px); return accept; }
+            if event.text == Key.PageDown { root.content-y = max(-root.maximum, root.content-y - viewport.height); return accept; }
+            if event.text == Key.PageUp { root.content-y = min(0px, root.content-y + viewport.height); return accept; }
+            if event.text == Key.Home { root.content-y = 0px; return accept; }
+            if event.text == Key.End { root.content-y = -root.maximum; return accept; }
+            return reject;
+        }
+    }
+    viewport := Flickable {
+        x: Locale.rtl ? 14px : 0px;
+        width: max(0px, parent.width - 14px); height: parent.height;
+        mouse-drag-pan-enabled: false;
+        content-width: self.width;
+        @children
+    }
+    rail := Rectangle {
+        x: Locale.rtl ? 0px : parent.width - self.width;
+        width: 14px; height: parent.height;
+        visible: root.maximum > 0px;
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: root.maximum > 0px ? clamp(-root.content-y / root.maximum, 0, 1) * root.travel : 0px;
+            width: drag.has-hover || drag.pressed ? 8px : 6px;
+            height: root.thumb-height; border-radius: self.width / 2;
+            background: drag.pressed ? Palette.accent : drag.has-hover ? Palette.secondary : Palette.muted.with-alpha(0.45);
+        }
+        drag := TouchArea {
+            private property <length> start-value;
+            pointer-event(event) => {
+                if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    keyboard.focus();
+                    // Clicking the track places the thumb around the pointer.
+                    if self.mouse-y < -root.content-y / root.maximum * root.travel || self.mouse-y > -root.content-y / root.maximum * root.travel + root.thumb-height {
+                        root.content-y = -clamp((self.mouse-y - root.thumb-height / 2) / max(1px, root.travel), 0, 1) * root.maximum;
+                    }
+                    self.start-value = root.content-y;
+                }
+            }
+            moved => {
+                if self.pressed {
+                    root.content-y = clamp(self.start-value - (self.mouse-y - self.pressed-y) * root.maximum / max(1px, root.travel), -root.maximum, 0px);
+                }
+            }
+            scroll-event(event) => {
+                root.content-y = clamp(root.content-y + event.delta-y, -root.maximum, 0px);
+                return accept;
+            }
+        }
+    }
+}
+// Slint recognizes the ListView name to position and virtualize repeated rows.
+component ListView inherits FileScrollView {
+    @children
+    accessible-role: list;
+    accessible-orientation: Orientation.vertical;
 }
 
 component Label inherits Text { vertical-stretch: 0; horizontal-alignment: Locale.rtl ? right : left; }
@@ -242,7 +319,7 @@ component Choice inherits Rectangle {
         forward-focus: popup-focus;
         popup-focus := FocusScope { key-pressed(event) => { root.key-handler(event) }
         Rectangle { background: Palette.surface; border-width: 1px; border-color: Palette.line; border-radius: Metrics.radius; drop-shadow-blur: 16px; drop-shadow-offset-y: 4px; drop-shadow-color: #00000040;
-            ListView { x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
+            NativeListView { x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
                 for value[index] in root.model : Rectangle {
                     height: 36px; border-radius: 6px; background: index == root.current-index ? Palette.selected : option.has-hover ? Palette.subtle : transparent;
                     Label { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; text: value; font-size: 13px; color: Palette.ink; overflow: elide; }
@@ -550,7 +627,8 @@ export component AppWindow inherits Window {
                                 action-icon: @image-url("icons/drive.svg");
                                 activated => { root.page = 0; }
                             }
-                            if root.files.length > 0 : ListView { x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px;
+                            if root.files.length > 0 : files-view := ListView { x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px;
+                                content-height: root.files.length * 52px;
                                 for file in root.files : Rectangle { height: 52px;
                                     accessible-role: list-item; accessible-label: file.name;
                                     accessible-action-default => { root.inspect(file.index); }
