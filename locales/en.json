@@ -78,7 +78,6 @@
   "Unverified candidate": "Unverified candidate",
   "Video": "Video",
   "Volume": "Volume",
-  "Volume {device}": "Volume {device}",
   "Window closed": "Window closed",
   "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.": "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.",
   "Windows drive": "Windows drive",

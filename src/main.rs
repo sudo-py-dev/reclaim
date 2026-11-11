@@ -557,6 +557,8 @@ impl Reclaim {
             .iter()
             .map(|d| DriveItem {
                 name: i18n::isolate(&d.display_name()).into(),
+                device: device_tag(&d.path).into(),
+                icon: drive_icon(d),
                 detail: format!(
                     "{} · {}{}",
                     i18n::t(&d.kind),
@@ -599,6 +601,25 @@ fn reset_preview(ui: &AppWindow) {
     ui.set_preview_error_raw("".into());
     ui.set_preview_error("".into());
     ui.set_preview_token(ui.get_preview_token().wrapping_add(1));
+}
+/// Short system name of a drive (`nvme0n1p1`, `disk2s1`, `PhysicalDrive0`, `C:`),
+/// shown as a tag beside the human-readable name.
+fn device_tag(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    let text = text.strip_prefix(r"\\.\").unwrap_or(&text);
+    text.rsplit(['/', '\\']).next().unwrap_or(text).to_owned()
+}
+/// `kind` holds the fixed English labels set by the platform drive discovery.
+fn drive_icon(drive: &drives::Drive) -> DriveIcon {
+    if drive.encrypted {
+        DriveIcon::Locked
+    } else if drive.kind == "USB drive" {
+        DriveIcon::Usb
+    } else if drive.kind == "Entire drive" {
+        DriveIcon::Disk
+    } else {
+        DriveIcon::Volume
+    }
 }
 fn replace_model<T: Clone + PartialEq + 'static>(
     current: ModelRc<T>,

@@ -78,7 +78,6 @@
   "Unverified candidate": "ملف محتمل غير متحقق منه",
   "Video": "الفيديو",
   "Volume": "وحدة تخزين",
-  "Volume {device}": "وحدة تخزين {device}",
   "Window closed": "أُغلقت النافذة",
   "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.": "رفض Windows الوصول. لمحركات الأقراص الفعلية، أعد تشغيل Reclaim كمسؤول أو افتح صورة قرص. يجب فتح قفل وحدات BitLocker أولًا.",
   "Windows drive": "محرك أقراص Windows",

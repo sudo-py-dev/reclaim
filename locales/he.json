@@ -78,7 +78,6 @@
   "Unverified candidate": "מועמד שלא אומת",
   "Video": "וידאו",
   "Volume": "כונן",
-  "Volume {device}": "כונן {device}",
   "Window closed": "החלון נסגר",
   "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.": "Windows חסם את הגישה. לגישה לכונן פיזי, הפעילו מחדש את Reclaim באמצעות הפעלה כמנהל, או פתחו דמות כונן. יש לבטל תחילה נעילה של כונני BitLocker.",
   "Windows drive": "כונן Windows",
