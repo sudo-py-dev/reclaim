@@ -165,10 +165,6 @@ The release workflow also uses `cargo xtask validate-tag`, `bundle`, and
 `checksums`; update signatures remain a separate, verified release step.
 CI formats, tests, and lints the tooling crate on all desktop platforms.
 
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:2c40c625aa8644a17535cfdbf1cde81c5a0967793ae1a3526091c6d76b385e30 -->
-
 ## Update notifications
 
 Reclaim makes one quiet update check per session, after 30 seconds and while no
