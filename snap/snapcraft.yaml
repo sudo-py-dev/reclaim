@@ -61,6 +61,8 @@ parts:
     plugin: rust
     source: .
     rust-cargo-parameters: [--locked]
+    build-snaps:
+      - rustup/latest/stable
     build-packages:
       - pkg-config
       - libfontconfig1-dev
