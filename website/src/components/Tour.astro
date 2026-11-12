@@ -7,8 +7,8 @@ import { rectStyle, screenImage, type Rect, type Screen } from '../lib/screens';
 /**
  * "How it works" as a guided tour: each step shows the matching app screen and
  * highlights the part of the window it talks about. Steps advance on their own
- * while the tour is on screen, unless the visitor prefers reduced motion or
- * interacts with it.
+ * while the tour is on screen and the browser tab is visible, unless the
+ * visitor prefers reduced motion.
  */
 interface Props {
   locale: Locale;
@@ -85,10 +85,15 @@ const pad = (n: number) => String(n).padStart(2, '0');
     let current = 0;
     let timer = 0;
     let visible = false;
-    let paused = false;
-    let stopped = reduce.matches;
+    let remaining = STEP_MS;
+    let startedAt = 0;
+    let running = false;
 
     function select(index: number, focus = false) {
+      window.clearTimeout(timer);
+      running = false;
+      remaining = STEP_MS;
+      tabs.forEach((tab) => tab.classList.remove('is-timing'));
       current = (index + tabs.length) % tabs.length;
       tabs.forEach((tab, i) => {
         const on = i === current;
@@ -100,24 +105,27 @@ const pad = (n: number) => String(n).padStart(2, '0');
       views.forEach((v) => v.classList.toggle('is-active', v.dataset.screenView === tab.dataset.screen));
       spot.setAttribute('style', tab.dataset.rect ?? '');
       if (focus) tab.focus();
+      void tab.offsetWidth;
+      tab.classList.add('is-timing');
       schedule();
     }
 
     function schedule() {
-      window.clearTimeout(timer);
-      const running = visible && !paused && !stopped;
+      const shouldRun = visible && !document.hidden && !reduce.matches;
+      if (shouldRun === running) return;
+      if (running) {
+        remaining = Math.max(0, remaining - (performance.now() - startedAt));
+        window.clearTimeout(timer);
+      }
+      running = shouldRun;
       tour.classList.toggle('is-playing', running);
-      // Restart the progress bar animation on the active tab.
-      tabs.forEach((t) => t.classList.remove('is-timing'));
       if (!running) return;
-      void tabs[current].offsetWidth;
-      tabs[current].classList.add('is-timing');
-      timer = window.setTimeout(() => select(current + 1), STEP_MS);
+      startedAt = performance.now();
+      timer = window.setTimeout(() => select(current + 1), remaining);
     }
 
     tabs.forEach((tab, i) => {
       tab.addEventListener('click', () => {
-        stopped = true; // A deliberate choice ends autoplay.
         select(i);
       });
       tab.addEventListener('keydown', (e) => {
@@ -134,23 +142,20 @@ const pad = (n: number) => String(n).padStart(2, '0');
         else if (e.key === 'End') next = tabs.length - 1;
         if (next === null) return;
         e.preventDefault();
-        stopped = true;
         select(next, true);
       });
     });
 
-    tour.addEventListener('pointerenter', () => ((paused = true), schedule()));
-    tour.addEventListener('pointerleave', () => ((paused = false), schedule()));
-    tour.addEventListener('focusin', () => ((paused = true), schedule()));
-    tour.addEventListener('focusout', () => ((paused = false), schedule()));
-    reduce.addEventListener('change', () => ((stopped = reduce.matches || stopped), schedule()));
+    document.addEventListener('visibilitychange', schedule);
+    reduce.addEventListener('change', schedule);
+    tabs[current].classList.add('is-timing');
 
     new IntersectionObserver(
       ([entry]) => {
         visible = entry.isIntersecting;
         schedule();
       },
-      { threshold: 0.4 },
+      { threshold: 0 },
     ).observe(tour);
   });
 </script>
@@ -266,6 +271,11 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
   .is-timing .progress {
     animation: progress 6s linear forwards;
+    animation-play-state: paused;
+  }
+
+  .is-playing .is-timing .progress {
+    animation-play-state: running;
   }
 
   @keyframes progress {
