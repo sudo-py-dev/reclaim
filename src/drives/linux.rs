@@ -296,81 +296,53 @@ pub fn destination(source: &Path, folder: &Path) -> Destination {
     };
     let number = |dev| format!("{}:{}", libc::major(dev), libc::minor(dev));
     destination_at(
-        Path::new("/sys/class/block"),
         Path::new("/sys/dev/block"),
-        Path::new("/proc/self/mountinfo"),
         &number(source.rdev()),
         &number(folder.dev()),
     )
 }
 
-fn destination_at(
-    class: &Path,
-    numbers: &Path,
-    mounts: &Path,
-    source: &str,
-    folder: &str,
-) -> Destination {
-    let source = whole_disks(&numbers.join(source));
-    let mut folder_node = numbers.join(folder);
-    if !folder_node.exists() {
-        // Btrfs and similar filesystems report an anonymous device number;
-        // their mount entry still names the block device that backs them.
-        let Some(device) = read_system_file(mounts).ok().and_then(|text| {
-            text.lines().find_map(|line| {
-                let fields: Vec<_> = line.split_whitespace().collect();
-                let separator = fields.iter().position(|f| *f == "-")?;
-                (fields.get(2) == Some(&folder)).then(|| {
-                    fields
-                        .get(separator.saturating_add(2))
-                        .map(|s| unescape(s, true))
-                })?
-            })
-        }) else {
-            return Destination::Unknown;
-        };
-        let device = fs::canonicalize(&device).unwrap_or_else(|_| device.into());
-        let Some(name) = device.file_name() else {
-            return Destination::Unknown;
-        };
-        folder_node = class.join(name);
-    }
-    let folder = whole_disks(&folder_node);
-    if source.is_empty() || folder.is_empty() {
-        Destination::Unknown
-    } else if source.is_disjoint(&folder) {
+fn destination_at(numbers: &Path, source: &str, folder: &str) -> Destination {
+    // Anonymous filesystem numbers (notably multi-device Btrfs) cannot be
+    // resolved safely from mountinfo: its source names only one member.
+    let (Some(source), Some(folder)) = (
+        whole_disks(&numbers.join(source)),
+        whole_disks(&numbers.join(folder)),
+    ) else {
+        return Destination::Unknown;
+    };
+    if source.is_disjoint(&folder) {
         Destination::Separate
     } else {
         Destination::SameDrive
     }
 }
 
-/// The physical disks a sysfs block node is stored on.
-fn whole_disks(node: &Path) -> HashSet<PathBuf> {
-    fn visit(node: &Path, disks: &mut HashSet<PathBuf>, depth: usize) {
-        let Ok(mut real) = fs::canonicalize(node) else {
-            return;
-        };
-        if real.join("partition").exists() {
-            let Some(parent) = real.parent() else {
-                return;
-            };
-            real = parent.to_path_buf();
+/// Resolve every physical disk, or refuse to certify separation. A partial
+/// set is unsafe: an unresolved RAID/device-mapper member may be the source.
+fn whole_disks(node: &Path) -> Option<HashSet<PathBuf>> {
+    fn visit(node: &Path, disks: &mut HashSet<PathBuf>, depth: usize) -> Option<()> {
+        if depth > 16 {
+            return None;
         }
-        let layers: Vec<_> = fs::read_dir(real.join("slaves"))
-            .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
-            .unwrap_or_default();
-        if layers.is_empty() || depth > 16 {
+        let mut real = fs::canonicalize(node).ok()?;
+        if real.join("partition").try_exists().ok()? {
+            real = real.parent()?.to_path_buf();
+        }
+        let layers = fs::read_dir(real.join("slaves")).ok()?;
+        let mut leaf = true;
+        for layer in layers {
+            leaf = false;
+            visit(&layer.ok()?.path(), disks, depth.saturating_add(1))?;
+        }
+        if leaf {
             disks.insert(real);
-        } else {
-            for layer in layers {
-                visit(&layer, disks, depth.saturating_add(1));
-            }
         }
+        Some(())
     }
     let mut disks = HashSet::new();
-    visit(node, &mut disks, 0);
-    disks
+    visit(node, &mut disks, 0)?;
+    (!disks.is_empty()).then_some(disks)
 }
 
 #[cfg(test)]
@@ -426,6 +398,8 @@ mod tests {
             f.write(&format!("devices/{name}/dev"), number);
             if name.contains('/') {
                 f.write(&format!("devices/{name}/partition"), "1");
+            } else {
+                fs::create_dir_all(f.0.path().join(format!("devices/{name}/slaves"))).unwrap();
             }
             let short = name.rsplit('/').next().unwrap();
             symlink(
@@ -456,23 +430,35 @@ mod tests {
             "mountinfo",
             "40 1 0:42 / /home rw - btrfs /dev/dm-90 rw\n41 1 0:43 / /mnt/sdb rw - btrfs /dev/sdb1 rw\n",
         );
-        let check = |source, folder| {
-            destination_at(
-                &f.0.path().join("sys"),
-                &f.0.path().join("numbers"),
-                &f.0.path().join("mountinfo"),
-                source,
-                folder,
-            )
-        };
+        let check = |source, folder| destination_at(&f.0.path().join("numbers"), source, folder);
         assert_eq!(check("8:0", "8:1"), Destination::SameDrive);
         assert_eq!(check("8:1", "8:2"), Destination::SameDrive);
         assert_eq!(check("8:1", "253:90"), Destination::SameDrive);
-        assert_eq!(check("8:17", "0:42"), Destination::Separate);
-        assert_eq!(check("8:2", "0:42"), Destination::SameDrive);
-        assert_eq!(check("8:16", "0:43"), Destination::SameDrive);
+        assert_eq!(check("8:17", "0:42"), Destination::Unknown);
+        assert_eq!(check("8:2", "0:42"), Destination::Unknown);
+        assert_eq!(check("8:16", "0:43"), Destination::Unknown);
         assert_eq!(check("8:17", "8:1"), Destination::Separate);
         assert_eq!(check("8:1", "0:99"), Destination::Unknown);
+
+        // A missing member must invalidate the entire topology, even if a
+        // healthy member was already resolved to a different physical disk.
+        symlink(
+            f.0.path().join("missing-device"),
+            f.0.path().join("devices/dm-90/slaves/missing"),
+        )
+        .unwrap();
+        assert_eq!(check("8:17", "253:90"), Destination::Unknown);
+        fs::remove_file(f.0.path().join("devices/dm-90/slaves/missing")).unwrap();
+        // Missing topology metadata must not be interpreted as a physical leaf.
+        fs::remove_dir(f.0.path().join("devices/sdb/slaves")).unwrap();
+        assert_eq!(check("8:17", "8:1"), Destination::Unknown);
+        // A cyclic layer graph is incomplete, not a separate physical drive.
+        symlink(
+            f.0.path().join("devices/dm-90"),
+            f.0.path().join("devices/dm-90/slaves/cycle"),
+        )
+        .unwrap();
+        assert_eq!(check("8:1", "253:90"), Destination::Unknown);
     }
 
     #[test]

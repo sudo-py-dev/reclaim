@@ -18,6 +18,20 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "source"
+path = "fuzz_targets/source.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "allocation"
+path = "fuzz_targets/allocation.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]
 

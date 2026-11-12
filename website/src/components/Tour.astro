@@ -74,7 +74,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 </div>
 
 <script>
-  const STEP_MS = 6000;
+  const STEP_MS = 2000;
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   document.querySelectorAll<HTMLElement>('[data-tour]').forEach((tour) => {
@@ -270,7 +270,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
   }
 
   .is-timing .progress {
-    animation: progress 6s linear forwards;
+    animation: progress 2s linear forwards;
     animation-play-state: paused;
   }
 

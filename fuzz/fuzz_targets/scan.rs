@@ -10,7 +10,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
     let cancel = AtomicBool::new(false);
-    for alignment in [1, 512] {
+    for alignment in [1, 512, 4096] {
         let mut source =
             SourceReader::new(Cursor::new(data), alignment, Some(data.len() as u64)).unwrap();
         reclaim::scan_reader(&mut source, &cancel, |event| {

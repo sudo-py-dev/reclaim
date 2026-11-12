@@ -1,6 +1,36 @@
 use super::*;
 use std::io::Write;
 
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires RECLAIM_TEST_DEVICE and RECLAIM_TEST_DESTINATION on that USB volume"]
+fn live_usb_export_to_source_drive_is_blocked_before_any_write() {
+    let source = PathBuf::from(std::env::var_os("RECLAIM_TEST_DEVICE").unwrap());
+    let directory = PathBuf::from(std::env::var_os("RECLAIM_TEST_DESTINATION").unwrap());
+    assert_eq!(
+        drives::destination(&source, &directory),
+        drives::Destination::SameDrive
+    );
+    let before = std::fs::read_dir(&directory).unwrap().count();
+    let mut app = Reclaim::default();
+    app.scanned_source = Some(source);
+    app.results = vec![Found {
+        offset: 0,
+        size: 4,
+        kind: "txt",
+        selected: true,
+        validation: reclaim::Validation::Unverified,
+        original_name: Some("must-not-be-written.txt".into()),
+        resident_data: Some(Arc::from(&b"data"[..])),
+        ntfs: None,
+    }];
+    app.export(directory.clone());
+    assert!(!app.busy);
+    assert!(app.receiver.is_none());
+    assert!(app.status.contains("different physical drive"));
+    assert_eq!(std::fs::read_dir(directory).unwrap().count(), before);
+}
+
 #[test]
 fn recovery_exports_only_selected_files_matching_current_filters() {
     for (category, query, expected) in [

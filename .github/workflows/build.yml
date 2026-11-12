@@ -54,6 +54,11 @@ jobs:
         if: runner.os == 'Linux'
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Compile fuzz harnesses
+        if: runner.os == 'Linux'
+        run: |
+          cargo check --locked --manifest-path fuzz/Cargo.toml --bins --target-dir target
+          cargo check --locked --manifest-path fuzz/containers/Cargo.toml --bins --target-dir target
       - run: cargo test --locked --manifest-path tools/Cargo.toml
       - run: cargo clippy --locked --manifest-path tools/Cargo.toml --all-targets -- -D warnings
   supply-chain:

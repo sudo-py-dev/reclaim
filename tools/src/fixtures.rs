@@ -79,6 +79,17 @@ pub fn generate(output: &Path) -> Result {
         fs::write(output.join(name), bytes)?;
         Ok(())
     };
+    // Format 0, one note with running status, then an exact End-of-Track.
+    let track = b"\0\x90\x3c\x40\x60\x3c\0\0\xff\x2f\0";
+    let mut midi = b"MThd\0\0\0\x06\0\0\0\x01\0\x60MTrk".to_vec();
+    midi.extend((track.len() as u32).to_be_bytes());
+    midi.extend(track);
+    put("sample.mid", &midi)?;
+    // SWF 7: signed one-bit zero RECT, 12 fps, one ShowFrame, End.
+    let mut swf = b"FWS\x07\0\0\0\0\x08\0\0\x0c\x01\0\x40\0\0\0".to_vec();
+    let size = swf.len() as u32;
+    u32(&mut swf, 4, size);
+    put("sample.swf", &swf)?;
     for (wide, extension, flags, certificate) in [
         (false, "exe", 2, false),
         (true, "dll", 0x2002, false),
@@ -367,7 +378,7 @@ mod tests {
         generate(a.path())?;
         generate(b.path())?;
         let generated = crate::files(a.path())?;
-        assert_eq!(generated.len(), 26);
+        assert_eq!(generated.len(), 28);
         for file in generated {
             let name = file.file_name().ok_or("fixture has no name")?;
             assert_eq!(fs::read(&file)?, fs::read(b.path().join(name))?);

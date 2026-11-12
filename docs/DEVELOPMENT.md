@@ -62,9 +62,9 @@ Disk images use ordinary file permissions. Reclaim does not unmount drives, unlo
 | Icons | ICO, including supported PNG and DIB payloads |
 | Documents | PDF, DOCX/XLSX/PPTX, DOCM/XLSM/PPTM, ODT/ODS/ODP, EPUB |
 | Archives and applications | ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK |
-| Programs and installers | EXE/DLL, ELF, MSI/MSP/MST, DEB, RPM, DEX, XAR-based PKG |
+| Programs and installers | EXE/DLL, ELF, MSI/MSP/MST, DEB, RPM, DEX, XAR-based PKG, uncompressed SWF |
 | Compound documents | OLE/CFB (generic `ole` unless an Installer root CLSID identifies MSI/MSP/MST) |
-| Audio and video | WAV, AIFF/AIFC, known-length AU, single-segment RIFF AVI |
+| Audio and video | WAV, AIFF/AIFC, known-length AU, single-segment RIFF AVI, Standard MIDI |
 | NTFS metadata | Supported deleted FILE records with resident unnamed DATA; original Unicode leaf names and inline contents |
 
 Images receive decoding/structural validation. Other results are identified as unverified candidates or checked NTFS records. ZIP-based document/application extensions are inferred from archive metadata.
@@ -96,6 +96,41 @@ with `cargo test --locked --test audit`. See [the code and UI audit](CODE_UI_AUD
 for what it checks and how to accept a reviewed finding.
 
 Tests cover signature boundaries, image validation, NTFS records, filtered exports, collision protection, sector-aligned reads, native Linux metadata fixtures, cancellation, and Slint page rendering in both themes.
+
+### Data preservation and USB checks
+
+Recovery blocks a destination known to share the scanned physical drive, even
+after a confirmation dialog. Unknown topology still requires explicit review;
+choose a destination you know is on another physical drive. Linux refuses to
+certify separation for anonymous filesystem device numbers (including Btrfs)
+or incomplete device-mapper/RAID topology. A single mountinfo source does not
+describe every disk in a multi-device filesystem.
+
+The security regression tests simulate a USB disconnect after a partial read,
+competing exports with the same filename, invalid candidate ranges, existing
+files and symlinks. Failed exports must leave no published partial file or
+temporary staging file, and successful exports must preserve existing data:
+
+```sh
+cargo test --locked --test security
+```
+
+Two opt-in Linux hardware tests only read the selected device or verify that
+same-drive export is rejected. They do not format, delete, write test files, or
+export recovery candidates. Set the device and its existing mount directory
+explicitly, checking their identity first:
+
+```sh
+RECLAIM_TEST_DEVICE=/dev/sdX1 cargo test --locked --bin reclaim live_named_volume_can_read_data -- --ignored --nocapture
+RECLAIM_TEST_DEVICE=/dev/sdX1 RECLAIM_TEST_DESTINATION=/media/user/USB cargo test --locked --bin reclaim live_usb_export_to_source_drive_is_blocked_before_any_write -- --ignored
+```
+
+The read test scans only the first 16 MiB. Normal read permissions or the
+desktop's read-only UDisks authorization are required. Disconnect/error behavior
+is simulated in automated tests; do not unplug a device during an actual export
+or use a failing drive for repeated hardware tests. Mounted source contents and
+mount topology can still change externally; these checks are not a guarantee
+against every hardware failure or mount race.
 
 Optional headless UI previews:
 
