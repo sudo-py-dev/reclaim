@@ -52,6 +52,11 @@ impl Updates {
         Self {
             dismissal_path,
             dismissed,
+            status: if crate::update_runtime::package_managed() {
+                "Updates are managed by Flatpak.".into()
+            } else {
+                String::new()
+            },
             ..Self::default()
         }
     }
@@ -113,7 +118,7 @@ impl Updates {
         self.start_check(true);
     }
     fn start_check(&mut self, manual: bool) {
-        if self.busy() {
+        if crate::update_runtime::package_managed() || self.busy() {
             return;
         }
         let (tx, rx) = mpsc::channel();
@@ -128,7 +133,7 @@ impl Updates {
         });
     }
     pub fn apply(&mut self) {
-        if self.busy() {
+        if crate::update_runtime::package_managed() || self.busy() {
             return;
         }
         let (tx, rx) = mpsc::channel();

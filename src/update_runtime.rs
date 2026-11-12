@@ -7,6 +7,11 @@
 use reclaim::updater::{self, Release};
 use std::path::{Path, PathBuf};
 
+/// Flatpak owns application updates; native installers cannot update /app.
+pub fn package_managed() -> bool {
+    cfg!(target_os = "linux") && Path::new("/.flatpak-info").exists()
+}
+
 pub fn supported() -> bool {
     cfg!(any(target_os = "linux", windows))
 }

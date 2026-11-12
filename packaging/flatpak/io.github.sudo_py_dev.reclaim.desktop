@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Reclaim
+Comment=Recover files from raw disk images
+Exec=reclaim
+Icon=io.github.sudo_py_dev.reclaim
+Terminal=false
+Categories=System;Filesystem;
+Keywords=recovery;disk;files;
+StartupWMClass=io.github.sudo_py_dev.reclaim

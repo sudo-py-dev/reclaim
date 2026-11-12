@@ -211,5 +211,6 @@
   "Later": "מאוחר יותר",
   "Hide details": "הסתרת פרטים",
   "You can keep working and update later.": "אפשר להמשיך לעבוד ולעדכן מאוחר יותר.",
-  "Updates": "עדכונים"
+  "Updates": "עדכונים",
+  "Updates are managed by Flatpak.": "העדכונים מנוהלים באמצעות Flatpak."
 }

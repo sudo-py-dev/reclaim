@@ -211,5 +211,6 @@
   "Later": "Später",
   "Hide details": "Details ausblenden",
   "You can keep working and update later.": "Du kannst weiterarbeiten und später aktualisieren.",
-  "Updates": "Updates"
+  "Updates": "Updates",
+  "Updates are managed by Flatpak.": "Updates werden von Flatpak verwaltet."
 }

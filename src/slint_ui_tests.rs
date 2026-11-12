@@ -877,3 +877,39 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
         });
     }
 }
+
+#[test]
+fn package_managed_updates_hide_the_native_installer_action() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui_text::apply(&ui);
+    ui.set_page(2);
+    ui.set_updates_managed(true);
+    ui.set_update_status(i18n::t("Updates are managed by Flatpak.").into());
+    ui.show().unwrap();
+    ui.window().take_snapshot().unwrap();
+    assert!(
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+            &ui,
+            &i18n::t("Check for updates"),
+        )
+        .next()
+        .is_none()
+    );
+    ui.set_updates_managed(false);
+    ui.window().take_snapshot().unwrap();
+    assert!(
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+            &ui,
+            &i18n::t("Check for updates"),
+        )
+        .next()
+        .is_some()
+    );
+}

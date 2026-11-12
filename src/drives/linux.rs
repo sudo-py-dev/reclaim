@@ -14,6 +14,10 @@ use std::{
 };
 
 pub fn discover() -> Result<Vec<Drive>, String> {
+    // The sandbox exposes disk images through the file portal, not host drives.
+    if Path::new("/.flatpak-info").exists() {
+        return Ok(Vec::new());
+    }
     discover_at(
         Path::new("/sys/class/block"),
         Path::new("/dev"),

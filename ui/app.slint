@@ -540,6 +540,7 @@ export component AppWindow inherits Window {
     in-out property <string> query;
     in-out property <int> category;
     in property <string> update-status;
+    in property <bool> updates-managed;
     in property <[ReleaseNoteBlock]> update-notes;
     in property <bool> update-busy;
     in property <bool> update-installing;
@@ -753,7 +754,7 @@ export component AppWindow inherits Window {
                             quiet: true;
                             clicked => { root.update-details-open = !root.update-details-open; }
                         }
-                        Action { enabled: !root.update-busy && (root.update-available ? !root.busy : !root.update-check-feedback);
+                        if !root.updates-managed : Action { enabled: !root.update-busy && (root.update-available ? !root.busy : !root.update-check-feedback);
                             spinning: root.update-busy || (!root.update-available && root.update-check-feedback);
                             primary: root.update-available;
                             text: root.update-available ? root.update-label : Strings.check-for-updates;

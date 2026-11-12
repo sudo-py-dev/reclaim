@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.sudo_py_dev.reclaim</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Reclaim</name>
+  <summary>Recover files from raw disk images</summary>
+  <developer id="io.github.sudo_py_dev">
+    <name>Reclaim contributors</name>
+  </developer>
+  <description>
+    <p>Scan raw disk images for recoverable photos, documents, archives, audio, and video. Review results, preview supported images, filter by file type, and save selected files to another location.</p>
+    <p>Reclaim opens the source read-only. Recoverability depends on what has been overwritten and on the source format; review recovered files before relying on them.</p>
+    <p>The Flatpak edition recovers files from disk images selected through the desktop file picker. Direct access to physical drives requires the native Linux package. Application updates are managed by Flatpak.</p>
+  </description>
+  <launchable type="desktop-id">io.github.sudo_py_dev.reclaim.desktop</launchable>
+  <url type="homepage">https://github.com/sudo-py-dev/reclaim</url>
+  <url type="bugtracker">https://github.com/sudo-py-dev/reclaim/issues</url>
+  <url type="vcs-browser">https://github.com/sudo-py-dev/reclaim</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Review recoverable files and select what to save</caption>
+      <image>https://raw.githubusercontent.com/sudo-py-dev/reclaim/main/docs/screenshots/reclaim-results.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.3" date="2026-11-12">
+      <description><p>Read-only file recovery with multilingual desktop controls and image previews.</p></description>
+    </release>
+  </releases>
+</component>

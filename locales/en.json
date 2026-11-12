@@ -211,5 +211,6 @@
   "Later": "Later",
   "Hide details": "Hide details",
   "You can keep working and update later.": "You can keep working and update later.",
-  "Updates": "Updates"
+  "Updates": "Updates",
+  "Updates are managed by Flatpak.": "Updates are managed by Flatpak."
 }
