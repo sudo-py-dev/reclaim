@@ -1,0 +1,58 @@
+name: WinGet manifest validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - packaging/winget/**
+      - .github/workflows/winget.yml
+  pull_request:
+    paths:
+      - packaging/winget/**
+      - .github/workflows/winget.yml
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Microsoft's WinGet client
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module -Name Microsoft.WinGet.Client -Repository PSGallery -Scope CurrentUser -Force
+          Import-Module Microsoft.WinGet.Client
+          Repair-WinGetPackageManager -Force -Latest
+      - name: Run winget validate for every submitted version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = Get-AppxPackage -Name Microsoft.DesktopAppInstaller
+          if (-not $package) { throw 'WinGet App Installer package is not registered' }
+          $winget = Join-Path $package.InstallLocation 'winget.exe'
+          & $winget --version
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet could not start' }
+          $failed = $false
+          $versions = Get-ChildItem packaging/winget -Recurse -Filter '*.installer.yaml'
+          if (-not $versions) { throw 'No WinGet manifests found' }
+          foreach ($installer in $versions) {
+            $directory = $installer.Directory.FullName
+            $log = Join-Path $env:RUNNER_TEMP ($installer.BaseName + '.validation.txt')
+            Write-Host "winget validate --manifest $directory"
+            & $winget validate --manifest $directory 2>&1 | Tee-Object -FilePath $log
+            $code = $LASTEXITCODE
+            "winget validate: $($installer.Directory.Name), exit code $code" >> $env:GITHUB_STEP_SUMMARY
+            if ($code -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: winget-validation-output
+          path: ${{ runner.temp }}/*.validation.txt
+          if-no-files-found: ignore
+          retention-days: 14
