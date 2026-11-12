@@ -55,7 +55,7 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 - **Ubuntu / Debian:** open a terminal in the folder you downloaded the file to and run the command below, using the version number in your file name. It needs Ubuntu 22.04, Debian 12 or newer.
 
   ```sh
-  sudo apt install ./reclaim_0.2.2_amd64.deb
+  sudo apt install ./reclaim_0.2.3_amd64.deb
   ```
 - **Portable ZIP:** unzip it into a folder (or onto a USB stick) and run the `reclaim` program inside. On Mac and Linux you may first need to run `chmod +x reclaim-*` in that folder.
 
