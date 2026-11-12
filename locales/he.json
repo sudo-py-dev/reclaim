@@ -215,5 +215,6 @@
   "Restart as administrator": "הפעלה מחדש כמנהל",
   "Administrator permission was not granted. Reclaim is still open.": "לא ניתן אישור מנהל. התוכנה נשארה פתוחה.",
   "Could not restart as administrator: {0}": "לא ניתן להפעיל מחדש כמנהל: {0}",
-  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "המקור הפסיק להחזיר נתונים לפני סופו המדווח. ייתכן שהוא נקטע, נותק או שהגישה אליו מוגבלת על ידי מערכת ההפעלה. עדיין ניתן לשחזר את הקבצים שכבר נמצאו."
+  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "המקור הפסיק להחזיר נתונים לפני סופו המדווח. ייתכן שהוא נקטע, נותק או שהגישה אליו מוגבלת על ידי מערכת ההפעלה. עדיין ניתן לשחזר את הקבצים שכבר נמצאו.",
+  "Could not prepare read-only access to this volume: {0}": "לא ניתן להכין גישה לקריאה בלבד לכונן הזה: {0}"
 }

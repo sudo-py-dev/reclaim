@@ -481,4 +481,31 @@ mod tests {
             "\u{2068}photo.exe\u{2069}"
         );
     }
+
+    #[test]
+    fn windows_scan_errors_translate_when_displayed_in_every_language() {
+        let premature_end = "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.";
+        let cancelled = "Administrator permission was not granted. Reclaim is still open.";
+        let technical = "Windows error 1234";
+        for language in LANGUAGES {
+            with_language(language, || {
+                // Workers keep catalog keys so switching the UI language also
+                // translates an error that was reported before the switch.
+                let error = explain("Could not read this volume: {0}", premature_end.into());
+                assert_eq!(t(&error), catalog(language)[premature_end]);
+                assert_eq!(t(cancelled), catalog(language)[cancelled]);
+                for summary in [
+                    "Could not prepare read-only access to this volume: {0}",
+                    "Could not restart as administrator: {0}",
+                ] {
+                    let error = explain(summary, technical.into());
+                    let translated = t(&error);
+                    assert!(translated.contains(technical));
+                    if language != Language::English {
+                        assert!(!translated.starts_with("Could not"));
+                    }
+                }
+            });
+        }
+    }
 }

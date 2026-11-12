@@ -49,7 +49,14 @@ pub fn open_source(path: &Path) -> std::io::Result<File> {
             )
         };
         if ok == 0 {
-            return Err(std::io::Error::last_os_error());
+            let error = std::io::Error::last_os_error();
+            return Err(std::io::Error::new(
+                error.kind(),
+                reclaim::i18n::explain(
+                    "Could not prepare read-only access to this volume: {0}",
+                    error.to_string(),
+                ),
+            ));
         }
     }
     Ok(file)
