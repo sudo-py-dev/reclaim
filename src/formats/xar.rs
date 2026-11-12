@@ -1,3 +1,8 @@
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use super::{CandidateEnd, le16, need, span};
 use quick_xml::events::Event;
 use std::{
@@ -26,11 +31,12 @@ pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), Ca
     }
     let heap = span(header as u64, compressed)?;
     need(b, heap)?;
-    let mut decoder = flate2::read::ZlibDecoder::new(&b[header..heap]);
+    let mut decoder =
+        flate2::read::ZlibDecoder::new(b.get(header..heap).ok_or(CandidateEnd::Invalid)?);
     let mut xml = Vec::new();
     decoder
         .by_ref()
-        .take(unpacked + 1)
+        .take(unpacked.saturating_add(1))
         .read_to_end(&mut xml)
         .map_err(|_| CandidateEnd::Invalid)?;
     if xml.len() as u64 != unpacked || decoder.total_in() != compressed {

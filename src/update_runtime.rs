@@ -1,4 +1,9 @@
 //! Managed, verified one-click updates. No save dialog, shell, or command script.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use reclaim::updater::{self, Release};
 use std::path::{Path, PathBuf};
 

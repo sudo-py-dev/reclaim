@@ -549,3 +549,100 @@ fn refresh_buttons_animate_even_when_results_do_not_change() {
         assert!(button.accessible_enabled().unwrap());
     }
 }
+
+/// A scan that finds thousands of files must not rebuild the list on every
+/// tick. The incremental sync has to produce exactly the rows a full rebuild
+/// would, through appends, selection changes, filters and a new scan.
+#[test]
+fn file_list_stays_exact_while_a_large_scan_streams_results() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    let candidate = |n: u64, kind: &'static str| Found {
+        offset: n * 4096,
+        size: 2048 + n,
+        kind,
+        selected: true,
+        original_name: n.is_multiple_of(7).then(|| format!("Holiday {n}.{kind}")),
+        resident_data: None,
+        ntfs: None,
+        validation: reclaim::Validation::StructureChecked,
+    };
+    let assert_exact = |state: &Reclaim, ui: &AppWindow, step: &str| {
+        let expected: Vec<_> = state
+            .visible_result_indices()
+            .into_iter()
+            .map(|index| file_item(&state.results[index], index))
+            .collect();
+        let files = ui.get_files();
+        let rows: Vec<_> = files.iter().collect();
+        assert_eq!(rows, expected, "{step}");
+        let selected = expected.iter().filter(|row| row.selected).count();
+        assert_eq!(
+            ui.get_all_selected(),
+            !expected.is_empty() && selected == expected.len(),
+            "{step}"
+        );
+    };
+    let mut state = Reclaim::default();
+    state.busy = true;
+    state.sync_ui(&ui);
+    // Results stream in uneven batches, with progress-only ticks in between.
+    let mut n = 0u64;
+    for batch in [1, 37, 0, 250, 3, 0, 1700, 9] {
+        for _ in 0..batch {
+            state.results.push(candidate(
+                n,
+                if n.is_multiple_of(3) { "pdf" } else { "jpg" },
+            ));
+            n += 1;
+        }
+        state.scanned = n;
+        state.sync_ui(&ui);
+        assert_exact(&state, &ui, &format!("after streaming {n} results"));
+    }
+    assert_eq!(ui.get_files().row_count(), 2000);
+
+    // A selection change patches its row; the next tick keeps it.
+    state.results[5].selected = false;
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "after deselecting one file");
+    assert!(!ui.get_all_selected());
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "on an unchanged tick");
+
+    // A category or search narrows the list, and later results respect it.
+    state.category = reclaim::category_index("pdf");
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "with the documents category");
+    state.results.push(candidate(n, "pdf"));
+    state.results.push(candidate(n + 1, "jpg"));
+    n += 2;
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "streaming under a category");
+    state.category = 0;
+    state.filter = "HOLIDAY".into();
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "with a search");
+    state.filter.clear();
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "after clearing the search");
+
+    // A new scan replaces the results, even with the same count.
+    let count = state.results.len();
+    state.results = (0..count as u64)
+        .map(|i| candidate(i + 1_000_000, "png"))
+        .collect();
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "after a new scan with the same count");
+    state.results.clear();
+    state.sync_ui(&ui);
+    assert_exact(&state, &ui, "after clearing the results");
+    assert_eq!(ui.get_files().row_count(), 0);
+    assert!(n > 2000);
+}

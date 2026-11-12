@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use crate::bytes::to_usize;
 mod allocation;
 mod bytes;
 mod detection;
@@ -410,8 +411,8 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
         if size > LIMIT as u64 {
             return CandidateEnd::Invalid;
         }
-        return if bytes.len() >= size as usize {
-            CandidateEnd::Complete(size as usize)
+        return if bytes.len() >= to_usize(size) {
+            CandidateEnd::Complete(to_usize(size))
         } else {
             CandidateEnd::More
         };
@@ -696,7 +697,7 @@ pub(crate) fn scan_reader_with_filter(
                 return Ok(());
             }
             if base + (i as u64) < skip_until {
-                i = (skip_until - base).min(carry.len() as u64) as usize;
+                i = to_usize((skip_until - base).min(carry.len() as u64));
                 continue;
             }
             // Empty disk regions are common. Only ICO begins with zero bytes;
@@ -725,7 +726,7 @@ pub(crate) fn scan_reader_with_filter(
                     && readable(offset, record_size as u64)
                 {
                     skip_until = offset + record_size as u64;
-                    resident_bytes += found.size as usize;
+                    resident_bytes += to_usize(found.size);
                     found_count += 1;
                     if resident_bytes > LIMIT || found_count > 100_000 {
                         return Err(io::Error::other(
@@ -757,10 +758,10 @@ pub(crate) fn scan_reader_with_filter(
                     });
                     match zip::inspect(file, offset, cancel)? {
                         zip::Inspection::Complete(size) if size > LIMIT as u64 => {
-                            end = Some(size as usize);
+                            end = Some(to_usize(size));
                             checked = Validation::StructureChecked;
                         }
-                        zip::Inspection::Complete(size) => candidate_limit = size as usize,
+                        zip::Inspection::Complete(size) => candidate_limit = to_usize(size),
                         zip::Inspection::Invalid => rejected_zip = true,
                         zip::Inspection::Unsupported => {}
                     }

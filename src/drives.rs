@@ -119,8 +119,7 @@ fn object_path(device: &Path) -> io::Result<String> {
         if byte.is_ascii_alphanumeric() {
             path.push(char::from(*byte));
         } else {
-            use std::fmt::Write;
-            let _ = write!(path, "_{byte:02x}");
+            path.push_str(&format!("_{byte:02x}"));
         }
     }
     Ok(path)

@@ -1,4 +1,10 @@
 //! Tolerant carving only: allocation metadata and recovery reads remain strict.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
+use crate::bytes::to_usize;
 use crate::{Event, source::is_media_error};
 use std::{
     cell::RefCell,
@@ -36,9 +42,9 @@ impl<R: Read + Seek> Read for Reader<'_, R> {
             .next_back()
             .filter(|&(_, &end)| at < end)
         {
-            let count = bytes.len().min((end - at) as usize);
-            bytes[..count].fill(0);
-            self.input.seek(SeekFrom::Start(at + count as u64))?;
+            let count = bytes.len().min(to_usize(end.saturating_sub(at)));
+            bytes.iter_mut().take(count).for_each(|byte| *byte = 0);
+            self.input.seek(SeekFrom::Start(offset_after(at, count)?))?;
             return Ok(count);
         }
         let before_next = self
@@ -47,17 +53,22 @@ impl<R: Read + Seek> Read for Reader<'_, R> {
             .ranges
             .range(at..)
             .next()
-            .map(|(&start, _)| (start - at).min(bytes.len() as u64) as usize)
+            .map(|(&start, _)| to_usize(start.saturating_sub(at).min(bytes.len() as u64)))
             .unwrap_or(bytes.len());
-        let bytes = &mut bytes[..before_next];
+        let Some(bytes) = bytes.get_mut(..before_next) else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        };
         match self.input.read(bytes) {
             Err(error) if is_media_error(&error) => {
                 self.input.seek(SeekFrom::Start(at))?;
                 // Retry one bounded block. Preserve healthy data surrounding the fault.
-                let count = bytes.len().min((4096 - at % 4096) as usize);
-                match self.input.read(&mut bytes[..count]) {
+                let count = bytes.len().min(to_usize(4096u64.saturating_sub(at % 4096)));
+                let Some(block) = bytes.get_mut(..count) else {
+                    return Err(io::Error::from(io::ErrorKind::InvalidInput));
+                };
+                match self.input.read(block) {
                     Err(error) if is_media_error(&error) => {
-                        let end = at + count as u64;
+                        let end = offset_after(at, count)?;
                         let mut damage = self.damage.borrow_mut();
                         if damage.ranges.len() >= 1_000_000 {
                             return Err(io::Error::other(
@@ -78,7 +89,7 @@ impl<R: Read + Seek> Read for Reader<'_, R> {
                         }
                         damage.ranges.insert(start, stop);
                         damage.pending.push((at, count as u64));
-                        bytes[..count].fill(0);
+                        bytes.iter_mut().take(count).for_each(|byte| *byte = 0);
                         self.input.seek(SeekFrom::Start(end))?;
                         Ok(count)
                     }
@@ -88,6 +99,11 @@ impl<R: Read + Seek> Read for Reader<'_, R> {
             result => result,
         }
     }
+}
+/// The source offset just past `count` bytes read at `at`.
+fn offset_after(at: u64, count: usize) -> io::Result<u64> {
+    at.checked_add(count as u64)
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
 }
 impl<R: Seek> Seek for Reader<'_, R> {
     fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {

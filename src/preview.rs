@@ -1,3 +1,8 @@
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use reclaim::Found;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -61,7 +66,7 @@ impl Read for Input {
             // seek_read changes the Windows file cursor.
             self.file.seek_read(buffer, self.position)?
         };
-        self.position += count as u64;
+        self.position = self.position.saturating_add(count as u64);
         Ok(count)
     }
 }
@@ -69,8 +74,11 @@ impl Seek for Input {
     fn seek(&mut self, from: SeekFrom) -> std::io::Result<u64> {
         let position = match from {
             SeekFrom::Start(value) => i128::from(value),
-            SeekFrom::Current(value) => i128::from(self.position) + i128::from(value),
-            SeekFrom::End(value) => i128::from(self.file.metadata()?.len()) + i128::from(value),
+            // i128 holds any u64 plus any i64, so these sums cannot overflow.
+            SeekFrom::Current(value) => i128::from(self.position).saturating_add(i128::from(value)),
+            SeekFrom::End(value) => {
+                i128::from(self.file.metadata()?.len()).saturating_add(i128::from(value))
+            }
         };
         self.position = u64::try_from(position)
             .map_err(|_| std::io::Error::other("Invalid preview position"))?;
@@ -102,7 +110,7 @@ pub fn load(
             .seek(SeekFrom::Start(found.offset))
             .map_err(|e| e.to_string())?;
         // audit-allow(DOS-ALLOC): previews are refused above 32 MiB at the top of this function.
-        let mut bytes = vec![0; found.size as usize];
+        let mut bytes = vec![0; usize::try_from(found.size).map_err(|e| e.to_string())?];
         input.read_exact(&mut bytes).map_err(|e| e.to_string())?;
         std::borrow::Cow::Owned(bytes)
     };

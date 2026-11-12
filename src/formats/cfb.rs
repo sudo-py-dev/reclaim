@@ -41,13 +41,13 @@ pub(super) fn end(b: &[u8], cancel: &AtomicBool) -> Probe {
     }
     let mut fats = Vec::new();
     for p in (76..512).step_by(4) {
-        let id = le32(b, p) as u32;
+        let id = crate::bytes::u32_le(b, p);
         if id != FREE {
             fats.push(id);
         }
     }
     let mut difs = HashSet::new();
-    let mut next = le32(b, 68) as u32;
+    let mut next = crate::bytes::u32_le(b, 68);
     for _ in 0..dif_count {
         if cancel.load(Ordering::Relaxed) || !difs.insert(next) {
             return Err(CandidateEnd::Invalid);
@@ -55,12 +55,12 @@ pub(super) fn end(b: &[u8], cancel: &AtomicBool) -> Probe {
         let start = sector(next, size)?;
         need(b, start + size)?;
         for p in (start..start + size - 4).step_by(4) {
-            let id = le32(b, p) as u32;
+            let id = crate::bytes::u32_le(b, p);
             if id != FREE {
                 fats.push(id);
             }
         }
-        next = le32(b, start + size - 4) as u32;
+        next = crate::bytes::u32_le(b, start + size - 4);
     }
     if next != END || fats.len() != count {
         return Err(CandidateEnd::Invalid);
@@ -79,7 +79,7 @@ pub(super) fn end(b: &[u8], cancel: &AtomicBool) -> Probe {
         let start = sector(*id, size)?;
         need(b, start + size)?;
         for p in (start..start + size).step_by(4) {
-            fat.push(le32(b, p) as u32);
+            fat.push(crate::bytes::u32_le(b, p));
         }
     }
     let allocated = fat
@@ -91,10 +91,11 @@ pub(super) fn end(b: &[u8], cancel: &AtomicBool) -> Probe {
         return Err(CandidateEnd::Invalid);
     }
     for (i, id) in fat[..allocated].iter().enumerate() {
-        if *id < DIF && (*id as usize >= allocated || *id == i as u32) {
+        if *id < DIF && (*id as usize >= allocated || *id as usize == i) {
             return Err(CandidateEnd::Invalid);
         }
-        if *id == FAT && !unique.contains(&(i as u32)) || *id == DIF && !difs.contains(&(i as u32))
+        if *id == FAT && !u32::try_from(i).is_ok_and(|i| unique.contains(&i))
+            || *id == DIF && !u32::try_from(i).is_ok_and(|i| difs.contains(&i))
         {
             return Err(CandidateEnd::Invalid);
         }
@@ -106,7 +107,7 @@ pub(super) fn end(b: &[u8], cancel: &AtomicBool) -> Probe {
     }
     let end = span(size as u64, allocated as u64 * size as u64)?;
     need(b, end)?;
-    let mut id = le32(b, 48) as u32;
+    let mut id = crate::bytes::u32_le(b, 48);
     let mut seen = HashSet::new();
     while id != END {
         if cancel.load(Ordering::Relaxed) || id as usize >= allocated || !seen.insert(id) {

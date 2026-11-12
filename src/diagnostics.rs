@@ -1,4 +1,9 @@
 //! Report startup failures before the Windows GUI (or its renderer) exists.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use std::{
     fs::OpenOptions,
     io::Write,
@@ -47,7 +52,8 @@ impl log::Log for FileLogger {
 
 pub fn write(message: &str) {
     if let Some(path) = LOG_PATH.get() {
-        let _ = append(path, message);
+        // Logging is best effort; a full or read-only disk must not stop the app.
+        append(path, message).ok();
     }
 }
 
@@ -88,14 +94,18 @@ fn create_private_dir(directory: &Path) -> std::io::Result<()> {
 }
 
 pub fn install() {
+    // First, before a file dialog, GPU driver or font loader can load a DLL.
+    let hardening = restrict_dll_search();
     for directory in log_directories() {
         if create_private_dir(&directory).is_err() {
             continue;
         }
         let path = directory.join("reclaim.log");
         if std::fs::metadata(&path).is_ok_and(|metadata| metadata.len() > 1024 * 1024) {
-            let _ = std::fs::remove_file(directory.join("reclaim.previous.log"));
-            let _ = std::fs::rename(&path, directory.join("reclaim.previous.log"));
+            // Rotation is best effort; on failure the current log keeps growing
+            // only until the next start, when the size check runs again.
+            std::fs::remove_file(directory.join("reclaim.previous.log")).ok();
+            std::fs::rename(&path, directory.join("reclaim.previous.log")).ok();
         }
         if append(
             &path,
@@ -109,9 +119,12 @@ pub fn install() {
         )
         .is_ok()
         {
-            let _ = LOG_PATH.set(path);
+            LOG_PATH.set(path).ok();
             break;
         }
+    }
+    if let Err(error) = hardening {
+        write(&error);
     }
     if log::set_logger(&LOGGER).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
@@ -132,6 +145,34 @@ pub fn install() {
     }
 }
 
+/// Load DLLs only from System32 and the application folder. By default Windows
+/// also searches the current directory and `PATH`, so a DLL planted next to a
+/// file the user opened could run inside Reclaim (CWE-427). One-way and
+/// process-wide.
+#[cfg(windows)]
+fn restrict_dll_search() -> Result<(), String> {
+    use windows_sys::Win32::System::LibraryLoader::{
+        LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
+    };
+    // SAFETY: plain flag bits, no pointers; only this process's loader policy changes.
+    let ok = unsafe {
+        SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR)
+    };
+    if ok == 0 {
+        return Err(format!(
+            // audit-allow(I18N-MISSING): a line in the diagnostic log, not interface text.
+            "Could not restrict the DLL search path: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn restrict_dll_search() -> Result<(), String> {
+    Ok(())
+}
+
 /// Log a fatal problem and show it. `summary` is already translated; `details`
 /// is technical and stays in its original language.
 pub fn report(summary: &str, details: &str) {
@@ -146,7 +187,7 @@ pub fn report(summary: &str, details: &str) {
         "If this is a virtual machine, install or update its graphics drivers or guest additions.",
     );
     let message = [summary, &display_details, &location, &hint].join("\n\n");
-    let _ = writeln!(std::io::stderr(), "{message}");
+    writeln!(std::io::stderr(), "{message}").ok();
     #[cfg(windows)]
     {
         use std::sync::atomic::{AtomicBool, Ordering};

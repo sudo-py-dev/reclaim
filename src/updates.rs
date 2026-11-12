@@ -1,4 +1,9 @@
 //! Slint-independent updater state; all downloads and installation run on a worker.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use reclaim::updater::{self, Release};
 use std::{
     io::{Read, Write},
@@ -119,7 +124,7 @@ impl Updates {
             self.status = "Checking for updates…".into();
         }
         std::thread::spawn(move || {
-            let _ = tx.send(Message::Checked(updater::check()));
+            tx.send(Message::Checked(updater::check())).ok();
         });
     }
     pub fn apply(&mut self) {
@@ -132,9 +137,10 @@ impl Updates {
             self.notice_visible = false;
             self.receiver = Some(rx);
             std::thread::spawn(move || {
-                let _ = tx.send(Message::Finished(
+                tx.send(Message::Finished(
                     crate::installer::open_installer(&path).map(|()| None),
-                ));
+                ))
+                .ok();
             });
             return;
         }
@@ -148,11 +154,11 @@ impl Updates {
         self.receiver = Some(rx);
         std::thread::spawn(move || {
             let progress = |done, total: u64| {
-                let _ = tx.send(Message::Progress(done, total));
+                tx.send(Message::Progress(done, total)).ok();
             };
             let result = if crate::update_runtime::supported() {
                 crate::update_runtime::update(&release, progress, |phase| {
-                    let _ = tx.send(Message::Phase(phase));
+                    tx.send(Message::Phase(phase)).ok();
                 })
                 .map(|()| None)
             } else if updater::installer_download(&release).is_some() {
@@ -160,7 +166,7 @@ impl Updates {
             } else {
                 updater::install_with_progress(&release, progress).map(|()| None)
             };
-            let _ = tx.send(Message::Finished(result));
+            tx.send(Message::Finished(result)).ok();
         });
     }
     pub fn poll(&mut self) {

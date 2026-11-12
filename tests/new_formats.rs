@@ -162,8 +162,9 @@ fn varied_header_mutations_never_panic_or_report_out_of_bounds_files() {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                let at = state as usize % bytes.len();
-                bytes[at] ^= (state >> 32) as u8 | 1;
+                let at = usize::try_from(state % u64::try_from(bytes.len()).unwrap()).unwrap();
+                // Take the low byte of the high half on purpose (pseudo-random flip).
+                bytes[at] ^= (state >> 32).to_le_bytes()[0] | 1;
             }
             let found = collect(&mut Cursor::new(&bytes));
             for file in found {

@@ -1,5 +1,6 @@
 //! Bounded container probes. Successful framing checks do not imply that
 //! application-level payloads are safe or fully decodable.
+use crate::bytes::to_usize;
 pub(crate) const LIMIT: usize = 64 * 1024 * 1024;
 
 pub(crate) enum CandidateEnd {
@@ -89,18 +90,18 @@ pub(crate) fn sqlite_end(bytes: &[u8]) -> CandidateEnd {
             return Invalid;
         }
     }
-    if bytes.len() < size as usize {
+    if bytes.len() < to_usize(size) {
         More
     } else {
-        Complete(size as usize)
+        Complete(to_usize(size))
     }
 }
 
 const fn crc_table() -> [u32; 256] {
     let mut table = [0; 256];
-    let mut i = 0;
+    let mut i: u32 = 0;
     while i < 256 {
-        let mut value = (i as u32) << 24;
+        let mut value = i << 24;
         let mut bit = 0;
         while bit < 8 {
             value = (value << 1)
@@ -111,7 +112,7 @@ const fn crc_table() -> [u32; 256] {
                 };
             bit += 1;
         }
-        table[i] = value;
+        table[i as usize] = value;
         i += 1;
     }
     table

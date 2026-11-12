@@ -1,4 +1,10 @@
 //! Bounded-memory walk for large, classic ZIP archives with known entry sizes.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
+use crate::bytes::to_usize;
 use std::{
     collections::HashSet,
     io::{self, Read, Seek, SeekFrom},
@@ -79,7 +85,16 @@ fn walk(input: &mut (impl Read + Seek), start: u64, cancel: &AtomicBool) -> io::
             return Ok(Inspection::Unsupported);
         }
         locals.insert(at);
-        at += 30 + short(&header, 26) + short(&header, 28) + long(&header, 18);
+        let Some(next) = total(&[
+            at,
+            30,
+            short(&header, 26),
+            short(&header, 28),
+            long(&header, 18),
+        ]) else {
+            return Ok(Inspection::Invalid);
+        };
+        at = next;
     }
     if locals.is_empty() {
         return Ok(Inspection::Invalid);
@@ -99,29 +114,47 @@ fn walk(input: &mut (impl Read + Seek), start: u64, cancel: &AtomicBool) -> io::
             return Ok(Inspection::Invalid);
         }
         let local = read::<30>(input, start, offset)?;
-        let name_len = short(&header, 28) as usize;
-        if short(&local, 26) as usize != name_len
+        let name_len = to_usize(short(&header, 28));
+        if to_usize(short(&local, 26)) != name_len
             || header[8..16] != local[6..14]
             || header[16..28] != local[14..26]
         {
             return Ok(Inspection::Invalid);
         }
-        let data_end = offset + 30 + name_len as u64 + short(&local, 28) + long(&header, 20);
-        if data_end > directory {
+        let data_end = total(&[
+            offset,
+            30,
+            name_len as u64,
+            short(&local, 28),
+            long(&header, 20),
+        ]);
+        if data_end.is_none_or(|end| end > directory) {
             return Ok(Inspection::Invalid);
         }
         // audit-allow(DOS-ALLOC): name_len comes from a 16-bit field, at most 64 KiB.
         let mut name = vec![0; name_len];
         input.read_exact(&mut name)?;
-        input.seek(SeekFrom::Start(start + at + 46))?;
+        let Some(central) = total(&[start, at, 46]) else {
+            return Ok(Inspection::Invalid);
+        };
+        input.seek(SeekFrom::Start(central))?;
         // audit-allow(DOS-ALLOC): name_len comes from a 16-bit field, at most 64 KiB.
         let mut central_name = vec![0; name_len];
         input.read_exact(&mut central_name)?;
         if name != central_name {
             return Ok(Inspection::Invalid);
         }
-        at += 46 + name_len as u64 + short(&header, 30) + short(&header, 32);
-        if at - directory > crate::LIMIT as u64 {
+        let Some(next) = total(&[
+            at,
+            46,
+            name_len as u64,
+            short(&header, 30),
+            short(&header, 32),
+        ]) else {
+            return Ok(Inspection::Invalid);
+        };
+        at = next;
+        if at.saturating_sub(directory) > crate::LIMIT as u64 {
             return Ok(Inspection::Invalid);
         }
     }
@@ -131,12 +164,22 @@ fn walk(input: &mut (impl Read + Seek), start: u64, cancel: &AtomicBool) -> io::
         || short(&end, 6) != 0
         || short(&end, 8) != count as u64
         || short(&end, 10) != count as u64
-        || long(&end, 12) != at - directory
+        || long(&end, 12) != at.saturating_sub(directory)
         || long(&end, 16) != directory
     {
         return Ok(Inspection::Invalid);
     }
-    let size = at + 22 + short(&end, 20);
-    read::<1>(input, start, size - 1)?;
+    let Some(size) = total(&[at, 22, short(&end, 20)]) else {
+        return Ok(Inspection::Invalid);
+    };
+    // `size` is at least 22, so the last byte's offset never underflows.
+    read::<1>(input, start, size.saturating_sub(1))?;
     Ok(Inspection::Complete(size))
+}
+
+/// Sums header fields, or `None` for an archive whose offsets would wrap.
+fn total(parts: &[u64]) -> Option<u64> {
+    parts
+        .iter()
+        .try_fold(0u64, |sum, part| sum.checked_add(*part))
 }

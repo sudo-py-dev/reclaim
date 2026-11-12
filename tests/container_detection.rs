@@ -139,7 +139,7 @@ fn page(serial: u32, sequence: u32, flags: u8, lacing: &[u8], body: &[u8]) -> Ve
     bytes[5] = flags;
     bytes[14..18].copy_from_slice(&serial.to_le_bytes());
     bytes[18..22].copy_from_slice(&sequence.to_le_bytes());
-    bytes[26] = lacing.len() as u8;
+    bytes[26] = u8::try_from(lacing.len()).unwrap();
     bytes.extend_from_slice(lacing);
     bytes.extend_from_slice(body);
     fix_crc(&mut bytes);

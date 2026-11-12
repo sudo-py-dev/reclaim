@@ -56,9 +56,9 @@ fn query(file: &File, code: u32, input: &[u8]) -> Option<Vec<u8>> {
             file.as_raw_handle(),
             code,
             input.as_ptr().cast(),
-            input.len() as u32,
+            win32_len(input.len()),
             output.as_mut_ptr().cast(),
-            output.len() as u32,
+            win32_len(output.len()),
             &mut returned,
             ptr::null_mut(),
         )
@@ -94,8 +94,8 @@ fn product(file: &File) -> Option<String> {
 pub fn discover() -> Result<Vec<Drive>, String> {
     let mut names = vec![0u16; 65536];
     // SAFETY: writable UTF-16 buffer, null name requests the device namespace.
-    let count =
-        unsafe { QueryDosDeviceW(ptr::null(), names.as_mut_ptr(), names.len() as u32) } as usize;
+    let count = unsafe { QueryDosDeviceW(ptr::null(), names.as_mut_ptr(), win32_len(names.len())) }
+        as usize;
     if count == 0 {
         return Err(format!(
             "Could not list Windows drives: {}. Open a disk image instead.",
@@ -202,12 +202,12 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             GetVolumeInformationW(
                 root.as_ptr(),
                 label.as_mut_ptr(),
-                label.len() as u32,
+                win32_len(label.len()),
                 ptr::null_mut(),
                 ptr::null_mut(),
                 ptr::null_mut(),
                 filesystem.as_mut_ptr(),
-                filesystem.len() as u32,
+                win32_len(filesystem.len()),
             )
         };
         // Locked/inaccessible volumes must not be offered as usable sources.
@@ -268,11 +268,11 @@ fn folder_disks(folder: &Path) -> Option<HashSet<u32>> {
     let mut volume = vec![0u16; 64];
     // SAFETY: name is NUL-terminated; output buffers match the given lengths.
     let ok = unsafe {
-        GetVolumePathNameW(name.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) != 0
+        GetVolumePathNameW(name.as_ptr(), mount.as_mut_ptr(), win32_len(mount.len())) != 0
             && GetVolumeNameForVolumeMountPointW(
                 mount.as_ptr(),
                 volume.as_mut_ptr(),
-                volume.len() as u32,
+                win32_len(volume.len()),
             ) != 0
     };
     if !ok {
@@ -299,4 +299,11 @@ pub fn destination(source: &Path, folder: &Path) -> Destination {
         (Some(_), Some(_)) => Destination::SameDrive,
         _ => Destination::Unknown,
     }
+}
+
+/// A buffer length for a Win32 `u32` length parameter. Every buffer here is far
+/// below 4 GiB; if one ever were not, the API is told less than the real size,
+/// which is always safe, instead of a wrapped size.
+fn win32_len(len: usize) -> u32 {
+    u32::try_from(len).unwrap_or(u32::MAX)
 }

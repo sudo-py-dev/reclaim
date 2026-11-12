@@ -1,3 +1,8 @@
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 /// Hand a verified local package to the operating system without a shell or
 /// command helper. Installation remains visible and controlled by the user.
 pub fn open_installer(path: &std::path::Path) -> Result<(), String> {
@@ -29,7 +34,8 @@ pub fn open_installer(path: &std::path::Path) -> Result<(), String> {
             core_foundation_sys::url::CFURLCreateFromFileSystemRepresentation(
                 core_foundation_sys::base::kCFAllocatorDefault,
                 bytes.as_ptr(),
-                bytes.len() as isize,
+                // Slice lengths never exceed isize::MAX.
+                isize::try_from(bytes.len()).unwrap_or(isize::MAX),
                 0,
             )
         };
@@ -173,7 +179,7 @@ pub fn open_url(url: &str) -> Result<(), String> {
             core_foundation_sys::url::CFURLCreateWithBytes(
                 core_foundation_sys::base::kCFAllocatorDefault,
                 url.as_ptr(),
-                url.len() as isize,
+                isize::try_from(url.len()).unwrap_or(isize::MAX),
                 core_foundation_sys::string::kCFStringEncodingUTF8,
                 std::ptr::null(),
             )

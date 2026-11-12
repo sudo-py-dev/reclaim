@@ -1,3 +1,4 @@
+use crate::bytes::to_usize;
 use std::io::{self, Read, Seek, SeekFrom};
 
 /// Adapts byte-level carving to devices that require sector-aligned reads.
@@ -46,7 +47,7 @@ impl<R: Read + Seek> Read for SourceReader<R> {
         if self.alignment == 1 {
             let mut count = bytes.len();
             if let Some(size) = self.size {
-                count = count.min((size - self.position).min(usize::MAX as u64) as usize);
+                count = count.min(to_usize((size - self.position).min(usize::MAX as u64)));
             }
             self.inner.seek(SeekFrom::Start(self.position))?;
             let count = self.inner.read(&mut bytes[..count])?;
@@ -67,7 +68,7 @@ impl<R: Read + Seek> Read for SourceReader<R> {
             self.inner.seek(SeekFrom::Start(aligned))?;
             let mut required = self
                 .size
-                .map(|n| (n - aligned).min(self.window_size as u64) as usize)
+                .map(|n| to_usize((n - aligned).min(self.window_size as u64)))
                 .unwrap_or(self.window_size);
             // A failed refill must not expose new bytes under the old offset.
             self.cached_at = None;
@@ -101,7 +102,7 @@ impl<R: Read + Seek> Read for SourceReader<R> {
         let Some(cached_at) = self.cached_at else {
             return Ok(0);
         };
-        let start = (self.position - cached_at) as usize;
+        let start = to_usize(self.position - cached_at);
         let count = bytes.len().min(self.cached_len.saturating_sub(start));
         if count == 0 {
             return Ok(0);
@@ -224,6 +225,10 @@ mod tests {
 
     struct SectorDevice(io::Cursor<Vec<u8>>);
     impl Read for SectorDevice {
+        #[expect(
+            clippy::panic_in_result_fn,
+            reason = "test double: a failed assertion is the test failure"
+        )]
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
             assert!(self.0.position().is_multiple_of(4096));
             assert!(bytes.len().is_multiple_of(4096));

@@ -1,4 +1,10 @@
-use super::{CandidateEnd, le16, le32, need};
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
+use super::{CandidateEnd, le16, need};
+use crate::bytes::to_usize;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Default)]
 pub(crate) struct Gzip {
@@ -17,14 +23,14 @@ impl Gzip {
     fn parse(&mut self, b: &[u8], cancel: &AtomicBool) -> Result<usize, CandidateEnd> {
         if self.decoder.is_none() {
             need(b, 10)?;
-            if !b.starts_with(b"\x1f\x8b\x08") || b[3] & 0xe0 != 0 {
+            let flags = b.get(3).copied().ok_or(CandidateEnd::More)?;
+            if !b.starts_with(b"\x1f\x8b\x08") || flags & 0xe0 != 0 {
                 return Err(CandidateEnd::Invalid);
             }
-            let flags = b[3];
             let mut at = 10;
             if flags & 4 != 0 {
-                need(b, at + 2)?;
-                at += 2 + le16(b, at);
+                need(b, add(at, 2)?)?;
+                at = add(add(at, 2)?, le16(b, at))?;
                 need(b, at)?;
             }
             for mask in [8, 16] {
@@ -33,22 +39,25 @@ impl Gzip {
                         return Err(CandidateEnd::Invalid);
                     }
                     let available = b.len().min(65536);
-                    let count = b[at..available].iter().position(|c| *c == 0).ok_or(
-                        if available == 65536 {
-                            CandidateEnd::Invalid
-                        } else {
-                            CandidateEnd::More
-                        },
-                    )?;
-                    at += count + 1;
+                    let missing = if available == 65536 {
+                        CandidateEnd::Invalid
+                    } else {
+                        CandidateEnd::More
+                    };
+                    let count = b
+                        .get(at..available)
+                        .and_then(|field| field.iter().position(|c| *c == 0))
+                        .ok_or(missing)?;
+                    at = add(add(at, count)?, 1)?;
                 }
             }
             if flags & 2 != 0 {
-                need(b, at + 2)?;
-                if le16(b, at) != (crc32fast::hash(&b[..at]) & 0xffff) as usize {
+                need(b, add(at, 2)?)?;
+                let header = b.get(..at).ok_or(CandidateEnd::More)?;
+                if le16(b, at) != (crc32fast::hash(header) & 0xffff) as usize {
                     return Err(CandidateEnd::Invalid);
                 }
-                at += 2;
+                at = add(at, 2)?;
             }
             self.consumed = at;
             self.decoder = Some(flate2::Decompress::new(false));
@@ -65,15 +74,17 @@ impl Gzip {
             let before_out = decoder.total_out();
             let status = decoder
                 .decompress(
-                    &b[self.consumed..],
+                    b.get(self.consumed..).ok_or(CandidateEnd::Invalid)?,
                     &mut output,
                     flate2::FlushDecompress::None,
                 )
                 .map_err(|_| CandidateEnd::Invalid)?;
-            let consumed = (decoder.total_in() - before_in) as usize;
-            let produced = (decoder.total_out() - before_out) as usize;
-            self.consumed += consumed;
-            self.crc.update(&output[..produced]);
+            // flate2's totals only grow; a decrease would be a decoder bug.
+            let consumed = to_usize(decoder.total_in().saturating_sub(before_in));
+            let produced = to_usize(decoder.total_out().saturating_sub(before_out));
+            self.consumed = add(self.consumed, consumed)?;
+            self.crc
+                .update(output.get(..produced).ok_or(CandidateEnd::Invalid)?);
             if decoder.total_out() > 256 * 1024 * 1024 {
                 return Err(CandidateEnd::Invalid);
             }
@@ -85,12 +96,20 @@ impl Gzip {
                 return Err(CandidateEnd::More);
             }
         }
-        need(b, self.consumed + 8)?;
-        if self.crc.clone().finalize() != le32(b, self.consumed) as u32
-            || decoder.total_out() as u32 != le32(b, self.consumed + 4) as u32
+        let end = add(self.consumed, 8)?;
+        need(b, end)?;
+        // ISIZE is the uncompressed length modulo 2^32 (RFC 1952).
+        let size_mod_2_32 = u32::try_from(decoder.total_out() & u64::from(u32::MAX)).ok();
+        if self.crc.clone().finalize() != crate::bytes::u32_le(b, self.consumed)
+            || size_mod_2_32 != Some(crate::bytes::u32_le(b, add(self.consumed, 4)?))
         {
             return Err(CandidateEnd::Invalid);
         }
-        Ok(self.consumed + 8)
+        Ok(end)
     }
+}
+
+/// Offsets inside a candidate never wrap; an overflow means a hostile header.
+fn add(a: usize, b: usize) -> Result<usize, CandidateEnd> {
+    a.checked_add(b).ok_or(CandidateEnd::Invalid)
 }

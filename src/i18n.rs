@@ -1,5 +1,10 @@
 //! English message IDs with bundled translations. Business state and filenames
 //! remain language-neutral; translate only at presentation boundaries.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use std::{
     cell::Cell,
     collections::{BTreeMap, HashMap},
@@ -80,7 +85,10 @@ pub fn language() -> Language {
     if let Some(language) = OVERRIDE.with(Cell::get) {
         return language;
     }
-    PREFERENCES[preference() as usize].1.unwrap_or_else(|| {
+    let chosen = PREFERENCES
+        .get(preference() as usize)
+        .and_then(|entry| entry.1);
+    chosen.unwrap_or_else(|| {
         static SYSTEM: OnceLock<Language> = OnceLock::new();
         *SYSTEM.get_or_init(|| language_for_locale(&sys_locale::get_locale().unwrap_or_default()))
     })
@@ -132,7 +140,7 @@ pub fn init() {
             .iter()
             .position(|entry| entry.2 == code)
             .unwrap_or(0);
-        PREFERENCE.store(index as u8, Ordering::Relaxed);
+        PREFERENCE.store(u8::try_from(index).unwrap_or(0), Ordering::Relaxed);
     }
 }
 pub fn set_preference(value: Preference) -> io::Result<()> {
@@ -145,7 +153,9 @@ pub fn set_preference(value: Preference) -> io::Result<()> {
         .ok_or_else(|| io::Error::other("Invalid settings path"))?;
     std::fs::create_dir_all(folder)?;
     let mut temporary = tempfile::NamedTempFile::new_in(folder)?;
-    let code = PREFERENCES[value as usize].2;
+    let code = PREFERENCES
+        .get(value as usize)
+        .map_or("system", |entry| entry.2);
     temporary.write_all(serde_json::to_string(code)?.as_bytes())?;
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|e| e.error)?;
@@ -337,9 +347,9 @@ fn translate(text: &str, language: Language, depth: usize) -> String {
                         .nth(*nth)
                         .and_then(|(i, _)| values.get(i));
                     if let Some(value) = value {
-                        output.push_str(&translate(value, language, depth + 1));
+                        output.push_str(&translate(value, language, depth.saturating_add(1)));
                     }
-                    *nth += 1;
+                    *nth = nth.saturating_add(1);
                 }
             }
         }

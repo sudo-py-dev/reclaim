@@ -1,5 +1,10 @@
 //! Background native inventory refresh. No GUI timers, shell commands, or
 //! authentication requests: discovery only reads device metadata.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use super::Drive;
 use std::{
     sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},

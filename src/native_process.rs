@@ -1,4 +1,9 @@
 //! Launch the updater / application through native APIs, without a shell.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use std::path::Path;
 
 #[cfg(target_os = "linux")]
@@ -87,7 +92,12 @@ pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
     // audit-allow(SEC-UNINIT): Win32 documents zeroed STARTUPINFOW as the initial state.
     // SAFETY: STARTUPINFOW is plain old data; all zero bytes is its documented initial value.
     let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
-    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "STARTUPINFOW is about 100 bytes; Win32 requires its exact size in cb"
+    )]
+    let size = std::mem::size_of::<STARTUPINFOW>() as u32;
+    startup.cb = size;
     // audit-allow(SEC-UNINIT): an output structure that CreateProcessW fills in.
     // SAFETY: PROCESS_INFORMATION is plain old data; CreateProcessW overwrites it.
     let mut process: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
@@ -151,7 +161,8 @@ impl Child {
                 }
             }
             if libc::WIFEXITED(status) {
-                return Ok(libc::WEXITSTATUS(status) as u32);
+                // WEXITSTATUS is the low 8 bits of the status, so it is never negative.
+                return Ok(libc::WEXITSTATUS(status).cast_unsigned());
             }
             Err(reclaim::i18n::diagnostic(
                 "Update process terminated unexpectedly",
@@ -193,21 +204,21 @@ impl Drop for Child {
 #[cfg(any(windows, test))]
 fn quote_argument(argument: &str) -> String {
     let mut result = String::from("\"");
-    let mut slashes = 0;
+    let mut slashes = 0usize;
     for ch in argument.chars() {
         if ch == '\\' {
-            slashes += 1;
+            slashes = slashes.saturating_add(1);
             continue;
         }
         if ch == '"' {
-            result.push_str(&"\\".repeat(slashes * 2 + 1));
+            result.push_str(&"\\".repeat(slashes.saturating_mul(2).saturating_add(1)));
         } else {
             result.push_str(&"\\".repeat(slashes));
         }
         slashes = 0;
         result.push(ch);
     }
-    result.push_str(&"\\".repeat(slashes * 2));
+    result.push_str(&"\\".repeat(slashes.saturating_mul(2)));
     result.push('"');
     result
 }
