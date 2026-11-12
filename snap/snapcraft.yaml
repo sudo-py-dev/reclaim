@@ -58,19 +58,23 @@ apps:
       - mount-observe
 parts:
   reclaim:
-    plugin: rust
+    plugin: nil
     source: .
-    rust-cargo-parameters: [--locked]
-    build-snaps:
-      - rustup/latest/stable
+    build-environment:
+      - PATH: /snap/bin:${PATH}
     build-packages:
+      - build-essential
+      - ca-certificates
+      - rustup
       - pkg-config
       - libfontconfig1-dev
     override-pull: |
       craftctl default
       craftctl set version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
     override-build: |
-      craftctl default
+      /usr/bin/rustup toolchain install 1.99.0 --profile minimal
+      /usr/bin/rustup run 1.99.0 cargo build --locked --release --bin reclaim
+      install -Dm755 target/release/reclaim "$CRAFT_PART_INSTALL/bin/reclaim"
       install -Dm644 snap/gui/reclaim.desktop "$CRAFT_PART_INSTALL/usr/share/applications/reclaim.desktop"
       install -Dm644 LICENSE "$CRAFT_PART_INSTALL/usr/share/licenses/reclaim/LICENSE"
       install -Dm644 assets/fonts/DejaVu-LICENSE.txt "$CRAFT_PART_INSTALL/usr/share/licenses/reclaim/DejaVu-LICENSE.txt"
