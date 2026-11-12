@@ -179,7 +179,8 @@ pub fn advisories(ws: &Workspace) -> Vec<Finding> {
     let config = toml::Value::Table(text.parse().expect("deny.toml is valid TOML"));
     let today = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| (d.as_secs() / 86_400) as i64)
+        // Days since 1970 are far below i64::MAX.
+        .map(|d| (d.as_secs() / 86_400).cast_signed())
         .unwrap_or(0);
     let locked = packages(ws.file("Cargo.lock"));
     let mut findings = Vec::new();

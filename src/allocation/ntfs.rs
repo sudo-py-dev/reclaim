@@ -1,4 +1,5 @@
 use super::*;
+use crate::bytes::to_usize;
 #[derive(Clone)]
 struct Stream {
     runs: Vec<(u64, u64)>,
@@ -17,17 +18,17 @@ fn fix_record(mut record: Vec<u8>, sector: usize) -> io::Result<Vec<u8>> {
     {
         return Err(invalid("NTFS allocation metadata record is invalid"));
     }
-    let usa = u16at(&record, 4) as usize;
-    let count = u16at(&record, 6) as usize;
-    let first = u16at(&record, 20) as usize;
-    let used = u32at(&record, 24) as usize;
+    let usa = to_usize(u16at(&record, 4));
+    let count = to_usize(u16at(&record, 6));
+    let first = to_usize(u16at(&record, 20));
+    let used = to_usize(u32at(&record, 24));
     if count != record.len() / sector + 1
         || usa < 48
         || usa + count * 2 > first
         || first < 48
         || used > record.len()
         || used < first + 4
-        || u32at(&record, 28) as usize != record.len()
+        || to_usize(u32at(&record, 28)) != record.len()
     {
         return Err(invalid("NTFS metadata record geometry is invalid"));
     }
@@ -52,8 +53,8 @@ fn little(bytes: &[u8]) -> u64 {
         .fold(0, |value, (i, byte)| value | (u64::from(*byte) << (i * 8)))
 }
 fn data(record: &[u8], clusters: u64, cluster_size: u64) -> io::Result<Data> {
-    let mut at = u16at(record, 20) as usize;
-    let used = u32at(record, 24) as usize;
+    let mut at = to_usize(u16at(record, 20));
+    let used = to_usize(u32at(record, 24));
     let mut found = None;
     let mut terminated = false;
     while at + 4 <= used {
@@ -65,7 +66,7 @@ fn data(record: &[u8], clusters: u64, cluster_size: u64) -> io::Result<Data> {
         if at + 16 > used {
             return Err(invalid("NTFS attribute is truncated"));
         }
-        let len = u32at(record, at + 4) as usize;
+        let len = to_usize(u32at(record, at + 4));
         if len < 24 || !len.is_multiple_of(8) || at + len > used {
             return Err(invalid("NTFS attribute length is invalid"));
         }
@@ -83,8 +84,8 @@ fn data(record: &[u8], clusters: u64, cluster_size: u64) -> io::Result<Data> {
             }
             found = Some(match attr[8] {
                 0 => {
-                    let size = u32at(attr, 16) as usize;
-                    let offset = u16at(attr, 20) as usize;
+                    let size = to_usize(u32at(attr, 16));
+                    let offset = to_usize(u16at(attr, 20));
                     if offset < 24
                         || offset.checked_add(size).is_none_or(|n| n > len)
                         || size > MAX_MAP
@@ -97,7 +98,7 @@ fn data(record: &[u8], clusters: u64, cluster_size: u64) -> io::Result<Data> {
                     if len < 64 || u64at(attr, 16) != 0 {
                         return Err(invalid("Unsupported NTFS allocation extent"));
                     }
-                    let mut p = u16at(attr, 32) as usize;
+                    let mut p = to_usize(u16at(attr, 32));
                     let last = u64at(attr, 24);
                     let size = u64at(attr, 48);
                     let initialized = u64at(attr, 56);
@@ -137,22 +138,22 @@ fn data(record: &[u8], clusters: u64, cluster_size: u64) -> io::Result<Data> {
                         };
                         p += o;
                         lcn += delta;
-                        if length == 0
-                            || lcn < 0
-                            || lcn > i128::from(clusters)
-                            || (lcn as u64)
-                                .checked_add(length)
-                                .is_none_or(|v| v > clusters)
-                        {
-                            return Err(invalid("NTFS allocation run leaves the volume"));
-                        }
+                        // A negative or oversized cluster number fails the
+                        // conversion and is rejected like any other bad run.
+                        let start = u64::try_from(lcn)
+                            .ok()
+                            .filter(|start| length != 0 && *start <= clusters)
+                            .filter(|start| {
+                                start.checked_add(length).is_some_and(|v| v <= clusters)
+                            })
+                            .ok_or_else(|| invalid("NTFS allocation run leaves the volume"))?;
                         covered = covered
                             .checked_add(length)
                             .ok_or_else(|| invalid("Invalid NTFS run length"))?;
                         if covered > clusters {
                             return Err(invalid("NTFS allocation runs exceed the volume"));
                         }
-                        runs.push((lcn as u64, length));
+                        runs.push((start, length));
                     }
                     if !end
                         || runs.is_empty()
@@ -204,7 +205,7 @@ fn stream_read(
             bytes.extend(read_at(
                 input,
                 lcn * cluster_size + from - logical,
-                (to - from) as usize,
+                to_usize(to - from),
                 total,
                 cancel,
             )?);
@@ -244,12 +245,12 @@ pub(super) fn plan(
             "NTFS allocation bitmap exceeds the supported map size",
         ));
     }
-    let size_code = b[64] as i8;
+    let size_code = i8::from_le_bytes([b[64]]);
     let record_size = if size_code < 0 {
-        1u64.checked_shl((-i16::from(size_code)) as u32)
+        1u64.checked_shl(u32::from(size_code.unsigned_abs()))
             .ok_or_else(|| invalid("Invalid NTFS record size"))?
     } else {
-        product(size_code as u64, cluster_size)?
+        product(u64::from(size_code.unsigned_abs()), cluster_size)?
     };
     if !(1024..=65536).contains(&record_size)
         || !record_size.is_multiple_of(sector)
@@ -259,8 +260,8 @@ pub(super) fn plan(
     }
     let mft_at = product(u64at(b, 48), cluster_size)?;
     let record = fix_record(
-        read_at(input, mft_at, record_size as usize, total, cancel)?,
-        sector as usize,
+        read_at(input, mft_at, to_usize(record_size), total, cancel)?,
+        to_usize(sector),
     )?;
     let Data::Nonresident(mft) = data(&record, clusters, cluster_size)? else {
         return Err(invalid("NTFS MFT data is not a nonresident stream"));
@@ -269,18 +270,18 @@ pub(super) fn plan(
         input,
         &mft,
         6 * record_size,
-        record_size as usize,
+        to_usize(record_size),
         cluster_size,
         total,
         cancel,
     )?;
-    let bitmap_record = fix_record(raw, sector as usize)?;
+    let bitmap_record = fix_record(raw, to_usize(sector))?;
     // Verify the metadata record identity rather than trusting a physical guess.
     if u32at(&bitmap_record, 44) != 6 {
         return Err(invalid("NTFS volume bitmap record identity does not match"));
     }
     let bitmap_data = data(&bitmap_record, clusters, cluster_size)?;
-    let needed = clusters.div_ceil(8) as usize;
+    let needed = to_usize(clusters.div_ceil(8));
     let (bitmap, bitmap_runs) = match bitmap_data {
         Data::Resident(bytes) => {
             if bytes.len() < needed {

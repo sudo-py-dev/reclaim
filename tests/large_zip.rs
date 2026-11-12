@@ -40,7 +40,7 @@ fn archive(file: &mut std::fs::File, prefix: u64) -> u64 {
     end[8..10].copy_from_slice(&1u16.to_le_bytes());
     end[10..12].copy_from_slice(&1u16.to_le_bytes());
     end[12..16].copy_from_slice(&47u32.to_le_bytes());
-    end[16..20].copy_from_slice(&(directory as u32).to_le_bytes());
+    end[16..20].copy_from_slice(&(u32::try_from(directory).unwrap()).to_le_bytes());
     file.write_all(&end).unwrap();
     directory + 47 + 22
 }

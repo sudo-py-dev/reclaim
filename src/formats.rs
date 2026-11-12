@@ -1,5 +1,6 @@
 //! Format-specific bounded probes. See docs/FILE_FORMAT_RESEARCH.md for sources
 //! and recovery limits. No recovered program or archive is ever executed.
+use crate::bytes::to_usize;
 use crate::{CandidateEnd, Validation, detection::LIMIT};
 use std::sync::atomic::{AtomicBool, Ordering};
 mod cfb;
@@ -32,7 +33,7 @@ fn span(offset: u64, size: u64) -> Result<usize, CandidateEnd> {
     offset
         .checked_add(size)
         .filter(|n| *n <= LIMIT as u64)
-        .map(|n| n as usize)
+        .map(to_usize)
         .ok_or(CandidateEnd::Invalid)
 }
 // MZ is only two bytes and common in arbitrary disk data. Reject impossible
@@ -305,7 +306,7 @@ fn elf(b: &[u8]) -> Probe {
     }
     need(b, end)?;
     for i in 0..pn {
-        let at = ph as usize + i * ps;
+        let at = to_usize(ph) + i * ps;
         let offset = word(at + if wide { 8 } else { 4 });
         let size = word(at + if wide { 32 } else { 16 });
         if u32at(at) == 1 && size > word(at + if wide { 40 } else { 20 }) {
@@ -316,7 +317,7 @@ fn elf(b: &[u8]) -> Probe {
         }
     }
     for i in 1..sn {
-        let at = sh as usize + i * ss;
+        let at = to_usize(sh) + i * ss;
         if u32at(at + 4) != 8 {
             // SHT_NOBITS is memory-only, not file data.
             let offset = word(at + if wide { 24 } else { 16 });
@@ -334,7 +335,7 @@ fn seven(b: &[u8]) -> Probe {
     need(b, 32)?;
     if !b.starts_with(b"7z\xbc\xaf\x27\x1c")
         || b[6] != 0
-        || crc32fast::hash(&b[12..32]) != le32(b, 8) as u32
+        || crc32fast::hash(&b[12..32]) != crate::bytes::u32_le(b, 8)
     {
         return Err(CandidateEnd::Invalid);
     }
@@ -344,7 +345,9 @@ fn seven(b: &[u8]) -> Probe {
         return Err(CandidateEnd::Invalid);
     }
     need(b, end)?;
-    if !matches!(b[start], 1 | 0x17) || crc32fast::hash(&b[start..end]) != le32(b, 28) as u32 {
+    if !matches!(b[start], 1 | 0x17)
+        || crc32fast::hash(&b[start..end]) != crate::bytes::u32_le(b, 28)
+    {
         return Err(CandidateEnd::Invalid);
     }
     Ok(end)
@@ -591,7 +594,7 @@ fn rar(b: &[u8], cancel: &AtomicBool) -> Probe {
         }
         let end = span(p as u64, length)?;
         need(b, end)?;
-        if crc32fast::hash(&b[at + 4..end]) != le32(b, at) as u32 {
+        if crc32fast::hash(&b[at + 4..end]) != crate::bytes::u32_le(b, at) {
             return Err(CandidateEnd::Invalid);
         }
         // Parse within this header only; malformed fields must not consume data.
@@ -641,11 +644,11 @@ fn rar(b: &[u8], cancel: &AtomicBool) -> Probe {
                 if name == 0 || name > end.saturating_sub(p) as u64 {
                     return Err(CandidateEnd::Invalid);
                 }
-                p += name as usize;
+                p += to_usize(name);
             }
             5 if main && data == 0 => {
                 if vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)? != 0
-                    || p + extra as usize != end
+                    || p + to_usize(extra) != end
                 {
                     return Err(CandidateEnd::Invalid);
                 }
@@ -653,7 +656,7 @@ fn rar(b: &[u8], cancel: &AtomicBool) -> Probe {
             }
             _ => return Err(CandidateEnd::Invalid),
         }
-        if p + extra as usize > end {
+        if p + to_usize(extra) > end {
             return Err(CandidateEnd::Invalid);
         }
         at = span(end as u64, data)?;
@@ -802,7 +805,7 @@ fn dex(b: &[u8]) -> Probe {
         a %= 65521;
         c %= 65521;
     }
-    if (c << 16 | a) != le32(b, 8) as u32 {
+    if (c << 16 | a) != crate::bytes::u32_le(b, 8) {
         return Err(CandidateEnd::Invalid);
     }
     Ok(size)

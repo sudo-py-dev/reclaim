@@ -1,5 +1,10 @@
 //! Native Linux discovery. Sizes/topology come from sysfs, mounts from the
 //! current namespace, and optional udev data supplies labels/filesystem types.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use super::{Destination, Drive};
 use std::{
     collections::{HashMap, HashSet},
@@ -38,41 +43,37 @@ fn number(path: impl AsRef<Path>) -> Option<u64> {
 
 // mountinfo encodes whitespace/backslashes as octal; udev/by-label use hex.
 fn unescape(value: &str, octal: bool) -> String {
-    let bytes = value.as_bytes();
-    let mut output = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        let escape = if octal && bytes[i] == b'\\' && i + 3 < bytes.len() {
-            let digits = &bytes[i + 1..i + 4];
-            if digits.iter().all(|b| (b'0'..=b'7').contains(b)) {
-                let value = digits
-                    .iter()
-                    .fold(0u16, |n, digit| n * 8 + u16::from(digit - b'0'));
-                u8::try_from(value).ok().map(|byte| (byte, 4))
-            } else {
-                None
-            }
-        } else if !octal
-            && bytes[i] == b'\\'
-            && bytes.get(i + 1) == Some(&b'x')
-            && i + 3 < bytes.len()
-        {
-            std::str::from_utf8(&bytes[i + 2..i + 4])
+    let mut rest = value.as_bytes();
+    let mut output = Vec::with_capacity(rest.len());
+    while let Some((&first, tail)) = rest.split_first() {
+        let decoded = match tail {
+            [a, b, c, ..] if octal && first == b'\\' => octal_byte([*a, *b, *c]),
+            [b'x', a, b, ..] if !octal && first == b'\\' => std::str::from_utf8(&[*a, *b])
                 .ok()
-                .and_then(|s| u8::from_str_radix(s, 16).ok())
-                .map(|n| (n, 4))
-        } else {
-            None
+                .and_then(|s| u8::from_str_radix(s, 16).ok()),
+            _ => None,
         };
-        if let Some((byte, count)) = escape {
-            output.push(byte);
-            i += count;
-        } else {
-            output.push(bytes[i]);
-            i += 1;
+        // Both escape forms are four bytes: the backslash and three more.
+        match (decoded, tail) {
+            (Some(byte), [_, _, _, after @ ..]) => {
+                output.push(byte);
+                rest = after;
+            }
+            _ => {
+                output.push(first);
+                rest = tail;
+            }
         }
     }
     String::from_utf8_lossy(&output).into_owned()
+}
+
+/// Three octal digits as one byte; `None` for other digits or values over 255.
+fn octal_byte(digits: [u8; 3]) -> Option<u8> {
+    if !digits.iter().all(|b| (b'0'..=b'7').contains(b)) {
+        return None;
+    }
+    u8::from_str_radix(std::str::from_utf8(&digits).ok()?, 8).ok()
 }
 
 struct Node {
@@ -89,10 +90,12 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
     let mut mounted = HashMap::<String, String>::new();
     for line in mount_text.lines() {
         let fields: Vec<_> = line.split_whitespace().collect();
-        if fields.len() >= 7 && fields.contains(&"-") {
-            let point = unescape(fields[4], true);
+        if let [_, _, device, _, point, _, _, ..] = fields.as_slice()
+            && fields.contains(&"-")
+        {
+            let point = unescape(point, true);
             mounted
-                .entry(fields[2].into())
+                .entry((*device).into())
                 .and_modify(|old| {
                     if point == "/" {
                         *old = point.clone();
@@ -227,7 +230,8 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
                     .find_map(|parent| number(sys.join(parent).join("queue/logical_block_size")))
             })
             .filter(|n| n.is_power_of_two() && (512..=65536).contains(n))
-            .unwrap_or(512) as usize;
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(512);
         let in_use = active.contains(&node.name);
         let whole =
             !node.partition && !node.name.starts_with("dm-") && !node.name.starts_with("md");
@@ -316,8 +320,11 @@ fn destination_at(
             text.lines().find_map(|line| {
                 let fields: Vec<_> = line.split_whitespace().collect();
                 let separator = fields.iter().position(|f| *f == "-")?;
-                (fields.get(2) == Some(&folder))
-                    .then(|| fields.get(separator + 2).map(|s| unescape(s, true)))?
+                (fields.get(2) == Some(&folder)).then(|| {
+                    fields
+                        .get(separator.saturating_add(2))
+                        .map(|s| unescape(s, true))
+                })?
             })
         }) else {
             return Destination::Unknown;
@@ -357,7 +364,7 @@ fn whole_disks(node: &Path) -> HashSet<PathBuf> {
             disks.insert(real);
         } else {
             for layer in layers {
-                visit(&layer, disks, depth + 1);
+                visit(&layer, disks, depth.saturating_add(1));
             }
         }
     }

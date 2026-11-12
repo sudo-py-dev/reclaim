@@ -1,4 +1,5 @@
 use super::*;
+use crate::bytes::to_usize;
 use std::collections::HashSet;
 struct Table {
     start: u64,
@@ -33,7 +34,7 @@ impl Table {
             self.cache = read_at(input, self.start + page, len, total, cancel)?;
             self.cached_at = page;
         }
-        let offset = (at - page) as usize;
+        let offset = to_usize(at - page);
         let mut value = [0; 4];
         value[..count].copy_from_slice(&self.cache[offset..offset + count]);
         Ok(value)
@@ -208,14 +209,14 @@ pub(super) fn exfat(
         return Err(invalid("Invalid active exFAT bitmap"));
     }
     // Verify the main boot-region checksum (mutable VolumeFlags/PercentInUse excluded).
-    let boot = read_at(input, 0, (12 * sector) as usize, total, cancel)?;
+    let boot = read_at(input, 0, to_usize(12 * sector), total, cancel)?;
     let mut sum = 0u32;
-    for (i, byte) in boot[..(11 * sector) as usize].iter().enumerate() {
+    for (i, byte) in boot[..to_usize(11 * sector)].iter().enumerate() {
         if !matches!(i, 106 | 107 | 112) {
             sum = sum.rotate_right(1).wrapping_add(u32::from(*byte));
         }
     }
-    if boot[(11 * sector) as usize..]
+    if boot[to_usize(11 * sector)..]
         .as_chunks::<4>()
         .0
         .iter()
@@ -244,7 +245,7 @@ pub(super) fn exfat(
         let bytes = read_at(
             input,
             heap * sector + (current - 2) * cluster_size,
-            cluster_size as usize,
+            to_usize(cluster_size),
             total,
             cancel,
         )?;
@@ -279,16 +280,16 @@ pub(super) fn exfat(
         return Err(invalid("Invalid exFAT bitmap length"));
     }
     // audit-allow(DOS-ALLOC): needed is at most length, which is checked against MAX_MAP.
-    let mut bytes = Vec::with_capacity(needed as usize);
+    let mut bytes = Vec::with_capacity(to_usize(needed));
     let mut bitmap_clusters = Vec::new();
     let mut current = start;
     let mut visited = HashSet::new();
-    while bytes.len() < (needed as usize) {
+    while bytes.len() < to_usize(needed) {
         if current < 2 || current > clusters + 1 || !visited.insert(current) {
             return Err(invalid("Invalid exFAT bitmap chain"));
         }
         bitmap_clusters.push(current);
-        let count = (needed - bytes.len() as u64).min(cluster_size) as usize;
+        let count = to_usize((needed - bytes.len() as u64).min(cluster_size));
         bytes.extend(read_at(
             input,
             heap * sector + (current - 2) * cluster_size,
@@ -296,7 +297,7 @@ pub(super) fn exfat(
             total,
             cancel,
         )?);
-        if bytes.len() < needed as usize {
+        if bytes.len() < to_usize(needed) {
             current = table.entry(input, current, 64, total, cancel)?;
         }
     }

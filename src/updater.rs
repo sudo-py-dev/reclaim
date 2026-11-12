@@ -5,6 +5,11 @@
 //! names the exact file and version, so a validly signed older build cannot be
 //! re-published as a newer one. The GitHub SHA-256 digest is checked as well,
 //! but on its own it only proves the file matches what the release page lists.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use crate::i18n::diagnostic;
 use minisign_verify::{PublicKey, Signature};
 use serde_json::Value;
@@ -95,8 +100,8 @@ pub fn check() -> Result<Option<Release>, String> {
         .map_err(check_error)?;
     let json: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
     let version = semver::Version::parse(
-        json["tag_name"]
-            .as_str()
+        json.get("tag_name")
+            .and_then(Value::as_str)
             .unwrap_or("")
             .trim_start_matches('v'),
     )
@@ -185,16 +190,19 @@ pub struct ProtectedPackage {
 /// are accepted, so an older signed package cannot be used to downgrade.
 #[cfg(target_os = "linux")]
 pub fn protect_deb_update(args: &[std::ffi::OsString]) -> Result<ProtectedPackage, String> {
-    if args.len() != 3 || args[0] != INSTALL_DEB_FLAG {
+    let [flag, version, package] = args else {
+        return Err(diagnostic("This command is used only by Reclaim's updater"));
+    };
+    if flag != INSTALL_DEB_FLAG {
         return Err(diagnostic("This command is used only by Reclaim's updater"));
     }
     let current = current_version();
-    let version = args[1]
+    let version = version
         .to_str()
         .and_then(|v| semver::Version::parse(v).ok())
         .filter(|v| v.pre.is_empty() && v.build.is_empty() && *v > current)
         .ok_or_else(|| diagnostic("Not a newer Reclaim version"))?;
-    let package = std::path::Path::new(&args[2]);
+    let package = std::path::Path::new(package);
     let mut text = String::new();
     regular_file(&signature_path(package))?
         .take(MAX_SIGNATURE + 1)
@@ -259,13 +267,14 @@ fn copy_verified_package(
         if count == 0 {
             break;
         }
-        size += count as u64;
+        // `Read` promises count <= buffer.len(); refuse a reader that breaks it.
+        let chunk = buffer.get(..count).ok_or("Update exceeds expected size")?;
+        size = size.saturating_add(count as u64);
         if size > MAX_BINARY {
             return Err("Update exceeds expected size".into());
         }
-        verifier.update(&buffer[..count]);
-        dest.write_all(&buffer[..count])
-            .map_err(|e| e.to_string())?;
+        verifier.update(chunk);
+        dest.write_all(chunk).map_err(|e| e.to_string())?;
     }
     verifier
         .finalize()
@@ -528,24 +537,24 @@ fn verify_download_progress(
     let mut verifier = key
         .verify_stream(&signature)
         .map_err(|_| "This update is not signed by the Reclaim release key")?;
-    let mut reader = reader.take(release.size + 1);
+    let mut reader = reader.take(release.size.saturating_add(1));
     let mut hash = Sha256::new();
-    let mut size = 0;
+    let mut size = 0u64;
     let mut buffer = vec![0u8; 64 * 1024];
     loop {
         let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
         if count == 0 {
             break;
         }
-        size += count as u64;
+        let chunk = buffer.get(..count).ok_or("Update exceeds expected size")?;
+        size = size.saturating_add(count as u64);
         if size > release.size {
             return Err("Update exceeds expected size".into());
         }
-        hash.update(&buffer[..count]);
-        verifier.update(&buffer[..count]);
+        hash.update(chunk);
+        verifier.update(chunk);
         progress(size, release.size);
-        file.write_all(&buffer[..count])
-            .map_err(|e| e.to_string())?;
+        file.write_all(chunk).map_err(|e| e.to_string())?;
     }
     if size != release.size || format!("{:x}", hash.finalize()) != release.digest {
         return Err("Update checksum verification failed".into());

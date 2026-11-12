@@ -51,7 +51,7 @@ fn record(number: u32, attribute: &[u8]) -> Vec<u8> {
     put16(&mut b, 16, 1);
     put16(&mut b, 20, 56);
     put16(&mut b, 22, 1);
-    put32(&mut b, 24, (56 + attribute.len() + 4) as u32);
+    put32(&mut b, 24, u32::try_from(56 + attribute.len() + 4).unwrap());
     put32(&mut b, 28, 1024);
     put32(&mut b, 44, number);
     b[56..56 + attribute.len()].copy_from_slice(attribute);
@@ -68,7 +68,7 @@ fn nonresident(runs: &[u8], clusters: u64, size: u64) -> Vec<u8> {
     let mut b = vec![0; (64 + runs.len()).next_multiple_of(8)];
     let len = b.len();
     put32(&mut b, 0, 0x80);
-    put32(&mut b, 4, len as u32);
+    put32(&mut b, 4, u32::try_from(len).unwrap());
     b[8] = 1;
     put64(&mut b, 24, clusters - 1);
     put16(&mut b, 32, 64);
@@ -85,7 +85,7 @@ fn ntfs(fragmented: bool, resident: bool) -> Vec<u8> {
     b[13] = 1;
     put64(&mut b, 40, 2048);
     put64(&mut b, 48, 8);
-    b[64] = (-10i8) as u8;
+    b[64] = (-10i8).cast_unsigned();
     b[510..512].copy_from_slice(b"\x55\xaa");
     let runs = if fragmented {
         vec![0x11, 8, 8, 0x11, 24, 24, 0]
@@ -187,6 +187,10 @@ fn occupied_files_are_not_read_or_found_and_free_offsets_export_correctly() {
         forbidden: (u64, u64),
     }
     impl Read for Audit {
+        #[expect(
+            clippy::panic_in_result_fn,
+            reason = "test double: a failed assertion is the test failure"
+        )]
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
             let at = self.input.position();
             let n = self.input.read(bytes)?;
@@ -327,7 +331,7 @@ fn malformed_boot_geometry_does_not_panic() {
         ] {
             let old = b[at];
             b[at] = 255;
-            let _ = plan(
+            let _outcome = plan(
                 &mut Cursor::new(&b),
                 b.len() as u64,
                 &AtomicBool::new(false),

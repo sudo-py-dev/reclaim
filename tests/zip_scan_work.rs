@@ -74,7 +74,7 @@ fn streaming_zip_entries_keep_the_fallback_detection_path() {
     let central = central + descriptor.len();
     bytes[central + 8..central + 10].copy_from_slice(&8u16.to_le_bytes());
     let end = bytes.windows(4).position(|w| w == b"PK\x05\x06").unwrap();
-    bytes[end + 16..end + 20].copy_from_slice(&(central as u32).to_le_bytes());
+    bytes[end + 16..end + 20].copy_from_slice(&(u32::try_from(central).unwrap()).to_le_bytes());
     let mut found = vec![];
     scan_reader(&mut Cursor::new(&bytes), &AtomicBool::new(false), |event| {
         if let Event::Found(file) = event {

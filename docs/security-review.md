@@ -152,3 +152,49 @@ its platform `open_url` implementation. The cargo-deny ban now permits only
 banned. Reclaim does not invoke this URL helper, and the project audit still
 bans a direct `webbrowser` dependency. This exception does not authorize
 application code to launch browser helpers.
+
+## Hardening pass, 2026-11-12
+
+### Changes
+
+- More Clippy lints are now `deny` for the whole crate: lossy integer casts
+  (`cast_possible_truncation`, `cast_possible_wrap`, `cast_sign_loss`),
+  `unwrap_in_result`, `panic_in_result_fn`, `fallible_impl_from`,
+  `get_unwrap`, `exit` and `let_underscore_must_use`. About 100 casts on sizes
+  and offsets read from scanned data now go through `bytes::to_usize` or
+  `try_from`. A compile-time check makes a build for a target narrower than 64
+  bits fail instead of relying on the fallback.
+- Every ignored `Result` is now explicit. A scan whose window has closed now
+  cancels itself instead of continuing with nobody reading its results.
+- These modules now deny unchecked indexing and arithmetic in shipped code
+  (`clippy::indexing_slicing`, `clippy::arithmetic_side_effects`): the updater,
+  gzip, xar and ZIP parsing, damaged-media reads, i18n, Linux drive discovery,
+  the drive monitor, diagnostics, the installer launcher, native process
+  launching, preview, update state and runtime, and UI text. Download loops
+  also refuse a reader that reports more bytes than its buffer holds. The audit
+  baseline drops by 35 unchecked indexes.
+- Release builds keep integer overflow checks on (`overflow-checks = true`), so
+  a wrap that slips past checked arithmetic aborts instead of producing a wrong
+  length.
+- Windows: Reclaim loads DLLs only from System32 and its own folder
+  (`SetDefaultDllDirectories`), so a DLL planted in the current folder or on
+  `PATH` is ignored. MSVC builds enable Control Flow Guard.
+- CI: every checkout uses `persist-credentials: false`, and the release build
+  no longer restores a build cache that pull requests could have written.
+
+### Verification
+
+`cargo fmt --all -- --check`, `cargo test --locked` (all suites, including the
+audit and headless UI renders) and
+`cargo clippy --locked --all-targets -- -D warnings` pass on Linux.
+
+### Not verified
+
+- Windows and macOS were not built on this Linux host: no Windows C
+  cross-compiler for `ring`, no macOS SDK. Their cast fixes and the DLL
+  search restriction were reviewed by hand. Run CI and smoke-test the Windows
+  build (file dialogs, previews, drive list, update) before releasing.
+- The larger parsers (`formats.rs`, `lib.rs`, `validation.rs`, `allocation/`,
+  `ntfs.rs`, `detection.rs`, `source.rs`, `cfb.rs`, Windows and macOS drive
+  discovery) still contain unchecked indexing and arithmetic, mostly after
+  explicit bounds checks. The audit ratchet keeps their counts from growing.

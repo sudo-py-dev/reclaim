@@ -81,7 +81,7 @@ fn public_candidate_names_cannot_escape_export_directory_or_spoof_direction() {
 #[test]
 fn source_reader_preserves_bytes_and_checks_seek_bounds() {
     use std::io::{Read, Seek, SeekFrom};
-    let data: Vec<u8> = (0..2048).map(|n| (n % 251) as u8).collect();
+    let data: Vec<u8> = (0..2048).map(|n| u8::try_from(n % 251).unwrap()).collect();
     for alignment in [1, 512, 4096] {
         let mut source =
             reclaim::SourceReader::new(Cursor::new(&data), alignment, Some(data.len() as u64))

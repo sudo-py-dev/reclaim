@@ -145,11 +145,9 @@ struct Extent<'a, R> {
 }
 impl<R: Read + Seek> Read for Extent<'_, R> {
     fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
-        let length = b.len().min(
-            self.length
-                .saturating_sub(self.position)
-                .min(usize::MAX as u64) as usize,
-        );
+        let length = b.len().min(crate::bytes::to_usize(
+            self.length.saturating_sub(self.position),
+        ));
         if length == 0 {
             return Ok(0);
         }

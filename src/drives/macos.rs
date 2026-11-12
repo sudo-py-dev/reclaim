@@ -86,14 +86,15 @@ fn string(value: CFTypeRef) -> Option<String> {
     if !(0..=1024 * 1024).contains(&length) {
         return None;
     }
+    let size = usize::try_from(length).ok()?.saturating_add(1);
     // audit-allow(DOS-ALLOC): length is checked to be at most 1 MiB just above.
-    let mut bytes = vec![0i8; length as usize + 1];
+    let mut bytes = vec![0i8; size];
     // SAFETY: bytes is writable for exactly bytes.len() bytes, the length passed.
     if unsafe {
         CFStringGetCString(
             value,
             bytes.as_mut_ptr(),
-            bytes.len() as isize,
+            isize::try_from(bytes.len()).unwrap_or(isize::MAX),
             kCFStringEncodingUTF8,
         )
     } == 0
@@ -197,7 +198,9 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         let count = unsafe {
             libc::getfsstat(
                 entries.as_mut_ptr(),
-                std::mem::size_of_val(entries.as_slice()) as i32,
+                // At most 65,536 entries of a few KiB, far below i32::MAX; a
+                // larger buffer would be reported as smaller, which is safe.
+                i32::try_from(std::mem::size_of_val(entries.as_slice())).unwrap_or(i32::MAX),
                 libc::MNT_NOWAIT,
             )
         };
@@ -207,8 +210,10 @@ pub fn discover() -> Result<Vec<Drive>, String> {
                 std::io::Error::last_os_error()
             ));
         }
-        if (count as usize) < entries.len() {
-            entries.truncate(count as usize);
+        // `count` is not negative here, checked just above.
+        let count = usize::try_from(count).unwrap_or(0);
+        if count < entries.len() {
+            entries.truncate(count);
             break entries;
         }
         capacity *= 2;

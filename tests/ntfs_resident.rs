@@ -18,8 +18,8 @@ fn attribute(record: &mut [u8], at: &mut usize, kind: u32, value: &[u8]) -> usiz
     let start = *at;
     let length = (24 + value.len()).next_multiple_of(8);
     put32(record, start, kind);
-    put32(record, start + 4, length as u32);
-    put32(record, start + 16, value.len() as u32);
+    put32(record, start + 4, u32::try_from(length).unwrap());
+    put32(record, start + 16, u32::try_from(value.len()).unwrap());
     put16(record, start + 20, 24);
     record[start + 24..start + 24 + value.len()].copy_from_slice(value);
     *at += length;
@@ -39,7 +39,7 @@ fn record(name: &str, contents: &[u8], flags: u16, external: bool) -> Vec<u8> {
     attribute(&mut bytes, &mut at, 0x10, &[0; 48]);
     let utf16: Vec<_> = name.encode_utf16().collect();
     let mut filename = vec![0; 66 + utf16.len() * 2];
-    filename[64] = utf16.len() as u8;
+    filename[64] = u8::try_from(utf16.len()).unwrap();
     filename[65] = 1;
     for (i, c) in utf16.iter().enumerate() {
         put16(&mut filename, 66 + i * 2, *c);
@@ -50,7 +50,7 @@ fn record(name: &str, contents: &[u8], flags: u16, external: bool) -> Vec<u8> {
         bytes[data_at + 8] = 1;
     }
     put32(&mut bytes, at, u32::MAX);
-    put32(&mut bytes, 24, (at + 4) as u32);
+    put32(&mut bytes, 24, u32::try_from(at + 4).unwrap());
     put16(&mut bytes, 48, 0xbeef);
     for (i, tail) in [510, 1022].into_iter().enumerate() {
         let original = [bytes[tail], bytes[tail + 1]];
@@ -71,11 +71,19 @@ fn scan(bytes: &[u8]) -> Vec<Found> {
 }
 struct Unreadable;
 impl Read for Unreadable {
+    #[expect(
+        clippy::panic_in_result_fn,
+        reason = "test double: a failed assertion is the test failure"
+    )]
     fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
         panic!("Resident exports must not read the raw source");
     }
 }
 impl Seek for Unreadable {
+    #[expect(
+        clippy::panic_in_result_fn,
+        reason = "test double: a failed assertion is the test failure"
+    )]
     fn seek(&mut self, _: SeekFrom) -> io::Result<u64> {
         panic!("Resident exports must not seek the raw source");
     }
@@ -161,7 +169,7 @@ fn deleted_records_preserve_standard_information_dates() {
     // The fixture's first resident attribute is $STANDARD_INFORMATION.
     let value = 64 + 24;
     for (index, seconds) in seconds.iter().enumerate() {
-        let filetime = (*seconds + 11_644_473_600) as u64 * 10_000_000;
+        let filetime = u64::try_from(*seconds + 11_644_473_600).unwrap() * 10_000_000;
         raw[value + index * 8..value + index * 8 + 8].copy_from_slice(&filetime.to_le_bytes());
     }
     let rows = scan(&raw);

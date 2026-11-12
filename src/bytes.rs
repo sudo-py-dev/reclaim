@@ -4,6 +4,22 @@
 //! buffer. Instead of panicking (which would stop the scan, CWE-125/CWE-248), an
 //! out-of-range field reads as zero. Every format here already treats a zero
 //! length, count or offset as invalid, so the candidate is rejected normally.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
+
+// Reclaim ships 64-bit builds only. This makes a build for a narrower target
+// fail to compile instead of quietly depending on `to_usize`'s fallback.
+const _: () = assert!(usize::BITS >= 64, "Reclaim supports 64-bit targets only");
+
+/// A size or offset read from scanned data, as an index type. Lossless on
+/// every supported target; the saturating fallback means a value that could
+/// not fit is rejected by the bounds check that follows instead of wrapping.
+pub(crate) fn to_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
 
 fn field<const N: usize>(bytes: &[u8], at: usize) -> [u8; N] {
     at.checked_add(N)
@@ -44,6 +60,12 @@ mod tests {
         assert_eq!(u32_be(&bytes, 4), 0x0506_0708);
         assert_eq!(u64_le(&bytes, 0), 0x0807_0605_0403_0201);
         assert_eq!(u64_be(&bytes, 0), 0x0102_0304_0506_0708);
+    }
+
+    #[test]
+    fn sizes_convert_without_loss() {
+        assert_eq!(to_usize(0), 0);
+        assert_eq!(to_usize(u64::MAX), usize::MAX);
     }
 
     #[test]

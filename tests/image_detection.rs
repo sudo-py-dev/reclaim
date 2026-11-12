@@ -96,7 +96,9 @@ fn every_icon_frame_must_match_dimensions_and_decode() {
 fn embedded_terminators_do_not_truncate_valid_images() {
     let png = include_bytes!("fixtures/real.png");
     let payload = b"\0\0\0\0IEND\xaeB`\x82";
-    let mut chunk = (payload.len() as u32).to_be_bytes().to_vec();
+    let mut chunk = (u32::try_from(payload.len()).unwrap())
+        .to_be_bytes()
+        .to_vec();
     chunk.extend_from_slice(b"raNd");
     chunk.extend_from_slice(payload);
     let crc = crc32fast::hash(&chunk[4..]);
@@ -105,7 +107,7 @@ fn embedded_terminators_do_not_truncate_valid_images() {
     let jpeg = include_bytes!("fixtures/real.jpg");
     let app_data = b"embedded \xff\xd9 marker";
     let mut app = b"\xff\xe3".to_vec();
-    app.extend_from_slice(&((app_data.len() + 2) as u16).to_be_bytes());
+    app.extend_from_slice(&(u16::try_from(app_data.len() + 2).unwrap()).to_be_bytes());
     app.extend_from_slice(app_data);
     let with_app = [&jpeg[..2], app.as_slice(), &jpeg[2..]].concat();
     let gif = include_bytes!("fixtures/real.gif");

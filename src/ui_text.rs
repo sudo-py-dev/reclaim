@@ -1,4 +1,9 @@
 //! Localized Slint properties. The English catalog is the message ID source.
+// Hardened module: no unchecked indexing or arithmetic in shipped code (CWE-125, CWE-190).
+#![cfg_attr(
+    not(test),
+    deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
+)]
 use crate::{AppWindow, Locale, Strings};
 use reclaim::i18n;
 use slint::ComponentHandle;
