@@ -8,6 +8,8 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 const FIXTURES: &[(&str, &[u8])] = &[
+    ("mid", include_bytes!("fixtures/formats/sample.mid")),
+    ("swf", include_bytes!("fixtures/formats/sample.swf")),
     ("exe", include_bytes!("fixtures/formats/pe32.exe")),
     ("exe", include_bytes!("fixtures/formats/certificate.exe")),
     ("dll", include_bytes!("fixtures/formats/pe64.dll")),
@@ -63,7 +65,18 @@ fn all_added_formats_carve_across_blocks_and_export_exact_bytes() {
         assert_eq!(found.size, bytes.len() as u64, "{kind}");
         let expected = if matches!(
             *kind,
-            "exe" | "dll" | "elf" | "msi" | "msp" | "mst" | "ole" | "rpm" | "dex" | "xar" | "pkg"
+            "exe"
+                | "dll"
+                | "elf"
+                | "msi"
+                | "msp"
+                | "mst"
+                | "ole"
+                | "rpm"
+                | "dex"
+                | "xar"
+                | "pkg"
+                | "swf"
         ) {
             Validation::Unverified
         } else {
@@ -85,6 +98,8 @@ fn truncated_candidates_and_corrupt_metadata_do_not_become_results() {
         );
     }
     let cases: &[(&str, usize)] = &[
+        ("mid", 8),
+        ("swf", 4),
         ("exe", 60),
         ("elf", 4),
         ("msi", 30),
@@ -143,13 +158,121 @@ fn short_device_reads_and_cancellation_are_supported() {
 }
 #[test]
 fn altered_executables_are_rechecked_before_export() {
-    let mut bytes = FIXTURES[0].1.to_vec();
+    let mut bytes = FIXTURES
+        .iter()
+        .find(|(kind, _)| *kind == "exe")
+        .unwrap()
+        .1
+        .to_vec();
     let found = collect(&mut Cursor::new(&bytes)).remove(0);
     bytes[60..64].fill(0xff);
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("bad.exe");
     assert!(recover_reader(&mut Cursor::new(bytes), &output, &found).is_err());
     assert!(!output.exists());
+}
+
+#[test]
+fn midi_and_swf_reject_every_truncated_prefix_and_recheck_changed_exports() {
+    for kind in ["mid", "swf"] {
+        let bytes = FIXTURES.iter().find(|(k, _)| *k == kind).unwrap().1;
+        for length in 0..bytes.len() {
+            assert!(
+                collect(&mut Cursor::new(&bytes[..length])).is_empty(),
+                "{kind} prefix {length}"
+            );
+        }
+        let found = collect(&mut Cursor::new(bytes)).remove(0);
+        let mut changed = bytes.to_vec();
+        // MIDI loses its End-of-Track; SWF loses its final End tag.
+        let at = changed.len() - 2;
+        changed[at] ^= 0x7f;
+        let directory = tempfile::tempdir().unwrap();
+        assert!(
+            recover_reader(
+                &mut Cursor::new(changed),
+                &directory.path().join("output"),
+                &found
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn midi_track_lengths_running_status_and_swf_tags_bound_candidates() {
+    let midi = include_bytes!("fixtures/formats/sample.mid");
+    // Every malformed event stream has valid outer track framing.
+    for track in [
+        &b"\0\x3c\x40\0\xff\x2f\0"[..],       // No preceding running status.
+        &b"\x81\x81\x81\x81\0\xff\x2f\0"[..], // Delta > four bytes.
+        &b"\0\x90\x3c\xff\0\xff\x2f\0"[..],   // Invalid channel data.
+        &b"\0\xff\x01\x7f\0\xff\x2f\0"[..],   // Meta payload exceeds track.
+        &b"\0\xff\x2f\0\0\x90\x3c\x40"[..],   // Data after End-of-Track.
+    ] {
+        let mut bad = midi[..18].to_vec();
+        bad.extend(u32::try_from(track.len()).unwrap().to_be_bytes());
+        bad.extend(track);
+        assert!(collect(&mut Cursor::new(bad)).is_empty());
+    }
+    // Formats 1/2 support multiple tracks, and SMPTE division is signed.
+    for format in [1u16, 2] {
+        let mut two = midi.to_vec();
+        two[8..10].copy_from_slice(&format.to_be_bytes());
+        two[10..12].copy_from_slice(&2u16.to_be_bytes());
+        two[12..14].copy_from_slice(&[0xe7, 40]);
+        two.extend_from_slice(&midi[14..]);
+        let files = collect(&mut Cursor::new(&two));
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].size, two.len() as u64);
+    }
+    let swf = include_bytes!("fixtures/formats/sample.swf");
+    for (offset, value) in [(0, b'C'), (3, 0), (8, 0), (12, 2), (14, 0x7f)] {
+        let mut bad = swf.to_vec();
+        bad[offset] = value;
+        assert!(collect(&mut Cursor::new(bad)).is_empty());
+    }
+    // Two adjacent files must remain two separate recovery candidates.
+    let adjacent = [midi.as_slice(), midi.as_slice()].concat();
+    let files = collect(&mut Cursor::new(adjacent));
+    assert_eq!(
+        files.iter().map(|f| f.offset).collect::<Vec<_>>(),
+        vec![0, midi.len() as u64]
+    );
+}
+
+#[test]
+fn swf_extended_tags_are_bounded_and_version_eight_requires_file_attributes() {
+    let base = include_bytes!("fixtures/formats/sample.swf");
+    let mut bytes = base[..14].to_vec();
+    bytes[3] = 8;
+    bytes.extend_from_slice(&((69u16 << 6) | 4).to_le_bytes());
+    bytes.extend_from_slice(&[0; 4]);
+    // A long-form Metadata tag with embedded signature-like payload.
+    let payload = b"%PDF-1.7 not an independently framed file";
+    bytes.extend_from_slice(&((77u16 << 6) | 63).to_le_bytes());
+    let size_at = bytes.len();
+    bytes.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(payload);
+    bytes.extend_from_slice(&base[14..]);
+    let size = u32::try_from(bytes.len()).unwrap();
+    bytes[4..8].copy_from_slice(&size.to_le_bytes());
+    let found = collect(&mut Cursor::new(&bytes));
+    assert!(
+        found
+            .iter()
+            .any(|f| f.kind == "swf" && f.size == u64::from(size))
+    );
+    bytes[size_at..size_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(
+        !collect(&mut Cursor::new(&bytes))
+            .iter()
+            .any(|f| f.kind == "swf")
+    );
+    let mut missing_attributes = base.to_vec();
+    missing_attributes[3] = 8;
+    assert!(collect(&mut Cursor::new(missing_attributes)).is_empty());
 }
 
 #[test]

@@ -39,10 +39,10 @@ pub fn category_index(kind: &str) -> usize {
         "pdf" | "docx" | "xlsx" | "pptx" | "docm" | "xlsm" | "pptm" | "odt" | "ods" | "odp"
         | "epub" | "ole" | "txt" | "csv" | "json" | "xml" | "md" | "html" | "log" | "sqlite" => 2,
         "zip" | "7z" | "cab" | "rar" | "tar" | "gz" | "xar" => 3,
-        "wav" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" => 4,
+        "wav" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" | "mid" => 4,
         "avi" | "mp4" | "ogv" => 5,
         "jar" | "apk" | "exe" | "dll" | "elf" | "msi" | "msp" | "mst" | "deb" | "rpm" | "dex"
-        | "pkg" => 6,
+        | "pkg" | "swf" => 6,
         _ => 0,
     }
 }
@@ -174,6 +174,16 @@ struct Format {
     ext: &'static str,
 }
 static FORMATS: &[Format] = &[
+    Format {
+        head: b"MThd",
+        tail: b"",
+        ext: "mid",
+    },
+    Format {
+        head: b"FWS",
+        tail: b"",
+        ext: "swf",
+    },
     Format {
         head: b"\x1f\x8b\x08",
         tail: b"",

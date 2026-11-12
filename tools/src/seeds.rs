@@ -41,8 +41,45 @@ pub fn resident_record() -> Vec<u8> {
 pub fn generate(repository: &Path) -> Result {
     let corpus = repository.join("fuzz/corpus/scan");
     let containers = repository.join("fuzz/containers/corpus/containers");
+    let allocation = repository.join("fuzz/corpus/allocation");
+    let source = repository.join("fuzz/corpus/source");
     fs::create_dir_all(&corpus)?;
     fs::create_dir_all(&containers)?;
+    fs::create_dir_all(&allocation)?;
+    fs::create_dir_all(&source)?;
+    // A complete small FAT12 volume with one free cluster containing a PDF.
+    let mut volume = vec![0u8; 32768];
+    volume[..3].copy_from_slice(b"\xeb\x3c\x90");
+    for (at, value) in [(11, 512u16), (14, 1), (17, 16), (19, 64), (22, 1)] {
+        volume[at..at + 2].copy_from_slice(&value.to_le_bytes());
+    }
+    volume[13] = 1;
+    volume[16] = 2;
+    volume[21] = 0xf8;
+    volume[510..512].copy_from_slice(b"\x55\xaa");
+    for at in [512, 1024] {
+        volume[at..at + 512].fill(0xff);
+        volume[at] = 0xf8;
+        volume[at + 4] = 0x0f;
+        volume[at + 5] = 0;
+    }
+    let pdf = b"%PDF-1.7\nexample\n%%EOF";
+    volume[2560..2560 + pdf.len()].copy_from_slice(pdf);
+    fs::write(allocation.join("fat12-volume"), &volume)?;
+    for (name, signature) in [("ntfs-boot", b"NTFS    "), ("exfat-boot", b"EXFAT   ")] {
+        let mut boot = vec![0; 512];
+        boot[3..11].copy_from_slice(signature);
+        boot[510..512].copy_from_slice(b"\x55\xaa");
+        fs::write(allocation.join(name), boot)?;
+    }
+    for (index, offset) in [0, 511, 4095, 1u64 << 32, 1u64 << 63, u64::MAX]
+        .into_iter()
+        .enumerate()
+    {
+        let mut command = vec![64];
+        command.extend(offset.to_le_bytes());
+        fs::write(source.join(format!("offset-{index}")), command)?;
+    }
     let fixtures = repository.join("tests/fixtures");
     for fixture in files(&fixtures)? {
         if fixture.extension().is_some_and(|ext| ext == "md")

@@ -1,5 +1,6 @@
 ---
 import Logo from './Logo.astro';
+import Icon from './Icon.astro';
 import { LANGUAGE_NAMES, LOCALES, localePath, useDict, type Locale, type PageKey } from '../i18n';
 import { REPO_URL, RELEASES_URL } from '../lib/release';
 
@@ -37,10 +38,10 @@ const year = new Date().getFullYear();
     <nav aria-label={t.footer.project}>
       <h2>{t.footer.project}</h2>
       <ul role="list">
-        <li><a href={REPO_URL} rel="noopener">{t.footer.source}</a></li>
-        <li><a href={RELEASES_URL} rel="noopener">{t.footer.releases}</a></li>
-        <li><a href={`${REPO_URL}/issues`} rel="noopener">{t.footer.issues}</a></li>
-        <li><a href={`${REPO_URL}/blob/main/docs/DEVELOPMENT.md`} rel="noopener">{t.footer.docs}</a></li>
+        <li><a class="project-link" href={REPO_URL} rel="noopener"><Icon name="github" size={17} />{t.footer.source}</a></li>
+        <li><a class="project-link" href={RELEASES_URL} rel="noopener"><Icon name="tag" size={17} />{t.footer.releases}</a></li>
+        <li><a class="project-link" href={`${REPO_URL}/issues`} rel="noopener"><Icon name="issue" size={17} />{t.footer.issues}</a></li>
+        <li><a class="project-link" href={`${REPO_URL}/blob/main/docs/DEVELOPMENT.md`} rel="noopener"><Icon name="book" size={17} />{t.footer.docs}</a></li>
       </ul>
     </nav>
 
@@ -117,6 +118,12 @@ const year = new Date().getFullYear();
 
   a:hover {
     color: var(--ink);
+  }
+
+  .project-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .langs a[aria-current] {

@@ -8,6 +8,8 @@ rustup toolchain install nightly --profile minimal --component rust-src
 cargo test --locked --test audit fuzz_harness
 cargo xtask seed-corpus
 cargo +nightly fuzz run scan --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=2048 -dict=fuzz/scan.dict
+cargo +nightly fuzz run source --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=1024
+cargo +nightly fuzz run allocation --dev --target x86_64-unknown-linux-gnu -- -max_total_time=120 -max_len=65536 -timeout=10 -rss_limit_mb=2048 -dict=fuzz/scan.dict
 ```
 
 AddressSanitizer is enabled by default. Debug assertions and overflow checks are
@@ -20,6 +22,23 @@ aligned reads, and recovery filename generation. It checks that carved ranges
 fit their input and names contain a single path component. Inputs are limited
 to 64 KiB and exports are not written to disk. This does not exercise the GUI,
 network updater, OS drive FFI, or megabyte-sized streaming boundaries.
+
+`source` compares randomized seek/read sequences against a standard in-memory
+cursor, with 1/512/4096/65536-byte alignments, negative seeks and offsets near
+integer limits. `allocation` fuzzes the production unused-space API with FAT,
+NTFS and exFAT inputs; malformed maps may return errors but must not panic,
+hang, or produce out-of-bounds candidates. Its corpus includes a complete FAT12
+volume with a recoverable file in a free cluster. These targets use synthetic
+memory inputs and never open a physical drive or write recovery output.
+
+`tests/security.rs` also uses a virtual disk to verify exact export bytes at
+offsets above 4 GiB, above 8 EiB, and near `u64::MAX`. Those tests exercise high
+offsets without allocating a giant image or writing to user devices.
+
+If LeakSanitizer explicitly reports that the host sandbox prevents its ptrace
+check, prefix the command with `ASAN_OPTIONS=detect_leaks=0`. This keeps
+AddressSanitizer enabled but omits leak detection; record that limitation with
+the results. Do not change host ptrace or other system security settings.
 
 The Rust seed command copies the existing real image/archive fixtures and creates a
 valid NTFS resident record and PDF. Corpus mutations, build artifacts, coverage,

@@ -1,5 +1,12 @@
 #![no_main]
 
+#[path = "../../../src/bytes.rs"]
+#[expect(
+    dead_code,
+    reason = "the lightweight probes use only part of the production byte helpers"
+)]
+mod bytes;
+
 // Compile the exact production probes, including their shared bounds and result
 // type, without pulling the desktop stack into the sanitizer build.
 #[path = "../../../src/detection.rs"]

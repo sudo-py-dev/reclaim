@@ -3593,6 +3593,7 @@ dependencies = [
  "libc",
  "log",
  "minisign-verify",
+ "pulldown-cmark",
  "quick-xml",
  "rfd",
  "semver",

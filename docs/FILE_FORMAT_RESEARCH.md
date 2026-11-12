@@ -7,13 +7,15 @@ A header match alone is not treated as a complete file.
 
 ## Added formats
 
-These additions expose 18 extensions across 13 format families. Each candidate
+These additions expose 20 extensions across 15 format families. Each candidate
 has a bounded extent probe, truncation checks, category mapping, portable naming,
 and export-time format rechecking. Source reads remain read-only. Programs and
 installers are never executed to identify or test them.
 
 | Family / extensions | Signature | Boundary and checks | Result label / limitations |
 | --- | --- | --- | --- |
+| Standard MIDI: `mid` | `MThd` | Formats 0–2, declared header and track lengths, valid division, bounded four-byte variable integers, channel/running-status events, meta/SysEx lengths, exact End-of-Track. | **Structure checked**. At most 4096 tracks and one million events per track, 64 MiB total. Unknown chunks, RIFF-wrapped MIDI and MIDI 2.0 clips are unsupported. Meta/SysEx payload semantics are not interpreted. |
+| Uncompressed Flash: `swf` | `FWS` | Versions 1–19, declared total length, variable RECT extent, frame header, bounded short/long tag extents, required first FileAttributes for version 8+, ShowFrame count and exact final End tag. | **Unverified candidate**. Tag framing only; nested payloads, scripts and rectangle coordinates are not semantically validated or executed. Compressed CWS/ZWS are unsupported. 64 MiB maximum. |
 | Windows PE: `exe`, `dll` | `4D 5A`, then `50 45 00 00` at the DOS header's PE pointer | PE32/PE32+ optional header; 1–96 sections; aligned, nonoverlapping raw ranges; referenced symbol/string table; certificate-table extent and record lengths. DLL flag selects extension. | **Unverified candidate**. Extent inferred from referenced structures, not an exact EOF. Unreferenced overlays, some debug data, and self-extracting installer payloads may be missing. Old DOS/NE/LE files are not PE and are rejected. Driver/native images retain `exe`; no guessed `sys` extension. |
 | Linux / Unix ELF: `elf` | `7F 45 4C 46` | 32/64-bit, little/big endian; executable/shared/relocatable/core types; program and section tables; all referenced file-backed ranges. `SHT_NOBITS` does not add file bytes. | **Unverified candidate**. Inferred minimum extent; no trailing-data guarantee. Extended numbering is not implemented. ET_DYN remains `elf` because it can be a PIE executable or shared library. |
 | Compound storage / Windows Installer: `ole`, `msi`, `msp`, `mst` | `D0 CF 11 E0 A1 B1 1A E1` | CFB v3/v4 header and sector geometry; DIFAT/FAT bounds and sector markers; directory-chain loops; root entry and root CLSID. Extent through last allocated sector. | **Unverified candidate**. Mini-stream contents, storage trees, installer database tables, payloads, and digital signatures are not fully validated. Unallocated trailing sectors can be omitted. Other compound documents use `ole`, rather than guessing old Office extensions. |
@@ -34,6 +36,9 @@ Executable/container candidates labeled unverified are not used to skip embedded
 files during the main signature search.
 
 ## Primary references
+
+- [MIDI Association Standard MIDI Files specification](https://midi.org/standard-midi-files-specification), cross-checked against the [upstream Midly SMF reader](https://github.com/kovaxis/midly/blob/master/src/smf.rs): header/track layout and formats. Added 2026-11-12.
+- [Adobe SWF specification v19, publisher document mirrored by Open Flash](https://open-flash.github.io/mirrors/swf-spec-19.pdf), chapters 1–4: file length, RECT extent, record headers, FileAttributes, ShowFrame and End. Added 2026-11-12.
 
 - [Microsoft PE/COFF specification](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format): DOS/PE headers, raw section extents, data directories and certificate-file offsets.
 - [Microsoft CFB specification](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/53989ce4-7b05-4f8d-829b-d08d6148375b), [CFB header](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/05060311-bfce-4b12-874d-71fd4ce63aea), [DIFAT](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/0afa4e43-b18f-432a-9917-4f276eca7a73): sector allocation and storage layout.

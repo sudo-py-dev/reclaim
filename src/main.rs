@@ -339,6 +339,12 @@ impl Reclaim {
         let Some(source) = self.scanned_source.clone() else {
             return;
         };
+        // Recheck after the dialog: a mount or drive may have changed while it
+        // was open. Never allow an affirmative click to write onto the source.
+        if drives::destination(&source, &directory) == drives::Destination::SameDrive {
+            self.status = "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.".into();
+            return;
+        }
         let files = self.recovery_files();
         if files.is_empty() {
             return;
@@ -969,10 +975,15 @@ fn run() -> Result<(), slint::PlatformError> {
             if rfd::MessageDialog::new()
                 .set_title(i18n::t("Review recovery destination"))
                 .set_description(i18n::t(explanation))
-                .set_buttons(rfd::MessageButtons::OkCancel)
+                .set_buttons(if destination == drives::Destination::SameDrive {
+                    rfd::MessageButtons::Ok
+                } else {
+                    rfd::MessageButtons::OkCancel
+                })
                 .set_level(rfd::MessageLevel::Warning)
                 .show()
                 == rfd::MessageDialogResult::Ok
+                && destination != drives::Destination::SameDrive
             {
                 s.export(directory);
             }

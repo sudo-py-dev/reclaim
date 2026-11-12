@@ -303,6 +303,8 @@ fn extension_kind(name: &str) -> &'static str {
         Some("tar") => "tar",
         Some("qoi") => "qoi",
         Some("dex") => "dex",
+        Some("mid" | "midi") => "mid",
+        Some("swf") => "swf",
         Some("gz") => "gz",
         Some("xar") => "xar",
         Some("pkg") => "pkg",

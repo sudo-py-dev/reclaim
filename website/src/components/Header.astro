@@ -29,7 +29,7 @@ const links = [
 
     <nav class="nav" aria-label={t.nav.menu}>
       {links.map((l) => <a href={l.href}>{l.label}</a>)}
-      <a href={REPO_URL} rel="noopener">{t.nav.github}</a>
+      <a href={REPO_URL} rel="noopener"><Icon name="github" size={17} />{t.nav.github}</a>
     </nav>
 
     <div class="actions">
@@ -58,6 +58,7 @@ const links = [
         </ul>
       </details>
       <a class="btn btn-primary btn-sm header-dl" href={localePath(locale, 'download')}>
+        <Icon name="download" size={16} />
         {t.nav.download}
       </a>
     </div>
@@ -132,6 +133,9 @@ const links = [
   }
 
   .nav a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     padding: 8px 12px;
     border-radius: 8px;
     color: var(--ink-2);

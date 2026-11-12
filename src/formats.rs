@@ -5,6 +5,7 @@ use crate::{CandidateEnd, Validation, detection::LIMIT};
 use std::sync::atomic::{AtomicBool, Ordering};
 mod cfb;
 mod gzip;
+mod media;
 mod xar;
 pub(crate) use gzip::Gzip;
 type Probe = Result<usize, CandidateEnd>;
@@ -71,6 +72,8 @@ pub(crate) fn supported(kind: &str) -> bool {
             | "gz"
             | "xar"
             | "pkg"
+            | "mid"
+            | "swf"
     )
 }
 pub(crate) fn end(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<CandidateEnd> {
@@ -81,6 +84,8 @@ pub(crate) fn end(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Candi
         Err(CandidateEnd::Invalid)
     } else {
         match kind {
+            "mid" => media::midi(bytes, cancel),
+            "swf" => media::swf(bytes, cancel),
             "pe" | "exe" | "dll" => pe(bytes),
             "elf" => elf(bytes),
             "cfb" | "ole" | "msi" | "msp" | "mst" => cfb::end(bytes, cancel),
@@ -142,7 +147,18 @@ pub(crate) fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<
     Some(
         if matches!(
             kind,
-            "exe" | "dll" | "elf" | "ole" | "msi" | "msp" | "mst" | "rpm" | "dex" | "xar" | "pkg"
+            "exe"
+                | "dll"
+                | "elf"
+                | "ole"
+                | "msi"
+                | "msp"
+                | "mst"
+                | "rpm"
+                | "dex"
+                | "xar"
+                | "pkg"
+                | "swf"
         ) {
             Validation::Unverified
         } else {
