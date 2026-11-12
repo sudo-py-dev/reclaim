@@ -17,7 +17,10 @@ const UNSAFE_FILES: &[&str] = &[
 
 /// The only places that may start another program, and what they may call.
 const PROCESS_APIS: &[(&str, &[&str])] = &[
-    ("src/native_process.rs", &["posix_spawn", "CreateProcessW"]),
+    (
+        "src/native_process.rs",
+        &["posix_spawn", "CreateProcessW", "ShellExecuteExW"],
+    ),
     ("src/installer.rs", &["ShellExecuteW"]),
 ];
 const PROCESS_IDENTS: &[&str] = &[

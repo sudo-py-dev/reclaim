@@ -58,6 +58,7 @@ export global Strings {
     in-out property <string> supported-formats: "Supported formats";
     in-out property <string> photos-documents-archives-audio-video: "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, and NTFS volumes.";
     in-out property <string> check-for-updates: "Check for updates";
+    in-out property <string> restart-as-administrator: "Restart as administrator";
     in-out property <string> updates: "Updates";
     in-out property <string> whats-new: "What’s new";
     in-out property <string> later: "Later";
@@ -430,6 +431,8 @@ component EmptyState inherits VerticalLayout {
 
 // What a scan is doing right now: status line, Stop, progress and any error.
 component ScanStatus inherits VerticalLayout {
+    in property <bool> needs-administrator;
+    callback restart-as-administrator();
     in property <string> status;
     // Quiet progress beside the status, such as "2.1 GiB of 5.7 GiB".
     in property <string> detail;
@@ -450,6 +453,10 @@ component ScanStatus inherits VerticalLayout {
         Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * root.progress; background: Palette.primary; border-radius: 2px; animate width { duration: 250ms; } }
     }
     if root.error != "" : Label { text: root.error; color: Palette.danger; wrap: word-wrap; font-size: 12px; }
+    if root.needs-administrator && !root.busy : Row {
+        Action { text: Strings.restart-as-administrator; icon: @image-url("icons/shield.svg"); primary: true; clicked => { root.restart-as-administrator(); } }
+        Rectangle { horizontal-stretch: 1; }
+    }
 }
 // System device name (nvme0n1p1, disk2s1, C:) set apart from human-readable labels.
 component DeviceTag inherits Rectangle {
@@ -511,6 +518,8 @@ export component AppWindow inherits Window {
     in property <string> source: Strings.no-source-selected;
     in property <string> status;
     in property <string> error;
+    in property <bool> needs-administrator;
+    callback restart-as-administrator();
     in property <string> summary;
     in property <string> detail: Strings.select-a-file-to-inspect;
     in property <image> preview;
@@ -669,7 +678,7 @@ export component AppWindow inherits Window {
                         Action { height: 40px; text: Strings.start-scanning; icon: @image-url("icons/search.svg"); primary: true; enabled: root.can-scan; clicked => { root.scan(); } }
                     }
                     if root.busy || root.error != "" : Divider {}
-                    if root.busy || root.error != "" : ScanStatus { status: root.status; detail: root.scan-detail; error: root.error; busy: root.busy; progress: root.progress; stop => { root.stop(); } }
+                    if root.busy || root.error != "" : ScanStatus { status: root.status; detail: root.scan-detail; error: root.error; needs-administrator: root.needs-administrator; restart-as-administrator => { root.restart-as-administrator(); } busy: root.busy; progress: root.progress; stop => { root.stop(); } }
                 } }
             }
             // Recovered files: filter, inspect, select, recover.
@@ -809,7 +818,7 @@ export component AppWindow inherits Window {
             // Status strip for Recovered files. Sources shows status inside its action bar;
             // Settings has nothing to do with scanning, so it only appears there while a scan runs or failed.
             if (root.page == 1 && root.show-status) || (root.page == 2 && (root.busy || root.error != "")) : Card { vertical-stretch: 0;
-                ScanStatus { padding: 12px; padding-left: 16px; padding-right: 16px; status: root.status; detail: root.scan-detail; error: root.error; busy: root.busy; progress: root.progress; stop => { root.stop(); } }
+                ScanStatus { padding: 12px; padding-left: 16px; padding-right: 16px; status: root.status; detail: root.scan-detail; error: root.error; needs-administrator: root.needs-administrator; restart-as-administrator => { root.restart-as-administrator(); } busy: root.busy; progress: root.progress; stop => { root.stop(); } }
             }
         }
     }

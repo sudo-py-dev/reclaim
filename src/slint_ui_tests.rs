@@ -913,3 +913,64 @@ fn package_managed_updates_hide_the_native_installer_action() {
         .is_some()
     );
 }
+
+#[test]
+fn windows_drive_access_failure_has_an_actionable_aligned_restart_button() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    let restarted = Rc::new(std::cell::Cell::new(false));
+    let flag = restarted.clone();
+    ui.on_restart_as_administrator(move || flag.set(true));
+    ui.show().unwrap();
+    for (code, language) in [
+        ("en", i18n::Language::English),
+        ("he", i18n::Language::Hebrew),
+    ] {
+        i18n::with_language(language, || {
+            ui_text::apply(&ui);
+            ui.set_page(1);
+            ui.set_show_status(true);
+            ui.set_status(i18n::t("Scan failed. See the message above.").into());
+            ui.set_error(i18n::t("Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.").into());
+            ui.set_needs_administrator(true);
+            ui.window().set_size(slint::PhysicalSize::new(900, 640));
+            let snapshot = ui.window().take_snapshot().unwrap();
+            crate::layout_checks::assert_controls_clear(&ui, (900., 640.), code);
+            let action = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                &ui,
+                &i18n::t("Restart as administrator"),
+            )
+            .next()
+            .expect("restart action for denied drive access");
+            action.invoke_accessible_default_action();
+            assert!(restarted.replace(false));
+            if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                std::fs::create_dir_all(&directory).unwrap();
+                image::save_buffer(
+                    format!("{directory}/access-denied-{code}.png"),
+                    snapshot.as_bytes(),
+                    snapshot.width(),
+                    snapshot.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+            ui.set_needs_administrator(false);
+            ui.window().take_snapshot().unwrap();
+            assert!(
+                i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                    &ui,
+                    &i18n::t("Restart as administrator"),
+                )
+                .next()
+                .is_none()
+            );
+        });
+    }
+}

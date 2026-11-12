@@ -19,6 +19,41 @@ use windows_sys::Win32::{
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
 }
+
+fn is_volume_device(path: &Path) -> bool {
+    path.to_str().is_some_and(|path| {
+        matches!(path.as_bytes(), [b'\\', b'\\', b'.', b'\\', letter, b':'] if letter.is_ascii_alphabetic())
+    })
+}
+
+/// Read-only access through the end of a Windows volume. Without extended DASD
+/// reads, filesystem boundary checks can return EOF before the partition ends,
+/// including during SourceReader's bounded read-ahead near the final clusters.
+pub fn open_source(path: &Path) -> std::io::Result<File> {
+    let file = File::open(path)?;
+    if is_volume_device(path) {
+        let mut returned = 0;
+        // SAFETY: file is a live read-only volume handle. This control code has
+        // no input/output buffers, does not write to or dismount the volume, and
+        // retains device-driver partition bounds. returned is valid writable u32.
+        let ok = unsafe {
+            DeviceIoControl(
+                file.as_raw_handle(),
+                FSCTL_ALLOW_EXTENDED_DASD_IO,
+                ptr::null(),
+                0,
+                ptr::null_mut(),
+                0,
+                &mut returned,
+                ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(file)
+}
 fn text(bytes: &[u16]) -> String {
     String::from_utf16_lossy(&bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())])
 }
@@ -306,4 +341,38 @@ pub fn destination(source: &Path, folder: &Path) -> Destination {
 /// which is always safe, instead of a wrapped size.
 fn win32_len(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extended_raw_reads_apply_only_to_volume_device_handles() {
+        for path in [r"\\.\C:", r"\\.\d:"] {
+            assert!(is_volume_device(Path::new(path)));
+        }
+        for path in [
+            r"C:\",
+            r"C:\disk.img",
+            r"\\server\disk.img",
+            r"\\.\PhysicalDrive0",
+            r"\\.\C:\file",
+            r"\\.\1:",
+        ] {
+            assert!(!is_volume_device(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn disk_image_sources_are_readable_without_device_controls() {
+        use std::io::Read;
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("source.img");
+        std::fs::write(&path, b"read-only source").unwrap();
+        let mut file = open_source(&path).unwrap();
+        let mut content = String::new();
+        file.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "read-only source");
+    }
 }

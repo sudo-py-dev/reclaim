@@ -82,7 +82,11 @@ fn is_device(path: &Path) -> bool {
 }
 
 pub fn open_source(path: &Path) -> io::Result<File> {
-    match File::open(path) {
+    #[cfg(windows)]
+    let opened = windows::open_source(path);
+    #[cfg(not(windows))]
+    let opened = File::open(path);
+    match opened {
         Ok(file) => Ok(file),
         #[cfg(target_os = "linux")]
         Err(e) if e.kind() == io::ErrorKind::PermissionDenied && is_device(path) => {

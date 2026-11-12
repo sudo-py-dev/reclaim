@@ -75,6 +75,7 @@ ui_strings! {
     set_supported_formats => "Supported formats",
     set_photos_documents_archives_audio_video => "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, and NTFS volumes.",
     set_check_for_updates => "Check for updates",
+    set_restart_as_administrator => "Restart as administrator",
     set_whats_new => "What’s new",
     set_updates => "Updates",
     set_later => "Later",

@@ -100,7 +100,6 @@
   "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "Impossible d’ouvrir le programme d’installation (erreur Windows {result}). Ouvrez le fichier téléchargé depuis l’Explorateur.",
   "Download update": "Télécharger la mise à jour",
   "Open installer": "Ouvrir le programme d’installation",
-  "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.": "Le disque a cessé de répondre avant la fin de l’analyse. Vérifiez le câble et réessayez une fois. Si cela se reproduit, le disque est peut-être défaillant : cessez de l’utiliser et récupérez les fichiers déjà trouvés.",
   "Update and restart": "Mettre à jour et redémarrer",
   "Preparing update…": "Préparation de la mise à jour…",
   "Installing update…": "Installation de la mise à jour…",
@@ -212,5 +211,9 @@
   "Hide details": "Masquer les détails",
   "You can keep working and update later.": "Vous pouvez continuer à travailler et mettre à jour plus tard.",
   "Updates": "Mises à jour",
-  "Updates are managed by Flatpak.": "Les mises à jour sont gérées par Flatpak."
+  "Updates are managed by Flatpak.": "Les mises à jour sont gérées par Flatpak.",
+  "Restart as administrator": "Redémarrer en tant qu’administrateur",
+  "Administrator permission was not granted. Reclaim is still open.": "L’autorisation administrateur n’a pas été accordée. Reclaim reste ouvert.",
+  "Could not restart as administrator: {0}": "Impossible de redémarrer en tant qu’administrateur : {0}",
+  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "La source a cessé de fournir des données avant sa fin annoncée. Elle peut être tronquée, déconnectée ou limitée par le système d’exploitation. Les fichiers déjà trouvés peuvent encore être récupérés."
 }

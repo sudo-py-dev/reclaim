@@ -100,7 +100,6 @@
   "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "Не удалось открыть установщик (ошибка Windows {result}). Откройте загруженный файл в Проводнике.",
   "Download update": "Скачать обновление",
   "Open installer": "Открыть установщик",
-  "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.": "Диск перестал отвечать до конца сканирования. Проверьте кабель и попробуйте ещё раз. Если это повторится, диск может быть неисправен: перестаньте им пользоваться и восстановите уже найденные файлы.",
   "Update and restart": "Обновить и перезапустить",
   "Preparing update…": "Подготовка обновления…",
   "Installing update…": "Установка обновления…",
@@ -212,5 +211,9 @@
   "Hide details": "Скрыть подробности",
   "You can keep working and update later.": "Можно продолжить работу и обновить приложение позже.",
   "Updates": "Обновления",
-  "Updates are managed by Flatpak.": "Обновления управляются через Flatpak."
+  "Updates are managed by Flatpak.": "Обновления управляются через Flatpak.",
+  "Restart as administrator": "Перезапустить от имени администратора",
+  "Administrator permission was not granted. Reclaim is still open.": "Права администратора не предоставлены. Reclaim остаётся открытым.",
+  "Could not restart as administrator: {0}": "Не удалось перезапустить от имени администратора: {0}",
+  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "Источник перестал возвращать данные до заявленного конца. Возможно, он усечён, отключён или доступ ограничен операционной системой. Уже найденные файлы по-прежнему можно восстановить."
 }

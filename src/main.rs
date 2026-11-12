@@ -43,6 +43,7 @@ use std::{
 use ui::*;
 enum Message {
     Scan(Event),
+    SourceAccessDenied,
     Opened(Arc<std::fs::File>),
     Done(Result<(), String>),
     Export(Result<usize, String>),
@@ -71,6 +72,7 @@ struct Reclaim {
     busy: bool,
     scan_stopped: bool,
     scan_error: Option<String>,
+    needs_administrator: bool,
     unreadable: Vec<(u64, u64)>,
     status: String,
     filter: String,
@@ -129,6 +131,7 @@ impl Default for Reclaim {
             busy: false,
             scan_stopped: false,
             scan_error: None,
+            needs_administrator: false,
             unreadable: Vec::new(),
             status: FIRST_RUN_STATUS.into(),
             filter: String::new(),
@@ -159,6 +162,7 @@ impl Reclaim {
         self.category = 0;
         self.scan_stopped = false;
         self.scan_error = None;
+        self.needs_administrator = false;
         self.unreadable.clear();
         self.exporting = false;
         self.started = Some(std::time::Instant::now());
@@ -170,6 +174,9 @@ impl Reclaim {
         self.scanned = 0;
         self.total = 0;
         let drive = self.drives.iter().find(|d| d.path == path);
+        let windows_drive = cfg!(windows) && drive.is_some();
+        #[cfg(windows)]
+        let windows_drive = windows_drive && !native_process::is_administrator();
         let source_size = drive
             .map(|d| d.size)
             .unwrap_or_else(|| path.metadata().map(|m| m.len()).unwrap_or(0));
@@ -197,7 +204,15 @@ impl Reclaim {
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(());
                 }
-                let handle = Arc::new(drives::open_source(&path)?);
+                let opened = drives::open_source(&path);
+                if windows_drive
+                    && opened
+                        .as_ref()
+                        .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+                {
+                    tx.send(Message::SourceAccessDenied).ok();
+                }
+                let handle = Arc::new(opened?);
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(());
                 }
@@ -470,6 +485,7 @@ impl Reclaim {
                 };
                 changed = true;
                 match message {
+                    Message::SourceAccessDenied => self.needs_administrator = true,
                     Message::Opened(handle) => {
                         self.source_handle = Some(handle);
                         self.status = if self.unused_scan {
@@ -580,6 +596,8 @@ impl Reclaim {
             .pick_file()
         {
             self.source = Some(path);
+            self.needs_administrator = false;
+            self.scan_error = None;
         }
     }
 }
@@ -663,6 +681,7 @@ impl Reclaim {
         let (status, detail) = self.scan_status(std::time::Instant::now());
         ui.set_status(status.into());
         ui.set_scan_detail(detail.into());
+        ui.set_needs_administrator(self.needs_administrator && !self.busy);
         ui.set_error(
             self.scan_error
                 .as_ref()
@@ -910,6 +929,30 @@ fn run() -> Result<(), slint::PlatformError> {
         });
     });
     let state = Rc::new(RefCell::new(Reclaim::default()));
+    #[cfg(windows)]
+    {
+        let state = state.clone();
+        let weak = ui.as_weak();
+        ui.on_restart_as_administrator(move || {
+            if state.borrow().busy || !state.borrow().needs_administrator {
+                return;
+            }
+            let error = match native_process::restart_elevated() {
+                Ok(true) => {
+                    slint::quit_event_loop().ok();
+                    return;
+                }
+                Ok(false) => {
+                    "Administrator permission was not granted. Reclaim is still open.".into()
+                }
+                Err(error) => i18n::explain("Could not restart as administrator: {0}", error),
+            };
+            state.borrow_mut().scan_error = Some(error);
+            if let Some(ui) = weak.upgrade() {
+                state.borrow_mut().sync_ui(&ui);
+            }
+        });
+    }
     state.borrow_mut().drive_monitor = drives::watch();
     state.borrow_mut().refresh_drives();
     macro_rules! action {
@@ -1000,6 +1043,8 @@ fn run() -> Result<(), slint::PlatformError> {
             && let Some(d) = s.drives.get(i).filter(|d| !d.encrypted)
         {
             s.source = Some(d.path.clone());
+            s.needs_administrator = false;
+            s.scan_error = None;
         }
     });
     action_with!(on_toggle_file, |s, i: i32| {

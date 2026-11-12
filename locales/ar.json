@@ -100,7 +100,6 @@
   "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "تعذر فتح برنامج التثبيت (خطأ Windows ‏{result}). افتح الملف المنزّل من مستكشف الملفات.",
   "Download update": "تنزيل التحديث",
   "Open installer": "فتح برنامج التثبيت",
-  "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.": "توقف القرص عن الاستجابة قبل انتهاء الفحص. تحقق من الكابل وحاول مرة أخرى. إذا تكرر ذلك فقد يكون القرص معطوبًا: توقف عن استخدامه واستعد الملفات التي عُثر عليها.",
   "Update and restart": "تحديث وإعادة تشغيل",
   "Preparing update…": "جارٍ تحضير التحديث…",
   "Installing update…": "جارٍ تثبيت التحديث…",
@@ -212,5 +211,9 @@
   "Hide details": "إخفاء التفاصيل",
   "You can keep working and update later.": "يمكنك متابعة العمل والتحديث لاحقًا.",
   "Updates": "التحديثات",
-  "Updates are managed by Flatpak.": "تتم إدارة التحديثات بواسطة Flatpak."
+  "Updates are managed by Flatpak.": "تتم إدارة التحديثات بواسطة Flatpak.",
+  "Restart as administrator": "إعادة التشغيل كمسؤول",
+  "Administrator permission was not granted. Reclaim is still open.": "لم يتم منح إذن المسؤول. لا يزال Reclaim مفتوحًا.",
+  "Could not restart as administrator: {0}": "تعذرت إعادة التشغيل كمسؤول: {0}",
+  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "توقف المصدر عن إرجاع البيانات قبل نهايته المعلنة. قد يكون مبتورًا أو غير متصل أو مقيدًا بواسطة نظام التشغيل. لا يزال بإمكانك استعادة الملفات التي تم العثور عليها."
 }

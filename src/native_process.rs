@@ -6,6 +6,57 @@
 )]
 use std::path::Path;
 
+#[cfg(windows)]
+pub fn is_administrator() -> bool {
+    // SAFETY: IsUserAnAdmin checks membership of the current effective token
+    // and accepts no pointers. A filtered UAC token does not have admin membership.
+    unsafe { windows_sys::Win32::UI::Shell::IsUserAnAdmin() != 0 }
+}
+
+/// Relaunch only this executable via Windows UAC, without forwarding arguments
+/// or starting a scan. Cancellation leaves the current window running.
+#[cfg(windows)]
+pub fn restart_elevated() -> Result<bool, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::ERROR_CANCELLED,
+        UI::Shell::{
+            SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+        },
+    };
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    let file: Vec<u16> = executable
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let verb: Vec<u16> = "runas".encode_utf16().chain(Some(0)).collect();
+    // audit-allow(SEC-UNINIT): Windows documents zero initialization of unused fields.
+    // SAFETY: SHELLEXECUTEINFOW is plain data; unused pointers/handles may be null.
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize =
+        u32::try_from(std::mem::size_of::<SHELLEXECUTEINFOW>()).map_err(|e| e.to_string())?;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = file.as_ptr();
+    info.nShow = 1;
+    // SAFETY: both UTF-16 strings are terminated and live through this synchronous
+    // call. The target is our own executable; no shell commands or arguments.
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == i32::try_from(ERROR_CANCELLED).ok() {
+            return Ok(false);
+        }
+        return Err(error.to_string());
+    }
+    if info.hProcess.is_null() {
+        return Ok(false);
+    }
+    // Child owns and closes the returned process handle without terminating it.
+    drop(Child(info.hProcess));
+    Ok(true)
+}
+
 #[cfg(target_os = "linux")]
 pub struct Child(libc::pid_t);
 #[cfg(windows)]

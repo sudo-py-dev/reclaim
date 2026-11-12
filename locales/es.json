@@ -100,7 +100,6 @@
   "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "No se pudo abrir el instalador (error de Windows {result}). Abre el archivo descargado desde el Explorador.",
   "Download update": "Descargar actualización",
   "Open installer": "Abrir instalador",
-  "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.": "La unidad dejó de responder antes de terminar el análisis. Revisa el cable e inténtalo una vez más. Si vuelve a ocurrir, puede que la unidad esté fallando: deja de usarla y recupera los archivos ya encontrados.",
   "Update and restart": "Actualizar y reiniciar",
   "Preparing update…": "Preparando actualización…",
   "Installing update…": "Instalando actualización…",
@@ -212,5 +211,9 @@
   "Hide details": "Ocultar detalles",
   "You can keep working and update later.": "Puedes seguir trabajando y actualizar más tarde.",
   "Updates": "Actualizaciones",
-  "Updates are managed by Flatpak.": "Flatpak gestiona las actualizaciones."
+  "Updates are managed by Flatpak.": "Flatpak gestiona las actualizaciones.",
+  "Restart as administrator": "Reiniciar como administrador",
+  "Administrator permission was not granted. Reclaim is still open.": "No se concedieron permisos de administrador. Reclaim sigue abierto.",
+  "Could not restart as administrator: {0}": "No se pudo reiniciar como administrador: {0}",
+  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "El origen dejó de devolver datos antes de su final declarado. Puede estar truncado, desconectado o restringido por el sistema operativo. Los archivos ya encontrados aún se pueden recuperar."
 }

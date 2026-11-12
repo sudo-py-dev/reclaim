@@ -100,7 +100,6 @@
   "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.",
   "Download update": "Download update",
   "Open installer": "Open installer",
-  "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.": "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.",
   "Update and restart": "Update and restart",
   "Preparing update…": "Preparing update…",
   "Installing update…": "Installing update…",
@@ -212,5 +211,9 @@
   "Hide details": "Hide details",
   "You can keep working and update later.": "You can keep working and update later.",
   "Updates": "Updates",
-  "Updates are managed by Flatpak.": "Updates are managed by Flatpak."
+  "Updates are managed by Flatpak.": "Updates are managed by Flatpak.",
+  "Restart as administrator": "Restart as administrator",
+  "Administrator permission was not granted. Reclaim is still open.": "Administrator permission was not granted. Reclaim is still open.",
+  "Could not restart as administrator: {0}": "Could not restart as administrator: {0}",
+  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered."
 }

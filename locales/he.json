@@ -67,7 +67,7 @@
   "Video": "וידאו",
   "Volume": "כונן",
   "Window closed": "החלון נסגר",
-  "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.": "Windows חסם את הגישה. לגישה לכונן פיזי, הפעילו מחדש את Reclaim באמצעות הפעלה כמנהל, או פתחו דמות כונן. יש לבטל תחילה נעילה של כונני BitLocker.",
+  "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.": "אין הרשאה לקריאת הכונן. הפעילו מחדש כמנהל או פתחו דמות כונן. אם הכונן מוצפן, יש לפתוח את נעילתו תחילה.",
   "macOS could not inspect drives. Open a raw disk image instead.": "macOS לא הצליח לבדוק את הכוננים. פתחו דמות כונן גולמית במקום זאת.",
   "macOS denied access. Reading a whole drive requires administrator rights, and macOS may ask you to allow access to removable volumes or Full Disk Access in System Settings > Privacy & Security. You can open a disk image instead.": "macOS חסם את הגישה. קריאת כונן שלם דורשת הרשאות מנהל, ו־macOS עשוי לבקש לאשר גישה לכוננים נשלפים או גישה מלאה לדיסק בהגדרות המערכת > פרטיות ואבטחה. אפשר לפתוח דמות כונן במקום זאת.",
   "{} file": "{} קובץ",
@@ -100,7 +100,6 @@
   "Could not open installer (Windows error {result}). Open the downloaded file from Explorer.": "לא ניתן לפתוח את המתקין (שגיאת Windows מספר {result}). פתחו את הקובץ שהורד מסייר הקבצים.",
   "Download update": "הורדת עדכון",
   "Open installer": "פתיחת המתקין",
-  "The drive stopped responding before the end of the scan. Check the cable and try once more. If it happens again, the drive may be failing: stop using it and recover the files already found.": "הכונן הפסיק להגיב לפני סוף הסריקה. בדקו את הכבל ונסו פעם נוספת. אם זה חוזר, ייתכן שהכונן כושל: הפסיקו להשתמש בו ושחזרו את הקבצים שכבר נמצאו.",
   "Update and restart": "עדכון והפעלה מחדש",
   "Preparing update…": "מכין את העדכון…",
   "Installing update…": "מתקין את העדכון…",
@@ -212,5 +211,9 @@
   "Hide details": "הסתרת פרטים",
   "You can keep working and update later.": "אפשר להמשיך לעבוד ולעדכן מאוחר יותר.",
   "Updates": "עדכונים",
-  "Updates are managed by Flatpak.": "העדכונים מנוהלים באמצעות Flatpak."
+  "Updates are managed by Flatpak.": "העדכונים מנוהלים באמצעות Flatpak.",
+  "Restart as administrator": "הפעלה מחדש כמנהל",
+  "Administrator permission was not granted. Reclaim is still open.": "לא ניתן אישור מנהל. התוכנה נשארה פתוחה.",
+  "Could not restart as administrator: {0}": "לא ניתן להפעיל מחדש כמנהל: {0}",
+  "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "המקור הפסיק להחזיר נתונים לפני סופו המדווח. ייתכן שהוא נקטע, נותק או שהגישה אליו מוגבלת על ידי מערכת ההפעלה. עדיין ניתן לשחזר את הקבצים שכבר נמצאו."
 }

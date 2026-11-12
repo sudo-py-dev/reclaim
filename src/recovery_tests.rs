@@ -322,3 +322,24 @@ fn skipped_ranges_are_merged_and_completion_reports_incomplete_coverage() {
     assert!(app.scan_error.is_none());
     assert!(app.status.contains("unreadable areas"));
 }
+
+#[test]
+fn source_access_failure_offers_elevation_only_when_requested_by_the_worker() {
+    for denied in [false, true] {
+        let mut app = Reclaim::default();
+        app.busy = true;
+        let (tx, rx) = mpsc::channel();
+        app.receiver = Some(rx);
+        if denied {
+            tx.send(Message::SourceAccessDenied).unwrap();
+        }
+        tx.send(Message::Done(Err("source could not be opened".into())))
+            .unwrap();
+        drop(tx);
+        app.poll();
+        assert!(!app.busy);
+        assert!(app.scan_error.is_some());
+        assert_eq!(app.needs_administrator, denied);
+        assert!(app.results.is_empty());
+    }
+}
