@@ -104,6 +104,8 @@ mkdir -p /tmp/reclaim-previews
 RECLAIM_PREVIEW_DIR=/tmp/reclaim-previews cargo test --locked --bin reclaim slint_workspace
 ```
 
+The same test run also checks layout automatically: no control leaves the window or overlaps another on any page, state, language or window size, and the scan status line does not move between states (see [the code and UI audit](CODE_UI_AUDIT.md)).
+
 The previews are PNG images rendered from the actual Slint components using its software renderer. They do not test native window management, authentication prompts, or real-device recovery.
 
 [Desktop CI](../.github/workflows/build.yml) runs locked tests (including the UI

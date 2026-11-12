@@ -259,7 +259,9 @@ impl Reclaim {
             .map(identity);
         let files = ui.get_files();
         let model = files.as_any().downcast_ref::<VecModel<FileItem>>();
-        let rebuild = model.is_none()
+        // The model must hold exactly the rows recorded here; anything else
+        // (another state synced into this window) means start over.
+        let rebuild = model.is_none_or(|model| model.row_count() != self.shown.rows.len())
             || self.shown.filter != self.filter
             || self.shown.category != self.category
             || self.shown.results_len > self.results.len()
@@ -1176,6 +1178,8 @@ fn main() {
     }
 }
 
+#[cfg(test)]
+mod layout_checks;
 #[cfg(test)]
 mod slint_ui_tests;
 

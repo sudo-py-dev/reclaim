@@ -441,7 +441,7 @@ component ScanStatus inherits VerticalLayout {
     Row { spacing: 12px; min-height: 28px;
         Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.error != "" ? Palette.danger : root.busy ? Palette.primary : Palette.line; }
         // One steady line while busy; longer results after a scan may wrap.
-        Label { text: root.status; color: Palette.ink; font-size: 13px; wrap: root.busy ? TextWrap.no-wrap : TextWrap.word-wrap; overflow: elide; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; }
+        headline := Label { text: root.status; color: Palette.ink; font-size: 13px; wrap: root.busy ? TextWrap.no-wrap : TextWrap.word-wrap; overflow: elide; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; }
         if root.busy && root.detail != "" : Label { text: root.detail; color: Palette.secondary; font-size: 13px; vertical-alignment: center; horizontal-stretch: 0; }
         if root.busy : Action { height: 28px; text: Strings.stop; clicked => { root.stop(); } }
     }
