@@ -22,6 +22,7 @@ const pageUrl = new URL(localePath(locale), site).href;
 const date = formatDate(release.date, locale);
 const [versionPre, versionPost = ''] = t.hero.meta.split('{version}');
 const results = await screenImage(locale, 'results');
+const featureIcons = ['shield', 'search', 'drive', 'globe', 'refresh', 'github'] as const;
 ---
 
 <Base
@@ -79,6 +80,7 @@ const results = await screenImage(locale, 'results');
         {
           t.features.items.map((f, i) => (
             <li data-reveal style={`--i:${i % 3}`}>
+              <span class="feature-icon"><Icon name={featureIcons[i] ?? 'shield'} size={22} /></span>
               <h3>{f.title}</h3>
               <p>{f.body}</p>
             </li>
@@ -302,14 +304,17 @@ const results = await screenImage(locale, 'results');
     transform: translateY(-2px);
   }
 
-  .features h3::before {
-    content: '';
-    display: block;
-    width: 28px;
-    height: 3px;
+  .feature-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
     margin-bottom: 18px;
-    border-radius: 3px;
-    background: var(--accent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--line));
   }
 
   /* Formats */

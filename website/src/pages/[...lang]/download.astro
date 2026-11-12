@@ -61,7 +61,7 @@ const p = t.download.platforms;
         <!-- Windows -->
         <article class="card" data-os-card="windows" data-reveal style="--i:0" aria-labelledby="win-title">
           <span class="badge">{t.download.recommended}</span>
-          <h2 id="win-title">{p.windows.name}</h2>
+          <h2 id="win-title"><Icon name="monitor" size={25} />{p.windows.name}</h2>
           <p class="detail">{p.windows.detail}</p>
           <p class="scans">{p.windows.scans}</p>
           <div class="buttons">
@@ -81,7 +81,7 @@ const p = t.download.platforms;
         <!-- macOS -->
         <article class="card" data-os-card="macos" data-reveal style="--i:1" aria-labelledby="mac-title">
           <span class="badge">{t.download.recommended}</span>
-          <h2 id="mac-title">{p.macos.name}</h2>
+          <h2 id="mac-title"><Icon name="command" size={25} />{p.macos.name}</h2>
           <p class="detail">{p.macos.detail}</p>
           <p class="scans">{p.macos.scans}</p>
           <div class="buttons">
@@ -110,7 +110,7 @@ const p = t.download.platforms;
         <!-- Linux -->
         <article class="card" data-os-card="linux" data-reveal style="--i:2" aria-labelledby="linux-title">
           <span class="badge">{t.download.recommended}</span>
-          <h2 id="linux-title">{p.linux.name}</h2>
+          <h2 id="linux-title"><Icon name="terminal" size={25} />{p.linux.name}</h2>
           <p class="detail">{p.linux.detail}</p>
           <p class="scans">{p.linux.scans}</p>
           <div class="buttons">
@@ -262,6 +262,9 @@ cargo run --release --locked</code></pre>
   }
 
   .card h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     font-size: 1.5rem;
   }
 
