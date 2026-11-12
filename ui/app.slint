@@ -360,7 +360,7 @@ component ReleaseNotes inherits Rectangle {
     in property <[ReleaseNoteBlock]> notes;
     height: min(190px, max(48px, notes-content.preferred-height + 8px));
     ScrollView { width: parent.width; height: parent.height;
-        notes-content := VerticalLayout { padding: 4px; padding-right: 16px; spacing: 8px; alignment: start;
+        notes-content := VerticalLayout { padding: 0px; padding-left: Locale.rtl ? 16px : 0px; padding-right: Locale.rtl ? 0px : 16px; spacing: 8px; alignment: start;
             if root.notes.length == 0 : Label { text: Strings.no-release-notes; color: Palette.secondary; wrap: word-wrap; }
             for block in root.notes : Label {
                 text: block.text; wrap: word-wrap; min-width: 0px;
@@ -748,18 +748,27 @@ export component AppWindow inherits Window {
                 GroupTitle { text: Strings.updates; }
                 Card { VerticalLayout {
                     SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-available && !root.update-busy && root.update-title != "" ? root.update-title : root.update-status;
-                        Action { enabled: !root.update-busy && !root.update-check-feedback;
-                            spinning: (root.update-busy && !root.update-installing) || root.update-check-feedback;
-                            text: Strings.check-for-updates; icon: @image-url("icons/refresh.svg");
-                            clicked => { root.update-check-feedback = true; root.check-update(); }
+                        if root.update-available : Action {
+                            text: root.update-details-open ? Strings.hide-details : Strings.whats-new;
+                            quiet: true;
+                            clicked => { root.update-details-open = !root.update-details-open; }
+                        }
+                        Action { enabled: !root.update-busy && (root.update-available ? !root.busy : !root.update-check-feedback);
+                            spinning: root.update-busy || (!root.update-available && root.update-check-feedback);
+                            primary: root.update-available;
+                            text: root.update-available ? root.update-label : Strings.check-for-updates;
+                            icon: root.update-available ? @image-url("icons/download.svg") : @image-url("icons/refresh.svg");
+                            clicked => {
+                                if root.update-available { root.apply-update(); }
+                                else { root.update-check-feedback = true; root.check-update(); }
+                            }
                         }
                     }
-                    if root.update-available || root.update-installing : VerticalLayout { padding: 16px; padding-top: 0px; spacing: 12px;
-                        if root.update-available : Row { spacing: 8px;
-                            Action { text: root.update-details-open ? Strings.hide-details : Strings.whats-new; quiet: true; clicked => { root.update-details-open = !root.update-details-open; } }
-                            Rectangle { horizontal-stretch: 1; }
-                            Action { text: root.update-label; primary: true; enabled: !root.busy && !root.update-busy; clicked => { root.apply-update(); } }
-                        }
+                    if root.update-details-open || root.update-installing : VerticalLayout {
+                        padding: 16px; padding-top: 4px;
+                        padding-left: Locale.rtl ? 16px : 60px;
+                        padding-right: Locale.rtl ? 60px : 16px;
+                        spacing: 12px;
                         if root.update-details-open : ReleaseNotes { notes: root.update-notes; }
                         if root.update-installing : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * clamp(root.update-progress, 0, 1); background: Palette.primary; animate width { duration: 200ms; } } }
                     }

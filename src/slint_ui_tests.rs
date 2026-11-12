@@ -454,6 +454,25 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
                 ui.set_page(2);
                 ui.set_update_details_open(false);
                 ui.window().take_snapshot().unwrap();
+                assert!(
+                    i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                        &ui,
+                        &i18n::t("Check for updates"),
+                    )
+                    .next()
+                    .is_none(),
+                    "install action replaces the update check"
+                );
+                let update_label = i18n::t("Update and restart");
+                let mut actions = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                    &ui,
+                    &update_label,
+                );
+                actions
+                    .next()
+                    .expect("settings update action")
+                    .invoke_accessible_default_action();
+                assert!(installed.replace(false));
                 let settings_details =
                     i_slint_backend_testing::ElementHandle::find_by_accessible_label(
                         &ui,
