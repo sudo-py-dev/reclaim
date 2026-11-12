@@ -14,3 +14,13 @@
 /recovered/
 .DS_Store
 Thumbs.db
+
+# Personal editor state and local test output.
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+*.log
+/coverage/
+/lcov.info
