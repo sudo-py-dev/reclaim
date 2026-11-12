@@ -1,0 +1,43 @@
+name: Snap package
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1
+        id: snapcraft
+      - name: Smoke test the confined desktop application
+        env:
+          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends xvfb x11-utils dbus-x11
+          sudo snap install --dangerous "$SNAP_FILE"
+          dbus-run-session -- xvfb-run -a sh -c '
+            timeout 20 snap run reclaim > snap-smoke.log 2>&1 &
+            child=$!
+            sleep 8
+            xwininfo -root -tree > snap-windows.txt
+            cat snap-windows.txt
+            kill -0 "$child"
+            rg -q "Reclaim - File Recovery" snap-windows.txt
+            if wait "$child"; then result=0; else result=$?; fi
+            test "$result" -eq 124
+          '
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: reclaim-snap
+          path: |
+            ${{ steps.snapcraft.outputs.snap }}
+            snap-smoke.log
+            snap-windows.txt
+          if-no-files-found: warn
+          retention-days: 14
