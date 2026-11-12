@@ -645,6 +645,19 @@ fn file_list_stays_exact_while_a_large_scan_streams_results() {
     assert_exact(&state, &ui, "after clearing the results");
     assert_eq!(ui.get_files().row_count(), 0);
     assert!(n > 2000);
+
+    // Another state synced into the same window replaces the rows it does not
+    // know about instead of appending to them.
+    state.results = (0..30).map(|i| candidate(i, "jpg")).collect();
+    state.sync_ui(&ui);
+    let mut fresh = Reclaim::default();
+    fresh.results = vec![candidate(7, "png")];
+    fresh.sync_ui(&ui);
+    assert_exact(
+        &fresh,
+        &ui,
+        "a fresh state in a window that already shows rows",
+    );
 }
 
 /// The scan status must not flip between sentences on every quick check: it
@@ -747,6 +760,100 @@ fn scan_status_renders_on_one_line_in_every_direction() {
                     )
                     .unwrap();
                 }
+            }
+        });
+    }
+}
+
+/// No control may leave the window or overlap another, on any page, in any
+/// main state, in left-to-right, right-to-left and the longest language, at the
+/// minimum and default window sizes. The scan status headline must not move or
+/// resize between "scanning" and a named slow check.
+#[test]
+fn layout_is_clear_and_steady_on_every_page_language_and_size() {
+    use crate::layout_checks::{assert_controls_clear, assert_steady};
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.show().unwrap();
+    let first_run = Reclaim::default;
+    let scanning = || {
+        let mut state = Reclaim::default();
+        state.source = Some("/dev/disk-with-a-long-descriptive-name".into());
+        for n in 0..40u64 {
+            state.results.push(Found {
+                offset: n * 4096,
+                size: 2048 + n,
+                kind: if n.is_multiple_of(3) { "pdf" } else { "jpg" },
+                selected: true,
+                original_name: Some(format!(
+                    "A very long holiday photo name number {n} from the summer trip.jpg"
+                )),
+                resident_data: None,
+                ntfs: None,
+                validation: reclaim::Validation::StructureChecked,
+            });
+        }
+        state.busy = true;
+        state.status = "Scanning for recoverable files…".into();
+        state.total = 6_120_000_000;
+        state.scanned = 2_250_000_000;
+        state
+    };
+    for (code, language) in [
+        ("en", i18n::Language::English),
+        ("he", i18n::Language::Hebrew),
+        ("ar", i18n::Language::Arabic),
+        ("de", i18n::Language::German),
+    ] {
+        i18n::with_language(language, || {
+            ui_text::apply(&ui);
+            ui.set_update_title(i18n::message("Version {0} is available.", &["0.3.0"]).into());
+            ui.set_update_label(i18n::t("Update and restart").into());
+            for (width, height) in [(900u32, 640u32), (1160, 780)] {
+                ui.window()
+                    .set_size(slint::PhysicalSize::new(width, height));
+                let window = (width as f32, height as f32);
+                for page in 0..3 {
+                    ui.set_page(page);
+                    for (name, make, notice) in [
+                        ("first run", &first_run as &dyn Fn() -> Reclaim, false),
+                        ("scanning", &scanning, false),
+                        ("update notice", &first_run, true),
+                    ] {
+                        let mut state = make();
+                        state.sync_ui(&ui);
+                        ui.set_update_notice(notice);
+                        ui.window().take_snapshot().unwrap();
+                        assert_controls_clear(
+                            &ui,
+                            window,
+                            &format!("{code} {width}x{height} page {page} {name}"),
+                        );
+                    }
+                }
+                ui.set_update_notice(false);
+                ui.set_page(1);
+                let mut state = scanning();
+                let mut steady = |ui: &AppWindow| {
+                    state.sync_ui(ui);
+                    ui.window().take_snapshot().unwrap();
+                };
+                let mut slow_check = |ui: &AppWindow| {
+                    ui.set_status(i18n::message("Checking a {0} file…", &["ZIP"]).into());
+                    ui.window().take_snapshot().unwrap();
+                };
+                assert_steady(
+                    &ui,
+                    "ScanStatus::headline",
+                    &format!("{code} {width}x{height}"),
+                    &mut [("scanning", &mut steady), ("slow check", &mut slow_check)],
+                );
             }
         });
     }
