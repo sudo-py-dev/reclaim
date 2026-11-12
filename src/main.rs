@@ -80,7 +80,14 @@ struct Reclaim {
     source_stamp: Option<(u64, Option<std::time::SystemTime>)>,
     recovery_folder: Option<(PathBuf, drives::Destination)>,
     shown: ShownFiles,
+    /// A slow candidate check named in the status line, and since when.
+    long_check: Option<(&'static str, std::time::Instant)>,
 }
+/// A candidate check is named in the status line only after it has run this
+/// long, so the many quick checks of a scan never make the line flicker.
+const LONG_CHECK_AFTER: Duration = Duration::from_millis(1500);
+/// Once named, a check stays on screen at least this long, so it can be read.
+const LONG_CHECK_SHOWN: Duration = Duration::from_millis(1500);
 /// What the file list model currently holds, so a sync appends new results and
 /// patches changed selections instead of rebuilding every row. A scan tick then
 /// costs the same with 30 results or 30,000.
@@ -131,6 +138,7 @@ impl Default for Reclaim {
             source_stamp: None,
             recovery_folder: None,
             shown: ShownFiles::default(),
+            long_check: None,
         }
     }
 }
@@ -582,6 +590,47 @@ fn format_bytes(n: u64) -> String {
     format!("{n} B")
 }
 impl Reclaim {
+    /// The status line and the progress beside it. The line stays on one
+    /// steady sentence while scanning; it names a check only when that check
+    /// is slow, and then keeps it long enough to read.
+    fn scan_status(&mut self, now: std::time::Instant) -> (String, String) {
+        let scanning = self.busy && !self.cancel.load(Ordering::Relaxed);
+        let slow = self
+            .scan_activity
+            .filter(|_| scanning)
+            .filter(|(_, _, _, since)| now.saturating_duration_since(*since) >= LONG_CHECK_AFTER)
+            .map(|(_, kind, _, _)| kind);
+        self.long_check = match (slow, self.long_check) {
+            (Some(kind), Some((shown, at))) if shown == kind => Some((kind, at)),
+            (Some(kind), _) => Some((kind, now)),
+            (None, Some((kind, at)))
+                if scanning && now.saturating_duration_since(at) < LONG_CHECK_SHOWN =>
+            {
+                Some((kind, at))
+            }
+            (None, _) => None,
+        };
+        let status = match self.long_check {
+            Some((kind, _)) => i18n::message("Checking a {0} file…", &[&kind.to_uppercase()]),
+            None => i18n::t(&self.status),
+        };
+        let detail = if !self.busy {
+            String::new()
+        } else if self.total > 0 {
+            i18n::message(
+                "{0} of {1}",
+                &[
+                    &format_bytes(self.scanned.min(self.total)),
+                    &format_bytes(self.total),
+                ],
+            )
+        } else if self.scanned > 0 {
+            i18n::isolate(&format_bytes(self.scanned))
+        } else {
+            String::new()
+        };
+        (status, detail)
+    }
     fn sync_ui(&mut self, ui: &AppWindow) {
         let (visible, selected) = self.sync_files(ui);
         ui.set_source(
@@ -603,21 +652,9 @@ impl Reclaim {
                 || self.drives_error.is_some()
                 || self.status != FIRST_RUN_STATUS,
         );
-        let status = if let Some((offset, kind, size, _)) = self.scan_activity
-            && self.busy
-            && !self.cancel.load(Ordering::Relaxed)
-        {
-            format!(
-                "{} · {} · {} · {}",
-                i18n::t("Checking file contents…"),
-                i18n::isolate(&kind.to_uppercase()),
-                i18n::isolate(&format_bytes(size as u64)),
-                i18n::isolate(&format_bytes(offset))
-            )
-        } else {
-            i18n::t(&self.status)
-        };
+        let (status, detail) = self.scan_status(std::time::Instant::now());
         ui.set_status(status.into());
+        ui.set_scan_detail(detail.into());
         ui.set_error(
             self.scan_error
                 .as_ref()

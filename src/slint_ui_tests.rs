@@ -646,3 +646,108 @@ fn file_list_stays_exact_while_a_large_scan_streams_results() {
     assert_eq!(ui.get_files().row_count(), 0);
     assert!(n > 2000);
 }
+
+/// The scan status must not flip between sentences on every quick check: it
+/// names a check only after it runs slowly, keeps it readable, and shows the
+/// overall progress separately.
+#[test]
+fn scan_status_stays_steady_and_names_only_slow_checks() {
+    i18n::with_language(i18n::Language::English, || {
+        let start = std::time::Instant::now();
+        let at = |ms: u64| start.checked_add(Duration::from_millis(ms)).unwrap();
+        let mut state = Reclaim::default();
+        state.busy = true;
+        state.status = "Scanning for recoverable files…".into();
+        state.total = 4 << 30;
+        state.scanned = 1 << 30;
+
+        let checking_zip = i18n::message("Checking a {0} file…", &["ZIP"]);
+        // A quick check keeps the steady sentence.
+        state.scan_activity = Some((4096, "zip", 1 << 20, start));
+        let (status, detail) = state.scan_status(at(400));
+        assert_eq!(status, "Scanning for recoverable files…");
+        assert_eq!(detail, i18n::message("{0} of {1}", &["1.0 GiB", "4.0 GiB"]));
+
+        // A slow one is named, and stays named while it runs.
+        let (status, _) = state.scan_status(at(1600));
+        assert_eq!(status, checking_zip);
+        let (status, _) = state.scan_status(at(1900));
+        assert_eq!(status, checking_zip);
+
+        // A check that ends right after being named stays readable for a moment.
+        state.scan_activity = None;
+        let (status, _) = state.scan_status(at(2000));
+        assert_eq!(status, checking_zip);
+        let (status, _) = state.scan_status(at(3200));
+        assert_eq!(status, "Scanning for recoverable files…");
+
+        // A long check that was on screen for a while leaves as soon as it ends.
+        state.scan_activity = Some((65536, "zip", 1 << 20, at(3200)));
+        assert_eq!(state.scan_status(at(4800)).0, checking_zip);
+        assert_eq!(state.scan_status(at(9000)).0, checking_zip);
+        state.scan_activity = None;
+        assert_eq!(
+            state.scan_status(at(9100)).0,
+            "Scanning for recoverable files…"
+        );
+
+        // Stopping always shows the stop message, never a check.
+        state.scan_activity = Some((8192, "zip", 0, start));
+        state.cancel.store(true, Ordering::Relaxed);
+        state.status = "Stopping after the current step…".into();
+        let (status, _) = state.scan_status(at(9000));
+        assert_eq!(status, "Stopping after the current step…");
+
+        // Nothing beside the status once the scan is over.
+        state.busy = false;
+        assert_eq!(state.scan_status(at(9100)).1, "");
+    });
+}
+
+#[test]
+fn scan_status_renders_on_one_line_in_every_direction() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    for (code, language) in [
+        ("en", i18n::Language::English),
+        ("he", i18n::Language::Hebrew),
+        ("de", i18n::Language::German),
+    ] {
+        i18n::with_language(language, || {
+            ui_text::apply(&ui);
+            let mut state = Reclaim::default();
+            state.busy = true;
+            state.status = "Scanning for recoverable files…".into();
+            state.total = 6_120_000_000;
+            state.scanned = 2_250_000_000;
+            for (name, checking) in [("scanning", false), ("checking", true)] {
+                state.scan_activity =
+                    checking.then(|| (4096, "zip", 27 << 20, std::time::Instant::now()));
+                state.long_check = checking.then(|| ("zip", std::time::Instant::now()));
+                state.sync_ui(&ui);
+                ui.set_page(1);
+                let detail = ui.get_scan_detail();
+                assert!(detail.contains("GiB"), "{code}: {detail}");
+                let snapshot = ui.window().take_snapshot().unwrap();
+                if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                    image::save_buffer(
+                        format!("{directory}/status-{code}-{name}.png"),
+                        snapshot.as_bytes(),
+                        snapshot.width(),
+                        snapshot.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+            }
+        });
+    }
+}
