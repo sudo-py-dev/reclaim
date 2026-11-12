@@ -7,10 +7,10 @@ import type { Dict } from './en';
  */
 const he: Dict = {
   meta: {
-    title: 'Reclaim — שחזור קבצים',
+    title: 'Reclaim: שחזור קבצים',
     description:
       'שחזור תמונות, מסמכים וקבצים שנמחקו מדיסק און קי, מכרטיס SD ומהכונן הקשיח. Reclaim חינמית, בקוד פתוח וסורקת במצב קריאה בלבד. תומכת ב-NTFS, FAT32 ו-exFAT.',
-    downloadTitle: 'Reclaim — הורדה',
+    downloadTitle: 'Reclaim: הורדה',
     downloadDescription:
       'הורידו את הגרסה העדכנית של Reclaim ל-Windows, ל-macOS (Apple Silicon ו-Intel) או ל-Debian ו-Ubuntu. שחזור קבצים שנמחקו, בחינם ובקוד פתוח.',
     notFoundTitle: 'הדף לא נמצא | Reclaim',
