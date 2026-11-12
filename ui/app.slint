@@ -56,7 +56,7 @@ export global Strings {
     in-out property <string> recover-in-three-steps: "Recover in three steps";
     in-out property <[string]> recovery-step-list;
     in-out property <string> supported-formats: "Supported formats";
-    in-out property <string> photos-documents-archives-audio-video: "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, and NTFS volumes.";
+    in-out property <string> photos-documents-archives-audio-video: "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, NTFS, ext2/3/4, and HFS+ volumes.";
     in-out property <string> check-for-updates: "Check for updates";
     in-out property <string> restart-as-administrator: "Restart as administrator";
     in-out property <string> updates: "Updates";
@@ -68,9 +68,17 @@ export global Strings {
     in-out property <string> project-website: "Project website";
     in-out property <string> built-with-rust-and-slint: "Built with Rust and Slint · MIT licensed application";
     in-out property <string> stop: "Stop";
+    in-out property <string> stop-recovery: "Stop recovery";
+    in-out property <string> review-recovery-destination: "Review recovery destination";
+    in-out property <string> saving-here-can-overwrite: "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.";
+    in-out property <string> saving-to-the-same-drive: "Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive.";
+    in-out property <string> choose-another-folder: "Choose another folder";
+    in-out property <string> save-here-anyway: "Save here anyway";
+    in-out property <string> cancel: "Cancel";
+    in-out property <string> phones-and-cameras-connect-for: "Phones and cameras connect for file transfer only, so Reclaim can’t search them for deleted files. If yours has a memory card, put the card in a card reader and scan it here. Also check its Trash or Recently deleted folder.";
 }
 import { CheckBox, LineEdit, ScrollView, ListView as NativeListView, Palette as NativePalette } from "std-widgets.slint";
-export enum DriveIcon { disk, usb, volume, locked }
+export enum DriveIcon { disk, usb, volume, locked, phone }
 export struct DriveItem { name: string, device: string, icon: DriveIcon, detail: string, size: string, available: bool }
 export struct FileItem { name: string, kind: string, size: string, selected: bool, index: int }
 export struct ReleaseNoteBlock { text: string, kind: int }
@@ -99,6 +107,11 @@ export global Palette {
     out property <color> primary-hover: dark ? #5c89ea : #3567d3;
     out property <color> primary-pressed: dark ? #416cc9 : #244ea8;
     out property <color> danger: dark ? #ffaaa4 : #b42318;
+    // Filled Stop buttons. White text keeps at least 4.5:1 on each state, and
+    // the dark fill keeps 3:1 against the card it sits on.
+    out property <color> stop: dark ? #d13c30 : #c42b1c;
+    out property <color> stop-hover: dark ? #c0392b : #b42318;
+    out property <color> stop-pressed: dark ? #b8322a : #a3261a;
 }
 // Shared metrics: one control height, one radius scale, spacing in multiples of 4.
 global Metrics {
@@ -193,8 +206,8 @@ component Body inherits Label { color: Palette.muted; font-size: 13px; wrap: wor
 component Divider inherits Rectangle { height: 1px; background: Palette.line; vertical-stretch: 0; }
 component Card inherits Rectangle { clip: true; background: Palette.surface; border-radius: 12px; border-width: 1px; border-color: Palette.line; }
 
-// One button component: filled for the single primary action of a page, outlined otherwise,
-// borderless (`quiet`) for low-emphasis actions.
+// One button component: filled for the single primary action of a page, filled red (`stop`)
+// for stopping work in progress, outlined otherwise, borderless (`quiet`) for low-emphasis actions.
 // Rotate the path coordinates: the software renderer does not implement item rotation.
 component RefreshSpin inherits Path {
     private property <angle> phase: mod(animation-tick() / 1ms, 700) / 700 * 360deg;
@@ -212,11 +225,15 @@ component Action inherits Rectangle {
     in property <string> text;
     in property <image> icon;
     in property <bool> primary;
+    in property <bool> stop;
     in property <bool> quiet;
     in property <bool> enabled: true;
     in property <bool> spinning;
+    // Never narrower than its caption: for dialogs, where a cut-off choice is unreadable.
+    in property <bool> fit;
+    private property <bool> filled: root.primary || root.stop;
     callback clicked();
-    height: Metrics.control; min-width: 64px; horizontal-stretch: 0;
+    height: Metrics.control; min-width: root.fit ? max(64px, root.preferred-width) : 64px; horizontal-stretch: 0;
     preferred-width: caption.preferred-width + (root.icon.width > 0 ? 26px : 0px) + 30px;
     forward-focus: focus;
     accessible-role: button;
@@ -224,9 +241,10 @@ component Action inherits Rectangle {
     accessible-enabled: root.enabled;
     accessible-action-default => { if root.enabled { root.clicked(); } }
     border-radius: Metrics.radius;
-    border-width: focus.has-focus ? 2px : primary || quiet ? 0px : 1px;
+    border-width: focus.has-focus ? 2px : root.filled || quiet ? 0px : 1px;
     border-color: focus.has-focus ? Palette.accent : Palette.line;
-    background: primary ? (touch.pressed ? Palette.primary-pressed : touch.has-hover ? Palette.primary-hover : Palette.primary)
+    background: stop ? (touch.pressed ? Palette.stop-pressed : touch.has-hover ? Palette.stop-hover : Palette.stop)
+        : primary ? (touch.pressed ? Palette.primary-pressed : touch.has-hover ? Palette.primary-hover : Palette.primary)
         : touch.pressed ? Palette.line : touch.has-hover ? Palette.subtle : quiet ? transparent : Palette.surface;
     animate background { duration: 120ms; }
     opacity: enabled || spinning ? 1 : 0.45;
@@ -238,10 +256,10 @@ component Action inherits Rectangle {
     }
     Row { padding-left: 14px; padding-right: 14px; spacing: 8px;
         if root.icon.width > 0 : Rectangle { width: 18px; height: 18px;
-            if root.spinning : RefreshSpin { width: parent.width; height: parent.height; stroke: root.primary ? white : Palette.accent; }
-            if !root.spinning : Image { width: parent.width; height: parent.height; source: root.icon; colorize: root.primary ? white : Palette.accent; }
+            if root.spinning : RefreshSpin { width: parent.width; height: parent.height; stroke: root.filled ? white : Palette.accent; }
+            if !root.spinning : Image { width: parent.width; height: parent.height; source: root.icon; colorize: root.filled ? white : Palette.accent; }
         }
-        caption := Label { font-size: 13px; font-weight: root.primary ? 600 : 500; min-width: 0px; horizontal-stretch: 1; overflow: elide; text: root.text; color: root.primary ? white : Palette.ink; vertical-alignment: center; }
+        caption := Label { font-size: 13px; font-weight: root.filled ? 600 : 500; min-width: 0px; horizontal-stretch: 1; overflow: elide; text: root.text; color: root.filled ? white : Palette.ink; vertical-alignment: center; }
     }
     touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
 }
@@ -443,10 +461,11 @@ component ScanStatus inherits VerticalLayout {
     spacing: 10px;
     Row { spacing: 12px; min-height: 28px;
         Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.error != "" ? Palette.danger : root.busy ? Palette.primary : Palette.line; }
-        // One steady line while busy; longer results after a scan may wrap.
-        headline := Label { text: root.status; color: Palette.ink; font-size: 13px; wrap: root.busy ? TextWrap.no-wrap : TextWrap.word-wrap; overflow: elide; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; }
+        // One steady line while busy; longer results after a scan may wrap. A zero preferred
+        // width makes it take only the leftover space, so its width never follows the text.
+        headline := Label { text: root.status; color: Palette.ink; font-size: 13px; wrap: root.busy ? TextWrap.no-wrap : TextWrap.word-wrap; overflow: elide; vertical-alignment: center; min-width: 0px; preferred-width: 0px; horizontal-stretch: 1; }
         if root.busy && root.detail != "" : Label { text: root.detail; color: Palette.secondary; font-size: 13px; vertical-alignment: center; horizontal-stretch: 0; }
-        if root.busy : Action { height: 28px; text: Strings.stop; clicked => { root.stop(); } }
+        if root.busy : Action { height: 28px; text: Strings.stop; icon: @image-url("icons/stop.svg"); stop: true; clicked => { root.stop(); } }
     }
     if root.busy || root.progress > 0 : Rectangle { height: 4px; background: Palette.line; border-radius: 2px; clip: true;
         if root.busy && root.progress == 0 : Rectangle { x: (parent.width + self.width) * mod(animation-tick() / 1ms, 1800) / 1800 - self.width; width: parent.width / 4; border-radius: 2px; background: Palette.primary; }
@@ -528,12 +547,18 @@ export component AppWindow inherits Window {
     in-out property <int> preview-token;
     in property <bool> busy;
     in property <bool> drives-refreshing;
+    // A phone or camera is connected; the Sources page explains why it cannot be scanned.
+    in property <bool> phone-connected;
     in-out property <bool> refresh-feedback;
     Timer { interval: 700ms; running: root.refresh-feedback; triggered => { root.refresh-feedback = false; } }
     in-out property <bool> update-check-feedback;
     Timer { interval: 700ms; running: root.update-check-feedback; triggered => { root.update-check-feedback = false; } }
     in property <bool> can-scan;
     in property <bool> can-recover;
+    // Recovery runs on its own, also while a scan continues.
+    in property <bool> recovering;
+    // The latest recovery message; empty shows the destination hint instead.
+    in property <string> recovery-status;
     // Every visible result is ticked (drives the list's "Select all" box).
     in-out property <bool> all-selected;
     // The scan produced results, so an empty list means the filters hide them.
@@ -565,6 +590,12 @@ export component AppWindow inherits Window {
     callback apply-update();
     callback dismiss-update();
     callback open-image(); callback refresh(); callback select-drive(int); callback scan(); callback stop();
+    // A recovery folder that may share a drive with the scanned source waits here
+    // for the user's decision. A same-drive folder can only be replaced, never accepted.
+    in property <bool> destination-review;
+    in property <bool> destination-same-drive;
+    in property <string> destination-path;
+    callback choose-another-destination(); callback save-here-anyway(); callback cancel-destination();
     callback recover(); callback toggle-file(int); callback inspect(int); callback select-all(bool); callback filter(); callback check-update();
     Row { cross-axis-alignment: stretch;
         // ── Sidebar ─────────────────────────────────────────────
@@ -633,10 +664,11 @@ export component AppWindow inherits Window {
                             animate background { duration: 120ms; }
                             Row { padding-left: 8px; padding-right: 12px; spacing: 10px;
                                 Rectangle { width: 32px; height: 32px; border-radius: Metrics.radius; background: root.selected-drive == i ? Palette.surface : Palette.subtle;
-                                    Image { width: 18px; height: 18px; colorize: drive.icon == DriveIcon.locked ? Palette.muted : Palette.accent;
+                                    Image { width: 18px; height: 18px; colorize: drive.icon == DriveIcon.locked || drive.icon == DriveIcon.phone ? Palette.muted : Palette.accent;
                                         source: drive.icon == DriveIcon.usb ? @image-url("icons/usb.svg")
                                             : drive.icon == DriveIcon.volume ? @image-url("icons/volume.svg")
                                             : drive.icon == DriveIcon.locked ? @image-url("icons/lock.svg")
+                                            : drive.icon == DriveIcon.phone ? @image-url("icons/phone.svg")
                                             : @image-url("icons/drive.svg");
                                     }
                                 }
@@ -666,6 +698,11 @@ export component AppWindow inherits Window {
                         }
                     } }
                 }
+                // Phones are listed but cannot be scanned; say why and what works instead.
+                if root.phone-connected : Row { spacing: 8px; padding-left: 4px; padding-right: 4px;
+                    VerticalLayout { padding-top: 1px; alignment: start; Image { source: @image-url("icons/phone.svg"); width: 16px; height: 16px; colorize: Palette.muted; } }
+                    phone-note := Label { text: Strings.phones-and-cameras-connect-for; color: Palette.secondary; font-size: 12px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
+                }
                 Rectangle { vertical-stretch: 1; }
                 // One action bar: what will be scanned, the button that scans it, and,
                 // only while something runs or failed, the scan status.
@@ -691,11 +728,16 @@ export component AppWindow inherits Window {
                 }
                 Row { cross-axis-alignment: stretch; vertical-stretch: 1; spacing: 12px;
                     Card { horizontal-stretch: 1; min-width: 0px; VerticalLayout {
-                        // List header: one "select all" box above the row boxes, and the counts.
+                        // List header: one "select all" box above the row boxes, with the counts
+                        // under its caption. Stacked, each line gets the full width of the narrow
+                        // list column, so neither is cut off in German at the compact size. They
+                        // never elide; the layout tests check both stay inside the list column.
                         Row { height: 44px; vertical-stretch: 0; padding-left: 18px; padding-right: 18px; spacing: 10px;
-                            CheckBox { horizontal-stretch: 0; enabled: root.files.length > 0 && !root.busy; checked <=> root.all-selected; accessible-label: Strings.select-all; toggled => { root.select-all(self.checked); } }
-                            Label { text: Strings.select-all; color: root.files.length > 0 ? Palette.ink : Palette.muted; font-size: 13px; font-weight: 500; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; overflow: elide; }
-                            Label { text: root.summary; color: Palette.muted; font-size: 12px; vertical-alignment: center; horizontal-stretch: 0; }
+                            CheckBox { horizontal-stretch: 0; enabled: root.files.length > 0; checked <=> root.all-selected; accessible-label: Strings.select-all; toggled => { root.select-all(self.checked); } }
+                            VerticalLayout { horizontal-stretch: 1; alignment: center; spacing: 1px;
+                                select-all-caption := Label { text: Strings.select-all; color: root.files.length > 0 ? Palette.ink : Palette.muted; font-size: 13px; font-weight: 500; min-width: self.preferred-width; }
+                                list-summary := Label { text: root.summary; color: Palette.muted; font-size: 12px; min-width: self.preferred-width; }
+                            }
                         }
                         Divider { }
                         Rectangle { vertical-stretch: 1;
@@ -747,9 +789,11 @@ export component AppWindow inherits Window {
                 Row { height: 40px; cross-axis-alignment: center; spacing: 12px;
                     Row { horizontal-stretch: 1; min-width: 0px; spacing: 8px; padding-left: 4px; padding-right: 4px;
                         Image { source: @image-url("icons/shield.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
-                        Label { text: Strings.save-to-a-different-physical-drive; color: Palette.muted; font-size: 12px; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; overflow: elide; }
+                        // Recovery messages may take two lines; the row keeps its height.
+                        recovery-message := Label { text: root.recovery-status != "" ? root.recovery-status : Strings.save-to-a-different-physical-drive; color: root.recovery-status != "" ? Palette.ink : Palette.muted; font-size: 12px; vertical-alignment: center; min-width: 0px; height: 30px; horizontal-stretch: 1; wrap: word-wrap; overflow: elide; }
                     }
-                    Action { width: 264px; height: 40px; text: Strings.recover-selected; icon: @image-url("icons/reclaim.svg"); primary: true; enabled: root.can-recover; clicked => { root.recover(); } }
+                    // While recovering, the same button turns red and stops the recovery.
+                    Action { width: 264px; height: 40px; text: root.recovering ? Strings.stop-recovery : Strings.recover-selected; icon: root.recovering ? @image-url("icons/stop.svg") : @image-url("icons/reclaim.svg"); primary: !root.recovering; stop: root.recovering; enabled: root.can-recover; clicked => { root.recover(); } }
                 }
             }
             // Settings & help: preferences, then guidance, then version and project details.
@@ -850,6 +894,41 @@ export component AppWindow inherits Window {
                 Action { text: root.update-label; primary: true; enabled: !root.update-busy; clicked => { root.apply-update(); } }
             }
         }
+        }
+    }
+    // Recovery destination review: same backdrop and card as the update notice. It names
+    // the chosen folder, explains the risk and offers the safe choice first. Escape cancels.
+    if root.destination-review : destination-keys := FocusScope {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.cancel-destination(); return accept; }
+            return reject;
+        }
+        Rectangle { background: #00000066; TouchArea { } }
+        destination-card := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(620px, parent.width - 40px); height: min(destination-content.preferred-height, parent.height - 40px);
+            clip: true;
+            background: Palette.surface; border-radius: 12px; border-width: 1px; border-color: Palette.line;
+            drop-shadow-blur: 24px; drop-shadow-offset-y: 6px; drop-shadow-color: #00000050;
+            destination-content := VerticalLayout { padding: 20px; spacing: 14px;
+                Row { spacing: 12px;
+                    IconTile { icon: @image-url("icons/drive.svg"); }
+                    VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 2px; alignment: center;
+                        Label { text: Strings.review-recovery-destination; color: Palette.ink; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+                        destination-folder := Label { text: root.destination-path; color: Palette.muted; font-size: 12px; overflow: elide; min-width: 0px; }
+                    }
+                }
+                Body { text: root.destination-same-drive ? Strings.saving-here-can-overwrite : Strings.saving-to-the-same-drive; color: Palette.secondary; }
+                Row { spacing: 8px;
+                    Rectangle { horizontal-stretch: 1; }
+                    Action { text: Strings.cancel; quiet: true; fit: true; clicked => { root.cancel-destination(); } }
+                    if !root.destination-same-drive : Action { text: Strings.save-here-anyway; fit: true; clicked => { root.save-here-anyway(); } }
+                    Action { text: Strings.choose-another-folder; icon: @image-url("icons/files.svg"); primary: true; fit: true; clicked => { root.choose-another-destination(); } }
+                }
+            }
         }
     }
     // The page column's title bar, drawn over its top padding.

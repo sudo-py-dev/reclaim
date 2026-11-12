@@ -90,6 +90,7 @@ mod tests {
             mounted: false,
             encrypted: false,
             sector_size: 512,
+            phone: false,
         }
     }
     #[test]

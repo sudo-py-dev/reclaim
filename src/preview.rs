@@ -14,13 +14,17 @@ pub fn supported(kind: &str) -> bool {
     )
 }
 
-// Independent position: preview reads must not move the scanner's file cursor.
-struct Input {
+/// A reader with its own position on the shared source handle.
+///
+/// A cloned handle shares one file cursor with the running scan on Linux and
+/// Windows, so a seek here would silently move the scanner and corrupt both
+/// reads. Previews and recovery, which run while a scan is active, use this.
+pub(crate) struct Input {
     file: Arc<std::fs::File>,
     position: u64,
 }
 impl Input {
-    fn new(file: Arc<std::fs::File>) -> std::io::Result<Self> {
+    pub(crate) fn new(file: Arc<std::fs::File>) -> std::io::Result<Self> {
         #[cfg(windows)]
         let file = {
             use std::os::windows::io::{AsRawHandle, FromRawHandle};
@@ -106,12 +110,11 @@ pub fn load(
             None,
         )
         .map_err(|e| e.to_string())?;
-        input
-            .seek(SeekFrom::Start(found.offset))
-            .map_err(|e| e.to_string())?;
         // audit-allow(DOS-ALLOC): previews are refused above 32 MiB at the top of this function.
         let mut bytes = vec![0; usize::try_from(found.size).map_err(|e| e.to_string())?];
-        input.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+        reclaim::FoundReader::new(&mut input, found)
+            .and_then(|mut reader| reader.read_exact(&mut bytes))
+            .map_err(|e| e.to_string())?;
         std::borrow::Cow::Owned(bytes)
     };
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
@@ -149,6 +152,7 @@ mod tests {
             original_name: None,
             resident_data: Some(Arc::from(bytes)),
             ntfs: None,
+            extents: None,
         }
     }
 

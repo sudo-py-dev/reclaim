@@ -147,6 +147,33 @@ pub fn catalogs(ws: &Workspace) -> Vec<Finding> {
                     format!("bidi override character in {key:?}; use isolates"),
                 ));
             }
+            if RIGHT_TO_LEFT
+                .iter()
+                .any(|code| catalog.path.ends_with(&format!("/{code}.json")))
+                && has_unanchored_trailing_symbol(value)
+            {
+                findings.push(Finding::new(
+                    "I18N-BIDI",
+                    Some(451),
+                    &catalog.path,
+                    line,
+                    format!(
+                        "a Latin term ending in + or # in {key:?} shows the symbol on the wrong \
+                         side; add U+200E after it"
+                    ),
+                ));
+            }
+            if let Some(word) = informal_word(&catalog.path, value) {
+                findings.push(Finding::new(
+                    "I18N-FORMALITY",
+                    None,
+                    &catalog.path,
+                    line,
+                    format!(
+                        "informal {word:?} in {key:?}; this catalog addresses the user formally"
+                    ),
+                ));
+            }
         }
         let keys: BTreeSet<&str> = catalog.pairs.iter().map(|(k, _)| k.as_str()).collect();
         for missing in english.difference(&keys) {
@@ -170,6 +197,95 @@ pub fn catalogs(ws: &Workspace) -> Vec<Finding> {
         }
     }
     findings
+}
+
+/// Catalogs laid out right to left.
+const RIGHT_TO_LEFT: &[&str] = &["he", "ar"];
+
+/// Informal forms of address for catalogs that use the formal one. The German
+/// list adds the informal imperatives this app's messages use, since German
+/// imperatives often carry no pronoun ("Wähle" against "Wählen Sie").
+const INFORMAL: &[(&str, &[&str])] = &[
+    (
+        "de",
+        &[
+            "du",
+            "dich",
+            "dir",
+            "dein",
+            "deine",
+            "deinen",
+            "deinem",
+            "deiner",
+            "deines",
+            "kannst",
+            "hast",
+            "möchtest",
+            "willst",
+            "musst",
+            "benutze",
+            "durchsuche",
+            "lade",
+            "öffne",
+            "prüfe",
+            "schließe",
+            "speichere",
+            "starte",
+            "stelle",
+            "verbinde",
+            "vermeide",
+            "versuche",
+            "verwende",
+            "wähle",
+        ],
+    ),
+    ("fr", &["tu", "toi", "ton", "ta", "tes"]),
+    (
+        "ru",
+        &[
+            "ты",
+            "тебя",
+            "тебе",
+            "тобой",
+            "твой",
+            "твоя",
+            "твоё",
+            "твои",
+            "твоих",
+        ],
+    ),
+];
+
+/// The first informal word in `value` when `path` is a catalog that must
+/// address the user formally.
+fn informal_word(path: &str, value: &str) -> Option<String> {
+    let (_, words) = INFORMAL
+        .iter()
+        .find(|(code, _)| path.ends_with(&format!("/{code}.json")))?;
+    value
+        .split(|c: char| !c.is_alphabetic())
+        .map(str::to_lowercase)
+        .find(|word| words.contains(&word.as_str()))
+}
+
+/// Whether a Latin term ends in `+` or `#` ("HFS+", "C#") without a
+/// left-to-right mark after it. In a right-to-left paragraph the symbol then
+/// takes the paragraph's direction and is drawn on the other side of the term.
+fn has_unanchored_trailing_symbol(value: &str) -> bool {
+    let mut chars = value.chars().peekable();
+    while let Some(c) = chars.next() {
+        if !c.is_ascii_alphanumeric() || !chars.peek().is_some_and(|n| matches!(n, '+' | '#')) {
+            continue;
+        }
+        while chars.next_if(|n| matches!(n, '+' | '#')).is_some() {}
+        if chars
+            .peek()
+            .is_none_or(|n| *n != '\u{200e}' && !n.is_ascii_alphanumeric())
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Whether a literal reads like a sentence meant for people rather than an

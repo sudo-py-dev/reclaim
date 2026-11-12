@@ -229,11 +229,28 @@ fn occupied_files_are_not_read_or_found_and_free_offsets_export_correctly() {
     assert_eq!(done, unused);
 }
 #[test]
-fn a_candidate_cannot_bridge_an_occupied_cluster() {
+fn a_file_split_around_an_occupied_cluster_comes_back_without_it() {
+    // Free clusters 3 and 4, occupied 5, free 6: a file filled the gap in order.
     let (mut b, heap) = fat12();
     b[heap + 512..heap + 512 + 9].copy_from_slice(b"%PDF-1.7\n");
+    b[heap + 2 * 512..heap + 3 * 512].fill(b'x');
+    b[heap + 3 * 512..heap + 3 * 512 + 9].copy_from_slice(b"OCCUPIED\n");
     b[heap + 4 * 512..heap + 4 * 512 + 5].copy_from_slice(b"%%EOF");
-    assert!(run(&b).0.is_empty());
+    let (files, _, _) = run(&b);
+    assert_eq!(files.len(), 1);
+    let file = &files[0];
+    assert_eq!(file.offset, (heap + 512) as u64);
+    assert_eq!(
+        file.extents.as_deref(),
+        Some([((heap + 512) as u64, 1024), ((heap + 4 * 512) as u64, 5)].as_slice())
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("split.pdf");
+    crate::recover_reader(&mut Cursor::new(&b), &output, file).unwrap();
+    let recovered = std::fs::read(output).unwrap();
+    assert!(recovered.starts_with(b"%PDF-1.7\n") && recovered.ends_with(b"%%EOF"));
+    assert!(!recovered.windows(8).any(|w| w == b"OCCUPIED"));
+    assert_eq!(recovered.len(), 1024 + 5);
 }
 #[test]
 fn mirrored_fat_disagreement_is_treated_as_occupied() {
@@ -401,4 +418,221 @@ fn media_faults_skip_free_data_but_never_fabricate_an_allocation_map() {
         .is_err()
     );
     assert!(!mapped);
+}
+
+/// A 1 MiB ext2 volume with 1 KiB blocks, one group, and blocks 100..104 free.
+fn ext2() -> Vec<u8> {
+    let mut b = vec![0; 1024 * 1024];
+    let s = 1024;
+    put32(&mut b, s + 0x04, 1024);
+    put32(&mut b, s + 0x14, 1);
+    put32(&mut b, s + 0x20, 8192);
+    put16(&mut b, s + 0x38, 0xef53);
+    put32(&mut b, s + 0x4c, 1);
+    put32(&mut b, s + 0x60, 0x2);
+    // Group descriptor table in block 2, block bitmap in block 3.
+    put32(&mut b, 2 * 1024, 3);
+    let bitmap = 3 * 1024;
+    b[bitmap..bitmap + 1024].fill(0xff);
+    for block in 100..104 {
+        let bit = block - 1;
+        b[bitmap + bit / 8] &= !(1 << (bit % 8));
+    }
+    b
+}
+/// A 1 MiB HFS+ volume with 512-byte blocks and blocks 100..104 free.
+fn hfs_plus() -> Vec<u8> {
+    let mut b = vec![0; 1024 * 1024];
+    let h = 1024;
+    b[h..h + 2].copy_from_slice(b"H+");
+    b[h + 2..h + 4].copy_from_slice(&4u16.to_be_bytes());
+    b[h + 40..h + 44].copy_from_slice(&512u32.to_be_bytes());
+    b[h + 44..h + 48].copy_from_slice(&2048u32.to_be_bytes());
+    b[h + 112..h + 120].copy_from_slice(&256u64.to_be_bytes());
+    b[h + 124..h + 128].copy_from_slice(&1u32.to_be_bytes());
+    b[h + 128..h + 132].copy_from_slice(&10u32.to_be_bytes());
+    b[h + 132..h + 136].copy_from_slice(&1u32.to_be_bytes());
+    let bitmap = 10 * 512;
+    b[bitmap..bitmap + 256].fill(0xff);
+    for block in 100..104 {
+        b[bitmap + block / 8] &= !(0x80 >> (block % 8));
+    }
+    b
+}
+fn map(b: &[u8]) -> io::Result<Plan> {
+    plan(&mut Cursor::new(b), b.len() as u64, &AtomicBool::new(false))
+}
+#[test]
+fn ext_block_bitmaps_limit_the_scan_to_free_blocks() {
+    let mut b = ext2();
+    let pdf = b"%PDF-1.7\nfree ext\n%%EOF";
+    b[100 * 1024..100 * 1024 + pdf.len()].copy_from_slice(pdf);
+    b[120 * 1024..120 * 1024 + pdf.len()].copy_from_slice(pdf);
+    let (files, unused, done) = run(&b);
+    assert_eq!((unused, done), (4096, 4096));
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].offset, 100 * 1024);
+    assert_eq!(map(&b).unwrap().filesystem, "ext2");
+    put32(&mut b, 1024 + 0x5c, 0x4);
+    assert_eq!(map(&b).unwrap().filesystem, "ext3");
+    put32(&mut b, 1024 + 0x60, 0x2 | 0x40);
+    assert_eq!(map(&b).unwrap().filesystem, "ext4");
+}
+#[test]
+fn ext_metadata_marked_free_or_unknown_features_fail_closed() {
+    let mut b = ext2();
+    // Clear the bit for the block bitmap itself (block 3).
+    b[3 * 1024] &= !(1 << 2);
+    assert_eq!(map(&b).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    let mut b = ext2();
+    put32(&mut b, 1024 + 0x60, 0x2 | 0x10);
+    assert_eq!(map(&b).unwrap_err().kind(), io::ErrorKind::Unsupported);
+    let mut b = ext2();
+    put32(&mut b, 1024 + 0x64, 0x200);
+    assert_eq!(map(&b).unwrap_err().kind(), io::ErrorKind::Unsupported);
+}
+#[test]
+fn ext_uninitialized_groups_are_skipped_only_with_group_checksums() {
+    let mut b = ext2();
+    put16(&mut b, 2 * 1024 + 0x12, 0x2);
+    assert_eq!(map(&b).unwrap().unused, 4096);
+    put32(&mut b, 1024 + 0x64, 0x10);
+    assert_eq!(map(&b).unwrap().unused, 0);
+}
+#[test]
+fn hfs_plus_allocation_file_limits_the_scan_to_free_blocks() {
+    let mut b = hfs_plus();
+    let pdf = b"%PDF-1.7\nfree HFS+\n%%EOF";
+    b[100 * 512..100 * 512 + pdf.len()].copy_from_slice(pdf);
+    b[120 * 512..120 * 512 + pdf.len()].copy_from_slice(pdf);
+    let (files, unused, done) = run(&b);
+    assert_eq!((unused, done), (2048, 2048));
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].offset, 100 * 512);
+    b[1024..1026].copy_from_slice(b"HX");
+    b[1026..1028].copy_from_slice(&5u16.to_be_bytes());
+    assert_eq!(map(&b).unwrap().filesystem, "HFSX");
+}
+#[test]
+fn hfs_plus_damaged_or_overflowing_maps_fail_closed() {
+    let mut b = hfs_plus();
+    // Block 10 holds the allocation file and must be marked used.
+    b[10 * 512 + 1] &= !0x20;
+    assert_eq!(map(&b).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    let mut b = hfs_plus();
+    b[1024 + 124..1024 + 128].copy_from_slice(&2u32.to_be_bytes());
+    assert_eq!(map(&b).unwrap_err().kind(), io::ErrorKind::Unsupported);
+    let mut b = hfs_plus();
+    b[1024 + 132..1024 + 136].copy_from_slice(&u32::MAX.to_be_bytes());
+    assert!(map(&b).is_err());
+}
+#[test]
+fn refs_volumes_are_named_and_never_scanned() {
+    let mut b = vec![0; 64 * 1024];
+    b[3..11].copy_from_slice(b"ReFS\0\0\0\0");
+    b[510..512].copy_from_slice(b"\x55\xaa");
+    let error = map(&b).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    assert!(error.to_string().contains("ReFS"));
+}
+#[test]
+fn malformed_ext_and_hfs_headers_do_not_panic() {
+    for mut b in [ext2(), hfs_plus()] {
+        for at in (1024..1024 + 512).chain(2048..2048 + 64) {
+            for value in [0, 1, 0x80, 255] {
+                let old = b[at];
+                b[at] = value;
+                let _outcome = map(&b);
+                b[at] = old;
+            }
+        }
+    }
+}
+
+/// A deleted MFT record in the NTFS 3.0 layout Linux's ntfs3 driver writes:
+/// update array at 42, attributes from 48, and no file name left behind.
+fn ntfs3_deleted_record(runs: &[u8], size: u64) -> Vec<u8> {
+    let mut b = vec![0; 1024];
+    b[..4].copy_from_slice(b"FILE");
+    put16(&mut b, 4, 42);
+    put16(&mut b, 6, 3);
+    put16(&mut b, 16, 1);
+    put16(&mut b, 20, 48);
+    put16(&mut b, 22, 0);
+    put32(&mut b, 28, 1024);
+    let mut at = 48;
+    // $STANDARD_INFORMATION, resident, 48-byte value.
+    put32(&mut b, at, 0x10);
+    put32(&mut b, at + 4, 72);
+    put32(&mut b, at + 16, 48);
+    put16(&mut b, at + 20, 24);
+    at += 72;
+    // Unnamed nonresident $DATA.
+    let length = (64 + runs.len()).next_multiple_of(8);
+    put32(&mut b, at, 0x80);
+    put32(&mut b, at + 4, u32::try_from(length).unwrap());
+    b[at + 8] = 1;
+    let clusters = size.div_ceil(4096);
+    put64(&mut b, at + 24, clusters - 1);
+    put16(&mut b, at + 32, 64);
+    put64(&mut b, at + 40, clusters * 4096);
+    put64(&mut b, at + 48, size);
+    put64(&mut b, at + 56, size);
+    b[at + 64..at + 64 + runs.len()].copy_from_slice(runs);
+    at += length;
+    put32(&mut b, at, u32::MAX);
+    put32(&mut b, 24, u32::try_from(at + 8).unwrap());
+    put16(&mut b, 42, 0xbeef);
+    for (i, tail) in [510, 1022].into_iter().enumerate() {
+        let pair = [b[tail], b[tail + 1]];
+        b[44 + i * 2..46 + i * 2].copy_from_slice(&pair);
+        put16(&mut b, tail, 0xbeef);
+    }
+    b
+}
+
+#[test]
+fn ntfs3_records_without_names_keep_their_fragments() {
+    let geometry = crate::ntfs::Geometry {
+        cluster_size: 4096,
+        clusters: 1000,
+    };
+    // Two fragments: 2 clusters at 200, then 1 cluster at 500.
+    let record = ntfs3_deleted_record(&[0x21, 2, 200, 0, 0x21, 1, 44, 1, 0], 9000);
+    let file = crate::ntfs::deleted_file(record, geometry, &AtomicBool::new(false)).unwrap();
+    assert_eq!(file.original_name, None);
+    assert_eq!(file.kind, "bin");
+    assert_eq!(file.size, 9000);
+    assert_eq!(
+        file.extents.as_deref(),
+        Some([(200 * 4096, 2 * 4096), (500 * 4096, 4096)].as_slice())
+    );
+    // A run past the end of the volume, or a sparse run, is never guessed at.
+    for runs in [&[0x21, 2, 0xe8, 0x03, 0][..], &[0x01, 2, 0][..]] {
+        let record = ntfs3_deleted_record(runs, 8000);
+        assert!(crate::ntfs::deleted_file(record, geometry, &AtomicBool::new(false)).is_none());
+    }
+}
+
+#[test]
+fn file_types_are_recognised_from_their_first_bytes() {
+    let mut mp4 = b"\0\0\0\x18ftypisom".to_vec();
+    assert_eq!(crate::sniff_kind(&mp4), Some("mp4"));
+    mp4[8..12].copy_from_slice(b"qt  ");
+    assert_eq!(crate::sniff_kind(&mp4), Some("mov"));
+    mp4[8..12].copy_from_slice(b"heic");
+    assert_eq!(crate::sniff_kind(&mp4), Some("heic"));
+    assert_eq!(
+        crate::sniff_kind(b"\x1a\x45\xdf\xa3\x01\0\0\0\x42\x82\x84webm"),
+        Some("webm")
+    );
+    assert_eq!(
+        crate::sniff_kind(b"\xff\xd8\xff\xe0\0\x10JFIF"),
+        Some("jpg")
+    );
+    assert_eq!(crate::sniff_kind(b"RIFF\0\0\0\0WAVEfmt "), Some("wav"));
+    assert_eq!(crate::sniff_kind(b"plain text"), None);
+    assert!(crate::starts_like("docx", b"PK\x03\x04\x14\0"));
+    assert!(crate::starts_like("mov", b"\0\0\0\x18ftypisom"));
+    assert!(!crate::starts_like("png", b"\xff\xd8\xff\xe0"));
 }

@@ -1,5 +1,9 @@
-//! Limited NTFS 3-style record recovery. Only deleted base records with one
-//! unnamed resident $DATA value are accepted. No cluster runs are guessed.
+//! NTFS 3-style deleted-record recovery.
+//!
+//! A deleted base record keeps its name, size and, for larger files, the list
+//! of cluster runs that held the data. Resident data is taken from the record
+//! itself. Cluster runs are only used when the caller knows the volume
+//! geometry (an unused-space scan); they are read from the record, never guessed.
 use crate::{Found, NtfsMetadata, Validation};
 use std::{
     io::{self, Read},
@@ -57,10 +61,106 @@ pub fn read_record(
             Err(e)
         };
     }
-    Ok(parse_record(record, offset, cancel).map(|found| (found, size)))
+    Ok(parse_record(record, offset, None, cancel).map(|found| (found, size)))
 }
 
-fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option<Found> {
+/// Volume geometry needed to turn a deleted record's cluster runs into bytes.
+#[derive(Clone, Copy)]
+pub(crate) struct Geometry {
+    pub cluster_size: u64,
+    pub clusters: u64,
+}
+
+/// Most cluster runs accepted for one deleted file.
+const MAX_RUNS: usize = 4096;
+
+/// A deleted file from a raw MFT record of a mapped volume: resident data, or
+/// nonresident data as byte extents of that volume.
+pub(crate) fn deleted_file(
+    record: Vec<u8>,
+    geometry: Geometry,
+    cancel: &AtomicBool,
+) -> Option<Found> {
+    parse_record(record, 0, Some(geometry), cancel)
+}
+
+fn little(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .rev()
+        .fold(0, |value, byte| (value << 8) | u64::from(*byte))
+}
+
+/// Byte extents of an unnamed, uncompressed, fully initialized nonresident
+/// $DATA attribute, or `None` when it cannot be read exactly.
+fn extents(attr: &[u8], geometry: Geometry) -> Option<(u64, Vec<(u64, u64)>)> {
+    // Flags: compressed, encrypted or sparse data cannot be copied as stored.
+    if attr.len() < 64 || short(attr, 12) != 0 || crate::bytes::u64_le(attr, 16) != 0 {
+        return None;
+    }
+    let last = crate::bytes::u64_le(attr, 24);
+    let size = crate::bytes::u64_le(attr, 48);
+    let initialized = crate::bytes::u64_le(attr, 56);
+    if size == 0 || initialized != size {
+        return None;
+    }
+    let mut p = usize::from(short(attr, 32));
+    let mut runs: Vec<(u64, u64)> = Vec::new();
+    let mut lcn = 0i128;
+    let mut covered = 0u64;
+    loop {
+        let tag = *attr.get(p)?;
+        p = p.checked_add(1)?;
+        if tag == 0 {
+            break;
+        }
+        let n = usize::from(tag & 15);
+        let o = usize::from(tag >> 4);
+        // o == 0 is a sparse run: there is no stored data to recover.
+        if n == 0 || n > 8 || o == 0 || o > 8 || runs.len() >= MAX_RUNS {
+            return None;
+        }
+        let length = little(attr.get(p..p.checked_add(n)?)?);
+        p = p.checked_add(n)?;
+        let raw = attr.get(p..p.checked_add(o)?)?;
+        let negative = raw.last().is_some_and(|b| b & 128 != 0);
+        let value = i128::from(little(raw));
+        let delta = if negative {
+            value.checked_sub(1i128.checked_shl(u32::try_from(o.checked_mul(8)?).ok()?)?)?
+        } else {
+            value
+        };
+        p = p.checked_add(o)?;
+        lcn = lcn.checked_add(delta)?;
+        let start = u64::try_from(lcn).ok()?;
+        if length == 0 || start.checked_add(length)? > geometry.clusters {
+            return None;
+        }
+        covered = covered.checked_add(length)?;
+        let bytes = length.checked_mul(geometry.cluster_size)?;
+        let at = start.checked_mul(geometry.cluster_size)?;
+        match runs.last_mut() {
+            Some((previous, previous_len)) if previous.checked_add(*previous_len) == Some(at) => {
+                *previous_len = previous_len.checked_add(bytes)?;
+            }
+            _ => runs.push((at, bytes)),
+        }
+    }
+    if runs.is_empty()
+        || last.checked_add(1) != Some(covered)
+        || covered.checked_mul(geometry.cluster_size)? < size
+    {
+        return None;
+    }
+    Some((size, runs))
+}
+
+fn parse_record(
+    mut record: Vec<u8>,
+    offset: u64,
+    geometry: Option<Geometry>,
+    cancel: &AtomicBool,
+) -> Option<Found> {
     if cancel.load(Ordering::Relaxed)
         || short(&record, 16) == 0
         || short(&record, 22) != 0
@@ -76,8 +176,11 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
         return None;
     }
     let sector = record.len() / (count - 1);
+    // NTFS 3.1 records keep their update array at 48; the older 3.0 layout,
+    // still written by Linux's ntfs3 driver, keeps it at 42 and has no
+    // record-number field.
     if !matches!(sector, 512 | 4096)
-        || usa < 48
+        || usa < 42
         || usa + count * 2 > first
         || first < 48
         || !first.is_multiple_of(8)
@@ -102,10 +205,11 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
     let mut at = first;
     let mut name: Option<(u8, String)> = None;
     let mut data = None;
+    let mut nonresident = None;
     let mut terminated = false;
     let mut standard_info = false;
     let mut metadata = NtfsMetadata {
-        record_number: long(&record, 44),
+        record_number: if usa >= 48 { long(&record, 44) } else { 0 },
         sequence_number: short(&record, 16),
         ..Default::default()
     };
@@ -207,7 +311,7 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
                     }
                 }
                 0x80 if attr[9] == 0 => {
-                    if data.is_some() {
+                    if data.is_some() || nonresident.is_some() {
                         return None;
                     }
                     data = Some(Arc::<[u8]>::from(value));
@@ -215,14 +319,36 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
                 _ => {}
             }
         } else if kind == 0x80 && attr[9] == 0 {
-            return None;
+            let geometry = geometry?;
+            if data.is_some() || nonresident.is_some() {
+                return None;
+            }
+            nonresident = Some(extents(attr, geometry)?);
         }
         at += length;
     }
     if !terminated || !standard_info {
         return None;
     }
-    let (_, name) = name?;
+    let name = name.map(|(_, name)| name);
+    if let Some((size, runs)) = nonresident {
+        let (offset, _) = *runs.first()?;
+        return Some(Found {
+            offset,
+            size,
+            // Linux's ntfs3 driver removes the name from a deleted record but
+            // keeps its data runs; the type then comes from the file's bytes.
+            kind: name.as_deref().map_or("bin", extension_kind),
+            selected: true,
+            // The record describes the data exactly; its bytes are not checked here.
+            validation: Validation::MetadataChecked,
+            original_name: name,
+            resident_data: None,
+            ntfs: Some(metadata),
+            extents: Some(Arc::from(runs)),
+        });
+    }
+    let name = name?;
     let data = data?;
     let kind = if data.starts_with(b"SQLite format 3\0") {
         "sqlite"
@@ -243,10 +369,11 @@ fn parse_record(mut record: Vec<u8>, offset: u64, cancel: &AtomicBool) -> Option
         original_name: Some(name),
         resident_data: Some(data),
         ntfs: Some(metadata),
+        extents: None,
     })
 }
 
-fn extension_kind(name: &str) -> &'static str {
+pub(crate) fn extension_kind(name: &str) -> &'static str {
     match name
         .rsplit_once('.')
         .map(|(_, ext)| ext.to_ascii_lowercase())
@@ -286,7 +413,13 @@ fn extension_kind(name: &str) -> &'static str {
         Some("au") => "au",
         Some("avi") => "avi",
         Some("mp3") => "mp3",
-        Some("mp4") => "mp4",
+        Some("mp4" | "m4v") => "mp4",
+        Some("mov") => "mov",
+        Some("3gp" | "3g2") => "3gp",
+        Some("mkv") => "mkv",
+        Some("webm") => "webm",
+        Some("heic" | "heif") => "heic",
+        Some("m4a") => "m4a",
         Some("jar") => "jar",
         Some("apk") => "apk",
         Some("exe") => "exe",

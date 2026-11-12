@@ -11,6 +11,7 @@ fn candidate() -> Found {
         original_name: None,
         resident_data: None,
         ntfs: None,
+        extents: None,
     }
 }
 

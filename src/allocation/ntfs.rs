@@ -307,5 +307,112 @@ pub(super) fn plan(
     if bitmap[0] & 1 == 0 {
         return Err(invalid("NTFS boot cluster is incorrectly marked unused"));
     }
-    from_bitmap(&bitmap, clusters, 0, cluster_size, "NTFS", cancel)
+    let mut plan = from_bitmap(
+        &bitmap,
+        clusters,
+        0,
+        cluster_size,
+        BitOrder::LeastSignificantFirst,
+        "NTFS",
+        cancel,
+    )?;
+    let geometry = crate::ntfs::Geometry {
+        cluster_size,
+        clusters,
+    };
+    plan.files = deleted_files(input, &mft, record_size, geometry, &bitmap, total, cancel)?;
+    Ok(plan)
+}
+
+/// Most deleted files taken from one MFT; the scan's own limit is 100,000.
+const MAX_DELETED: usize = 50_000;
+
+/// Physical byte position of `logical` within a nonresident stream.
+fn physical(stream: &Stream, logical: u64, cluster_size: u64) -> Option<u64> {
+    let mut start = 0u64;
+    for (lcn, count) in &stream.runs {
+        let length = count.checked_mul(cluster_size)?;
+        if logical < start.checked_add(length)? {
+            return lcn.checked_mul(cluster_size)?.checked_add(logical - start);
+        }
+        start = start.checked_add(length)?;
+    }
+    None
+}
+
+/// Whether every cluster of a byte range is marked free in the volume bitmap.
+fn all_free(bitmap: &[u8], at: u64, length: u64, cluster_size: u64) -> bool {
+    let first = at / cluster_size;
+    let Some(last) = at.checked_add(length).map(|end| end.div_ceil(cluster_size)) else {
+        return false;
+    };
+    (first..last).all(|cluster| {
+        usize::try_from(cluster / 8)
+            .ok()
+            .and_then(|index| bitmap.get(index))
+            .is_some_and(|byte| byte & (1 << (cluster % 8)) == 0)
+    })
+}
+
+/// Deleted files whose MFT records survive and whose data clusters are all
+/// still unused, so their bytes cannot have been overwritten by another file.
+/// Fragmented files come back whole, with their original names.
+fn deleted_files(
+    input: &mut (impl Read + Seek),
+    mft: &Stream,
+    record_size: u64,
+    geometry: crate::ntfs::Geometry,
+    bitmap: &[u8],
+    total: u64,
+    cancel: &AtomicBool,
+) -> io::Result<Vec<crate::Found>> {
+    let records = mft.initialized.min(mft.size) / record_size;
+    let batch = (1024 * 1024 / record_size).max(1);
+    let mut files = Vec::new();
+    let mut index = 16;
+    while index < records && files.len() < MAX_DELETED {
+        check(cancel)?;
+        let count = batch.min(records - index);
+        let bytes = stream_read(
+            input,
+            mft,
+            index * record_size,
+            to_usize(count * record_size),
+            geometry.cluster_size,
+            total,
+            cancel,
+        )?;
+        for (number, raw) in (index..).zip(bytes.chunks_exact(to_usize(record_size))) {
+            // Only deleted (flags 0) file records are candidates.
+            if raw.get(..4) != Some(b"FILE".as_slice()) || u16at(raw, 22) != 0 {
+                continue;
+            }
+            let Some(mut file) = crate::ntfs::deleted_file(raw.to_vec(), geometry, cancel) else {
+                continue;
+            };
+            match &file.extents {
+                Some(extents) => {
+                    if !extents
+                        .iter()
+                        .all(|(at, length)| all_free(bitmap, *at, *length, geometry.cluster_size))
+                    {
+                        continue;
+                    }
+                }
+                None => {
+                    let Some(at) = physical(mft, number * record_size, geometry.cluster_size)
+                    else {
+                        continue;
+                    };
+                    file.offset = at;
+                }
+            }
+            files.push(file);
+            if files.len() >= MAX_DELETED {
+                break;
+            }
+        }
+        index += count;
+    }
+    Ok(files)
 }

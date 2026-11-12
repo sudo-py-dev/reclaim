@@ -186,6 +186,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             mounted: false,
             encrypted: false,
             sector_size: sector,
+            phone: false,
         });
     }
     // SAFETY: GetLogicalDrives has no pointer arguments.
@@ -275,6 +276,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             mounted: true,
             encrypted,
             sector_size,
+            phone: false,
         });
     }
     if unknown_backing_disk {

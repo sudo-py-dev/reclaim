@@ -1,5 +1,45 @@
 use super::*;
 
+/// A phone connected for file transfer, as Linux discovery reports it.
+fn phone() -> drives::Drive {
+    drives::Drive {
+        path: "/sys/bus/usb/devices/1-2".into(),
+        name: "Unihertz F21 Pro".into(),
+        name_is_message: false,
+        size: 0,
+        kind: "Phone or camera".into(),
+        location: "File transfer only".into(),
+        mounted: false,
+        encrypted: false,
+        sector_size: 512,
+        phone: true,
+    }
+}
+
+#[test]
+fn phones_are_listed_unavailable_with_an_explanation() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    let mut state = Reclaim::default();
+    state.sync_ui(&ui);
+    assert!(!ui.get_phone_connected());
+    state.drives.push(phone());
+    state.sync_ui(&ui);
+    assert!(ui.get_phone_connected());
+    let row = ui.get_drives().row_data(0).unwrap();
+    assert!(!row.available);
+    assert_eq!(row.icon, DriveIcon::Phone);
+    assert_eq!(row.size, "");
+    assert_eq!(row.device, "");
+    assert!(row.detail.contains("File transfer only"));
+}
+
 #[test]
 fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
     slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
@@ -21,6 +61,7 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
         mounted: false,
         encrypted: false,
         sector_size: 512,
+        phone: false,
     });
     // Other kinds render their own icon and device tag in the previews.
     for (path, name, name_is_message, kind, location, encrypted) in [
@@ -59,8 +100,10 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
             mounted: false,
             encrypted,
             sector_size: 512,
+            phone: false,
         });
     }
+    state.drives.push(phone());
     state.source = Some(state.drives[0].path.clone());
     state.results = vec![
         Found {
@@ -71,6 +114,7 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
             original_name: Some("Summer.png".into()),
             resident_data: None,
             ntfs: None,
+            extents: None,
             validation: reclaim::Validation::StructureChecked,
         },
         Found {
@@ -81,6 +125,7 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
             original_name: Some("Notes.pdf".into()),
             resident_data: None,
             ntfs: None,
+            extents: None,
             validation: reclaim::Validation::StructureChecked,
         },
     ];
@@ -590,6 +635,7 @@ fn file_list_stays_exact_while_a_large_scan_streams_results() {
         original_name: n.is_multiple_of(7).then(|| format!("Holiday {n}.{kind}")),
         resident_data: None,
         ntfs: None,
+        extents: None,
         validation: reclaim::Validation::StructureChecked,
     };
     let assert_exact = |state: &Reclaim, ui: &AppWindow, step: &str| {
@@ -801,6 +847,11 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
     let ui = AppWindow::new().unwrap();
     ui.show().unwrap();
     let first_run = Reclaim::default;
+    let with_phone = || {
+        let mut state = Reclaim::default();
+        state.drives.push(phone());
+        state
+    };
     let scanning = || {
         let mut state = Reclaim::default();
         state.source = Some("/dev/disk-with-a-long-descriptive-name".into());
@@ -815,6 +866,7 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
                 )),
                 resident_data: None,
                 ntfs: None,
+                extents: None,
                 validation: reclaim::Validation::StructureChecked,
             });
         }
@@ -822,6 +874,12 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
         state.status = "Scanning for recoverable files…".into();
         state.total = 6_120_000_000;
         state.scanned = 2_250_000_000;
+        state
+    };
+    let recovering = || {
+        let mut state = scanning();
+        state.exporting = true;
+        state.recovery_status = "Recovering selected files…".into();
         state
     };
     for (code, language) in [
@@ -842,7 +900,9 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
                     ui.set_page(page);
                     for (name, make, notice) in [
                         ("first run", &first_run as &dyn Fn() -> Reclaim, false),
+                        ("phone connected", &with_phone, false),
                         ("scanning", &scanning, false),
+                        ("recovering while scanning", &recovering, false),
                         ("update notice", &first_run, true),
                     ] {
                         let mut state = make();
@@ -858,6 +918,39 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
                 }
                 ui.set_update_notice(false);
                 ui.set_page(1);
+                // The list header never elides, so counts in the hundreds of
+                // thousands must still fit the narrow list column.
+                scanning().sync_ui(&ui);
+                let count = "250000";
+                ui.set_summary(i18n::message("Found: {0} · Selected: {1}", &[count, count]).into());
+                ui.window().take_snapshot().unwrap();
+                assert_controls_clear(
+                    &ui,
+                    window,
+                    &format!("{code} {width}x{height} page 1 large counts"),
+                );
+                // Both labels are at least as wide as their text, so text that
+                // does not fit pokes out of the list column instead of eliding.
+                let element = |id: &str| {
+                    i_slint_backend_testing::ElementHandle::find_by_element_id(&ui, id)
+                        .next()
+                        .unwrap_or_else(|| panic!("{id}"))
+                };
+                let list = element("AppWindow::files-view");
+                let (left, right) = (
+                    list.absolute_position().x,
+                    list.absolute_position().x + list.size().width,
+                );
+                for id in ["AppWindow::select-all-caption", "AppWindow::list-summary"] {
+                    let label = element(id);
+                    let start = label.absolute_position().x;
+                    let end = start + label.size().width;
+                    assert!(
+                        start >= left - 0.5 && end <= right + 0.5,
+                        "{code} {width}x{height}: {id} ({start}..{end}) is cut off by the list \
+                         column ({left}..{right})"
+                    );
+                }
                 let mut state = scanning();
                 let mut steady = |ui: &AppWindow| {
                     state.sync_ui(ui);
@@ -867,12 +960,85 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
                     ui.set_status(i18n::message("Checking a {0} file…", &["ZIP"]).into());
                     ui.window().take_snapshot().unwrap();
                 };
+                let mut recovering_now = |ui: &AppWindow| {
+                    recovering().sync_ui(ui);
+                    ui.window().take_snapshot().unwrap();
+                };
                 assert_steady(
                     &ui,
                     "ScanStatus::headline",
                     &format!("{code} {width}x{height}"),
-                    &mut [("scanning", &mut steady), ("slow check", &mut slow_check)],
+                    &mut [
+                        ("scanning", &mut steady),
+                        ("slow check", &mut slow_check),
+                        ("recovering", &mut recovering_now),
+                    ],
                 );
+                // Recovery messages replace the hint without moving anything.
+                let message = |text: &'static str| {
+                    move |ui: &AppWindow| {
+                        let mut state = recovering();
+                        state.recovery_status = text.into();
+                        state.sync_ui(ui);
+                        ui.window().take_snapshot().unwrap();
+                    }
+                };
+                let mut hint = |ui: &AppWindow| {
+                    scanning().sync_ui(ui);
+                    ui.window().take_snapshot().unwrap();
+                };
+                assert_steady(
+                    &ui,
+                    "AppWindow::recovery-message",
+                    &format!("{code} {width}x{height}"),
+                    &mut [
+                        ("hint", &mut hint),
+                        ("recovering", &mut message("Recovering selected files…")),
+                        (
+                            "saved",
+                            &mut message(
+                                "Saved 1 file. Open the destination folder and verify their contents.",
+                            ),
+                        ),
+                        (
+                            "warning",
+                            &mut message(
+                                "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.",
+                            ),
+                        ),
+                    ],
+                );
+                // Selected files can be recovered mid-scan; the button then stops it.
+                scanning().sync_ui(&ui);
+                assert!(ui.get_can_recover(), "{code}: recover during a scan");
+                recovering().sync_ui(&ui);
+                ui.window().take_snapshot().unwrap();
+                assert!(ui.get_can_recover() && ui.get_busy());
+                assert!(
+                    i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                        &ui,
+                        &i18n::t("Stop recovery"),
+                    )
+                    .next()
+                    .is_some(),
+                    "{code}: the recover button offers to stop"
+                );
+                if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                    let mut state = recovering();
+                    state.recovery_status =
+                        "Saved 1 file. Open the destination folder and verify their contents."
+                            .into();
+                    state.sync_ui(&ui);
+                    let snapshot = ui.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        format!("{directory}/recovering-{code}-{width}.png"),
+                        snapshot.as_bytes(),
+                        snapshot.width(),
+                        snapshot.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
             }
         });
     }
@@ -972,5 +1138,228 @@ fn windows_drive_access_failure_has_an_actionable_aligned_restart_button() {
                 .is_none()
             );
         });
+    }
+}
+
+#[test]
+fn destination_review_offers_a_safe_choice_and_never_accepts_the_source_drive() {
+    use crate::layout_checks::assert_controls_clear;
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    ui.show().unwrap();
+    ui.set_page(1);
+    let folder = PathBuf::from("/media/user/Backup drive with a long name/Recovered photos");
+    let button = |ui: &AppWindow, label: &str| {
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(ui, &i18n::t(label))
+            .next()
+            .is_some()
+    };
+    for (code, language) in [
+        ("en", i18n::Language::English),
+        ("he", i18n::Language::Hebrew),
+        ("ar", i18n::Language::Arabic),
+        ("de", i18n::Language::German),
+        ("es", i18n::Language::Spanish),
+        ("fr", i18n::Language::French),
+        ("ru", i18n::Language::Russian),
+    ] {
+        i18n::with_language(language, || {
+            ui_text::apply(&ui);
+            for (width, height) in [(900u32, 640u32), (1160, 780)] {
+                ui.window()
+                    .set_size(slint::PhysicalSize::new(width, height));
+                for (kind, destination) in [
+                    ("same-drive", drives::Destination::SameDrive),
+                    ("unknown", drives::Destination::Unknown),
+                ] {
+                    let mut state = Reclaim::default();
+                    state.destination_review = Some((folder.clone(), destination));
+                    state.sync_ui(&ui);
+                    let snapshot = ui.window().take_snapshot().unwrap();
+                    let context = format!("{code} {width}x{height} {kind} destination");
+                    assert!(ui.get_destination_review(), "{context}");
+                    assert!(ui.get_destination_path().contains("Recovered photos"));
+                    assert!(button(&ui, "Choose another folder"), "{context}");
+                    assert!(button(&ui, "Cancel"), "{context}");
+                    assert_eq!(
+                        button(&ui, "Save here anyway"),
+                        destination == drives::Destination::Unknown,
+                        "{context}: only an undetermined drive can be accepted"
+                    );
+                    assert_controls_clear(&ui, (width as f32, height as f32), &context);
+                    // Dialog buttons never elide, so each must fit inside the card.
+                    let card = i_slint_backend_testing::ElementHandle::find_by_element_id(
+                        &ui,
+                        "AppWindow::destination-card",
+                    )
+                    .next()
+                    .expect("destination card");
+                    let (left, right) = (
+                        card.absolute_position().x,
+                        card.absolute_position().x + card.size().width,
+                    );
+                    for label in ["Cancel", "Save here anyway", "Choose another folder"] {
+                        for action in
+                            i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                                &ui,
+                                &i18n::t(label),
+                            )
+                        {
+                            let start = action.absolute_position().x;
+                            let end = start + action.size().width;
+                            assert!(
+                                start >= left && end <= right,
+                                "{context}: {label} ({start}..{end}) is outside the dialog ({left}..{right})"
+                            );
+                        }
+                    }
+                    if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                        image::save_buffer(
+                            format!("{directory}/destination-{kind}-{code}-{width}.png"),
+                            snapshot.as_bytes(),
+                            snapshot.width(),
+                            snapshot.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+        });
+    }
+    // Escape cancels.
+    let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+    ui.on_cancel_destination({
+        let cancelled = cancelled.clone();
+        move || cancelled.set(true)
+    });
+    ui.set_destination_review(false);
+    ui.window().take_snapshot().unwrap();
+    ui.set_destination_review(true);
+    ui.window().take_snapshot().unwrap();
+    let escape: slint::SharedString = slint::platform::Key::Escape.into();
+    ui.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: escape.clone(),
+        });
+    ui.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyReleased { text: escape });
+    assert!(cancelled.get(), "Escape closes the destination dialog");
+    // "Save here anyway" never writes onto the scanned drive, even if invoked
+    // for a same-drive folder; the dialog just closes.
+    let mut state = Reclaim::default();
+    state.destination_review = Some((folder.clone(), drives::Destination::SameDrive));
+    state.save_to_unconfirmed_destination();
+    assert!(!state.exporting && state.destination_review.is_none());
+}
+
+#[test]
+fn finished_scan_message_wraps_at_the_full_width() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    ui.set_page(1);
+    i18n::with_language(i18n::Language::German, || {
+        ui_text::apply(&ui);
+        let mut state = Reclaim::default();
+        state.status = "Scan finished with unreadable areas. Some files could not be checked. The drive may be failing: recover the files you need now and avoid repeated scans.".into();
+        state.sync_ui(&ui);
+        let snapshot = ui.window().take_snapshot().unwrap();
+        let headline =
+            i_slint_backend_testing::ElementHandle::find_by_element_id(&ui, "ScanStatus::headline")
+                .next()
+                .expect("scan headline");
+        // Wrapped at the row's width this is two or three lines, not a word per line.
+        assert!(headline.size().width > 300.0, "{:?}", headline.size());
+        assert!(headline.size().height < 70.0, "{:?}", headline.size());
+        if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+            image::save_buffer(
+                format!("{directory}/status-de-finished.png"),
+                snapshot.as_bytes(),
+                snapshot.width(),
+                snapshot.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+        }
+    });
+}
+
+#[test]
+fn stop_buttons_are_filled_red_in_light_and_dark() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            mock_time: true,
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    ui_text::apply(&ui);
+    ui.set_page(1);
+    let mut state = Reclaim::default();
+    state.results.push(Found {
+        offset: 0,
+        size: 2048,
+        kind: "jpg",
+        selected: true,
+        original_name: None,
+        resident_data: None,
+        ntfs: None,
+        extents: None,
+        validation: reclaim::Validation::StructureChecked,
+    });
+    state.busy = true;
+    state.exporting = true;
+    state.status = "Scanning for recoverable files…".into();
+    for dark in [false, true] {
+        ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+        state.sync_ui(&ui);
+        ui.window().take_snapshot().unwrap();
+        // Let the button's background animation finish.
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(300));
+        slint::platform::update_timers_and_animations();
+        let snapshot = ui.window().take_snapshot().unwrap();
+        for label in ["Stop", "Stop recovery"] {
+            let button =
+                i_slint_backend_testing::ElementHandle::find_by_accessible_label(&ui, label)
+                    .next()
+                    .unwrap_or_else(|| panic!("{label} button"));
+            // A background pixel inside the button, clear of its icon and caption.
+            let position = button.absolute_position();
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "an on-screen position in a 900x640 snapshot is small and positive"
+            )]
+            let (x, y) = ((position.x + 5.0) as u32, (position.y + 5.0) as u32);
+            let offset = ((y * snapshot.width() + x) * 4) as usize;
+            let pixel = &snapshot.as_bytes()[offset..offset + 3];
+            let (red, green, blue) = (
+                i32::from(pixel[0]),
+                i32::from(pixel[1]),
+                i32::from(pixel[2]),
+            );
+            assert!(
+                red > green + 80 && red > blue + 80,
+                "{label} is not filled red (dark: {dark}): {pixel:?}"
+            );
+        }
     }
 }
