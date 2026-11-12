@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Reclaim
+Comment=Recover files from drives and disk images
+Exec=reclaim
+Icon=${SNAP}/meta/gui/reclaim.png
+Terminal=false
+Categories=System;Filesystem;
+Keywords=recovery;disk;files;
+StartupWMClass=reclaim_reclaim

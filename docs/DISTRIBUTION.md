@@ -72,3 +72,44 @@ A future Flathub submission also needs an assessment of eligibility as a recover
 utility, an appropriate sandbox-supported scope, a source build with offline
 Cargo dependencies, and the standard build, metadata, permission, and runtime
 checks. Do not submit this standalone build script as a Flathub manifest.
+
+## Snap Store
+
+The package name is `reclaim`, registered to the project's Snap Store publisher.
+The source recipe is `snap/snapcraft.yaml`; it builds the Rust app in an isolated
+Ubuntu 24.04 environment, uses strict confinement and the GNOME desktop runtime,
+and packages the MIT application and bundled font licenses.
+
+Build committed source without copying local credentials, caches or disk images:
+
+```sh
+packaging/snap/build.sh
+```
+
+The result is `dist/reclaim_<version>_amd64.snap`. Upload and request release with:
+
+```sh
+snapcraft upload dist/reclaim_<version>_amd64.snap --release=stable
+snapcraft upload-metadata dist/reclaim_<version>_amd64.snap
+snapcraft status reclaim
+```
+
+The `block-devices` plug, including partition access, requires a Snap Store
+permission declaration and snapd 2.71 or later. Physical drives are opened
+read-only; UDisks2 supplies the normal desktop authentication prompt where needed.
+Storage permissions are not requested for automatic connection. They must be
+approved by store reviewers and explicitly connected by the user:
+
+```sh
+sudo snap connect reclaim:block-devices
+sudo snap connect reclaim:udisks2
+sudo snap connect reclaim:hardware-observe
+sudo snap connect reclaim:mount-observe
+sudo snap connect reclaim:removable-media
+```
+
+The last interface is for disk images or recovery folders on removable media.
+Home-folder disk images can be used without raw-device permissions. The Snap
+Store manages updates; Reclaim never tries to install a native `.deb` inside the
+snap. A registered name or uploaded revision does not mean the package has been
+approved or released. Check `snapcraft status reclaim` for the published channels.

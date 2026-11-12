@@ -7,9 +7,17 @@
 use reclaim::updater::{self, Release};
 use std::path::{Path, PathBuf};
 
-/// Flatpak owns application updates; native installers cannot update /app.
-pub fn package_managed() -> bool {
+pub fn flatpak_managed() -> bool {
     cfg!(target_os = "linux") && Path::new("/.flatpak-info").exists()
+}
+
+pub fn snap_managed() -> bool {
+    cfg!(target_os = "linux") && std::env::var("SNAP_NAME").as_deref() == Ok("reclaim")
+}
+
+/// Sandboxed packages are updated by their distributor, not native installers.
+pub fn package_managed() -> bool {
+    flatpak_managed() || snap_managed()
 }
 
 pub fn supported() -> bool {

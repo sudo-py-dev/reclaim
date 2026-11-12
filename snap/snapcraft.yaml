@@ -1,0 +1,74 @@
+name: reclaim
+base: core24
+adopt-info: reclaim
+title: Reclaim
+summary: Recover files from drives and disk images
+license: MIT
+grade: stable
+confinement: strict
+assumes:
+  - snapd2.71
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+website: https://github.com/sudo-py-dev/reclaim
+source-code: https://github.com/sudo-py-dev/reclaim
+issues: https://github.com/sudo-py-dev/reclaim/issues
+contact: https://github.com/sudo-py-dev/reclaim/issues
+icon: snap/gui/reclaim.png
+description: |
+  Reclaim finds recoverable photos, documents, archives, audio, and video
+  on drives and raw disk images. Review results, preview supported images,
+  filter by file type, and save selected files to another drive.
+
+  The source is opened read-only. Unused-space scanning supports NTFS,
+  FAT12/16/32, and exFAT volumes. The interface supports seven languages,
+  including Hebrew and Arabic, and light and dark themes.
+
+  Physical-drive access requires connecting the storage interfaces:
+
+      sudo snap connect reclaim:block-devices
+      sudo snap connect reclaim:udisks2
+      sudo snap connect reclaim:hardware-observe
+      sudo snap connect reclaim:mount-observe
+
+  For recovery folders or disk images on removable storage, also run:
+
+      sudo snap connect reclaim:removable-media
+
+  Disk images in your home folder can be opened without raw-drive access.
+  Reclaim is an early preview: recoverability depends on the source and
+  overwritten data. Save recovered files to a different physical drive and
+  verify them before relying on them. Updates are managed by the Snap Store.
+plugs:
+  block-devices:
+    allow-partitions: true
+apps:
+  reclaim:
+    command: bin/reclaim
+    desktop: usr/share/applications/reclaim.desktop
+    extensions: [gnome]
+    plugs:
+      - home
+      - removable-media
+      - block-devices
+      - udisks2
+      - hardware-observe
+      - mount-observe
+parts:
+  reclaim:
+    plugin: rust
+    source: .
+    rust-cargo-parameters: [--locked]
+    build-packages:
+      - pkg-config
+      - libfontconfig1-dev
+    override-pull: |
+      craftctl default
+      craftctl set version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+    override-build: |
+      craftctl default
+      install -Dm644 snap/gui/reclaim.desktop "$CRAFT_PART_INSTALL/usr/share/applications/reclaim.desktop"
+      install -Dm644 LICENSE "$CRAFT_PART_INSTALL/usr/share/licenses/reclaim/LICENSE"
+      install -Dm644 assets/fonts/DejaVu-LICENSE.txt "$CRAFT_PART_INSTALL/usr/share/licenses/reclaim/DejaVu-LICENSE.txt"

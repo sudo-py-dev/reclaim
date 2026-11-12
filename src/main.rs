@@ -893,8 +893,10 @@ fn run() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     // After the platform exists (AppWindow::new sets it up) and before the window
     // is shown, which is when it is created. No effect on Windows/macOS.
-    slint::set_xdg_app_id(if update_runtime::package_managed() {
+    slint::set_xdg_app_id(if update_runtime::flatpak_managed() {
         "io.github.sudo_py_dev.reclaim"
+    } else if update_runtime::snap_managed() {
+        "reclaim_reclaim"
     } else {
         APP_ID
     })?;

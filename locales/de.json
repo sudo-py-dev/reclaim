@@ -216,5 +216,6 @@
   "Administrator permission was not granted. Reclaim is still open.": "Die Administratorberechtigung wurde nicht erteilt. Reclaim bleibt geöffnet.",
   "Could not restart as administrator: {0}": "Neustart als Administrator fehlgeschlagen: {0}",
   "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.": "Die Quelle lieferte vor ihrem gemeldeten Ende keine Daten mehr. Sie ist möglicherweise abgeschnitten, getrennt oder durch das Betriebssystem eingeschränkt. Bereits gefundene Dateien können weiterhin wiederhergestellt werden.",
-  "Could not prepare read-only access to this volume: {0}": "Der schreibgeschützte Zugriff auf dieses Volume konnte nicht vorbereitet werden: {0}"
+  "Could not prepare read-only access to this volume: {0}": "Der schreibgeschützte Zugriff auf dieses Volume konnte nicht vorbereitet werden: {0}",
+  "Updates are managed by the Snap Store.": "Updates werden vom Snap Store verwaltet."
 }
