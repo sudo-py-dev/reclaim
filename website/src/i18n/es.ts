@@ -4,7 +4,7 @@ const es: Dict = {
   meta: {
     title: 'Reclaim | Recuperar archivos borrados gratis en Windows, macOS y Linux',
     description:
-      'Recupera fotos, documentos y otros archivos borrados de memorias USB, tarjetas SD y discos duros. Reclaim es gratuito, de código abierto y solo lee el disco. NTFS, FAT32 y exFAT.',
+      'Recupera fotos, documentos y otros archivos borrados de memorias USB, tarjetas SD y discos duros. Reclaim es gratuito, de código abierto y solo lee el disco. NTFS, FAT32, exFAT, ext2/3/4 y HFS+.',
     downloadTitle: 'Descargar Reclaim | Recuperación de archivos gratis para Windows, macOS y Linux',
     downloadDescription:
       'Descarga el instalador más reciente de Reclaim para Windows, macOS (Apple Silicon e Intel) o Debian y Ubuntu. Recuperación de archivos borrados gratuita y de código abierto.',
@@ -86,7 +86,7 @@ const es: Dict = {
       },
       {
         title: 'Compatible con las unidades habituales',
-        body: 'NTFS, FAT12/16/32 y exFAT: los formatos de discos de Windows, memorias USB, tarjetas SD y tarjetas de cámara.',
+        body: 'NTFS, FAT12/16/32, exFAT, ext2/3/4 y HFS+: los formatos de discos de Windows y Linux, discos externos de Mac, memorias USB, tarjetas SD y tarjetas de cámara.',
       },
       {
         title: 'En tu idioma',
@@ -124,7 +124,7 @@ const es: Dict = {
       'Los datos sobrescritos, o borrados por el TRIM de un SSD, no se pueden recuperar.',
       'No se restauran los nombres ni las carpetas originales; los archivos reciben nombres generados.',
       'La mayoría de los archivos están limitados a 64 MiB, y los fragmentados pueden quedar incompletos.',
-      'Aún no se pueden analizar los discos internos de Mac (APFS), las particiones de sistema de Linux (ext4, Btrfs) ni las imágenes de disco completo con tabla de particiones.',
+      'Aún no se pueden analizar los discos internos de Mac (APFS), las particiones de Linux con Btrfs o XFS ni las imágenes de disco completo con tabla de particiones.',
       'Los resultados no se conservan al cerrar la aplicación: guarda primero lo que necesites.',
     ],
   },
@@ -177,19 +177,19 @@ const es: Dict = {
       windows: {
         name: 'Windows',
         detail: '64 bits (x86_64)',
-        scans: 'Analiza unidades NTFS, FAT32 y exFAT: discos internos, tarjetas de memoria y memorias USB.',
+        scans: 'Analiza unidades NTFS, FAT32 y exFAT: discos internos, tarjetas de memoria y memorias USB. También funcionan los discos externos en ext2/3/4 o HFS+.',
         how: 'Ejecuta el instalador. Se instala para tu usuario y añade un acceso directo al menú Inicio y un desinstalador. Si una unidad no se abre, haz clic derecho en Reclaim y elige «Ejecutar como administrador». ¿Has perdido archivos en la unidad C:? Usa la versión portátil desde una memoria USB.',
       },
       macos: {
         name: 'macOS',
         detail: 'Apple Silicon (M1 o posterior) o Intel',
-        scans: 'Analiza tarjetas de memoria, memorias USB y discos externos en FAT32, exFAT o NTFS. El disco interno del Mac (APFS) aún no se puede analizar.',
+        scans: 'Analiza tarjetas de memoria, memorias USB y discos externos en FAT32, exFAT, NTFS o Mac OS Plus (HFS+). El disco interno del Mac (APFS) aún no se puede analizar.',
         how: 'Abre el paquete para instalar Reclaim en Aplicaciones. Aún no está notarizada por Apple: si macOS la bloquea, ve a Ajustes del Sistema → Privacidad y seguridad y pulsa «Abrir igualmente». Leer una unidad completa requiere la contraseña de administrador, y macOS también puede pedirte que permitas el acceso a volúmenes extraíbles.',
       },
       linux: {
         name: 'Linux',
         detail: 'Debian 12, Ubuntu 22.04 o posterior · x86_64',
-        scans: 'Analiza unidades FAT32, exFAT y NTFS, como tarjetas de memoria y memorias USB. Las particiones de sistema de Linux (ext4, Btrfs) aún no se pueden analizar.',
+        scans: 'Analiza particiones ext2, ext3 y ext4, además de unidades FAT32, exFAT y NTFS como tarjetas de memoria y memorias USB. Btrfs y XFS aún no se pueden analizar.',
         how: 'En la carpeta donde lo descargaste, instala el paquete con el siguiente comando. Al elegir una unidad, Reclaim te pedirá una contraseña de administrador mediante el aviso habitual del sistema. Las versiones portátiles requieren glibc 2.35 o posterior.',
       },
     },

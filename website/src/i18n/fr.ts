@@ -4,7 +4,7 @@ const fr: Dict = {
   meta: {
     title: 'Reclaim | Récupérer des fichiers supprimés gratuitement sur Windows, macOS et Linux',
     description:
-      'Récupérez photos, documents et autres fichiers supprimés sur clés USB, cartes SD et disques durs. Reclaim est gratuit, open source et analyse en lecture seule. NTFS, FAT32 et exFAT.',
+      'Récupérez photos, documents et autres fichiers supprimés sur clés USB, cartes SD et disques durs. Reclaim est gratuit, open source et analyse en lecture seule. NTFS, FAT32, exFAT, ext2/3/4 et HFS+.',
     downloadTitle: 'Télécharger Reclaim | Récupération de fichiers gratuite pour Windows, macOS et Linux',
     downloadDescription:
       'Téléchargez le dernier installateur de Reclaim pour Windows, macOS (Apple Silicon et Intel) ou Debian et Ubuntu. Récupération de fichiers supprimés gratuite et open source.',
@@ -86,7 +86,7 @@ const fr: Dict = {
       },
       {
         title: 'Compatible avec les disques courants',
-        body: 'NTFS, FAT12/16/32 et exFAT : les formats des disques Windows, clés USB, cartes SD et cartes d’appareil photo.',
+        body: 'NTFS, FAT12/16/32, exFAT, ext2/3/4 et HFS+ : les formats des disques Windows et Linux, disques externes Mac, clés USB, cartes SD et cartes d’appareil photo.',
       },
       {
         title: 'Dans votre langue',
@@ -124,7 +124,7 @@ const fr: Dict = {
       'Les données écrasées, ou effacées par le TRIM d’un SSD, ne peuvent pas être récupérées.',
       'Les noms et dossiers d’origine ne sont pas restaurés ; les fichiers reçoivent des noms générés.',
       'La plupart des fichiers sont limités à 64 Mio, et les fichiers fragmentés peuvent être incomplets.',
-      'Les disques internes des Mac (APFS), les partitions système Linux (ext4, Btrfs) et les images de disque entier avec table de partitions ne peuvent pas encore être analysés.',
+      'Les disques internes des Mac (APFS), les partitions Linux en Btrfs ou XFS et les images de disque entier avec table de partitions ne peuvent pas encore être analysés.',
       'Les résultats ne sont pas conservés après fermeture : enregistrez d’abord ce dont vous avez besoin.',
     ],
   },
@@ -177,19 +177,19 @@ const fr: Dict = {
       windows: {
         name: 'Windows',
         detail: '64 bits (x86_64)',
-        scans: 'Analyse les disques NTFS, FAT32 et exFAT : disques internes, cartes mémoire et clés USB.',
+        scans: 'Analyse les disques NTFS, FAT32 et exFAT : disques internes, cartes mémoire et clés USB. Les disques externes en ext2/3/4 ou HFS+ fonctionnent aussi.',
         how: 'Lancez l’installateur. Il installe Reclaim pour votre utilisateur, avec un raccourci dans le menu Démarrer et un désinstallateur. Si un disque ne s’ouvre pas, faites un clic droit sur Reclaim et choisissez « Exécuter en tant qu’administrateur ». Fichiers perdus sur le lecteur C: ? Utilisez plutôt la version portable depuis une clé USB.',
       },
       macos: {
         name: 'macOS',
         detail: 'Apple Silicon (M1 et suivants) ou Intel',
-        scans: 'Analyse les cartes mémoire, clés USB et disques externes en FAT32, exFAT ou NTFS. Le disque interne du Mac (APFS) ne peut pas encore être analysé.',
+        scans: 'Analyse les cartes mémoire, clés USB et disques externes en FAT32, exFAT, NTFS ou Mac OS étendu (HFS+). Le disque interne du Mac (APFS) ne peut pas encore être analysé.',
         how: 'Ouvrez le paquet pour installer Reclaim dans Applications. L’app n’est pas encore notariée par Apple : si macOS la bloque, allez dans Réglages Système → Confidentialité et sécurité et cliquez sur « Ouvrir quand même ». La lecture d’un disque entier nécessite un mot de passe administrateur, et macOS peut aussi demander d’autoriser l’accès aux volumes amovibles.',
       },
       linux: {
         name: 'Linux',
         detail: 'Debian 12, Ubuntu 22.04 ou plus récent · x86_64',
-        scans: 'Analyse les disques FAT32, exFAT et NTFS, comme les cartes mémoire et les clés USB. Les partitions système Linux (ext4, Btrfs) ne peuvent pas encore être analysées.',
+        scans: 'Analyse les partitions ext2, ext3 et ext4, ainsi que les disques FAT32, exFAT et NTFS comme les cartes mémoire et les clés USB. Btrfs et XFS ne peuvent pas encore être analysés.',
         how: 'Dans le dossier de téléchargement, installez le paquet avec la commande ci-dessous. Quand vous choisissez un disque, Reclaim demande un mot de passe administrateur via l’invite habituelle du système. Les versions portables nécessitent glibc 2.35 ou plus récent.',
       },
     },
