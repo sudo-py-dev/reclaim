@@ -111,7 +111,6 @@
   "General": "عام",
   "About": "حول",
   "Version": "الإصدار",
-  "Project website": "موقع المشروع",
   "Checking a {0} file…": "جارٍ فحص ملف {0}…",
   "{0} of {1}": "{0} من {1}",
   "Reading unused-space map…": "جارٍ قراءة خريطة المساحة غير المستخدمة…",
@@ -227,5 +226,12 @@
   "Updates are managed by the Snap Store.": "تتم إدارة التحديثات بواسطة متجر Snap.",
   "Choose another folder": "اختيار مجلد آخر",
   "Save here anyway": "الحفظ هنا على أي حال",
-  "Cancel": "إلغاء"
+  "Cancel": "إلغاء",
+  "Source code": "الشيفرة المصدرية",
+  "Report a problem": "الإبلاغ عن مشكلة",
+  "Open an issue on GitHub": "فتح بلاغ على GitHub",
+  "Release history": "سجل الإصدارات",
+  "Every version with its release notes": "جميع الإصدارات مع ملاحظات كل إصدار",
+  "License": "الترخيص",
+  "Read the MIT License": "قراءة ترخيص MIT"
 }

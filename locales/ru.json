@@ -111,7 +111,6 @@
   "General": "Общие",
   "About": "О программе",
   "Version": "Версия",
-  "Project website": "Сайт проекта",
   "Checking a {0} file…": "Проверка файла {0}…",
   "{0} of {1}": "{0} из {1}",
   "Reading unused-space map…": "Чтение карты свободного места…",
@@ -227,5 +226,12 @@
   "Updates are managed by the Snap Store.": "Обновления управляются через Snap Store.",
   "Choose another folder": "Выбрать другую папку",
   "Save here anyway": "Всё равно сохранить здесь",
-  "Cancel": "Отмена"
+  "Cancel": "Отмена",
+  "Source code": "Исходный код",
+  "Report a problem": "Сообщить о проблеме",
+  "Open an issue on GitHub": "Создать задачу на GitHub",
+  "Release history": "История версий",
+  "Every version with its release notes": "Все версии с примечаниями к выпуску",
+  "License": "Лицензия",
+  "Read the MIT License": "Прочитать лицензию MIT"
 }

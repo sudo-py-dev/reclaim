@@ -111,7 +111,6 @@
   "General": "כללי",
   "About": "אודות",
   "Version": "גרסה",
-  "Project website": "אתר הפרויקט",
   "Checking a {0} file…": "בודק קובץ {0}…",
   "{0} of {1}": "{0} מתוך {1}",
   "Reading unused-space map…": "קורא את מפת השטח הפנוי…",
@@ -227,5 +226,12 @@
   "Updates are managed by the Snap Store.": "העדכונים מנוהלים באמצעות חנות Snap.",
   "Choose another folder": "בחירת תיקייה אחרת",
   "Save here anyway": "שמירה כאן בכל זאת",
-  "Cancel": "ביטול"
+  "Cancel": "ביטול",
+  "Source code": "קוד מקור",
+  "Report a problem": "דיווח על בעיה",
+  "Open an issue on GitHub": "פתיחת דיווח ב־GitHub",
+  "Release history": "היסטוריית גרסאות",
+  "Every version with its release notes": "כל הגרסאות והערות השחרור שלהן",
+  "License": "רישיון",
+  "Read the MIT License": "קריאת רישיון MIT"
 }
