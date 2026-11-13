@@ -1402,7 +1402,7 @@ fn about_rows_are_keyboard_buttons_with_descriptions() {
     ui.show().unwrap();
     // Tall enough that the whole Settings page is in view, About card included.
     ui.window().set_size(slint::PhysicalSize::new(1160, 2000));
-    ui_text::apply(&ui);
+    i18n::with_language(i18n::Language::English, || ui_text::apply(&ui));
     ui.set_page(2);
     let opened = Rc::new(RefCell::new(Vec::new()));
     let sink = opened.clone();
