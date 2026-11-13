@@ -18,6 +18,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
       - name: Validate version tag
         env:
           RELEASE_REF: ${{ github.ref }}
@@ -59,6 +61,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: 1.100.0
           targets: ${{ matrix.target }}
       - name: Linux dependencies
         if: runner.os == 'Linux'
@@ -108,6 +111,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
       - name: Install Flatpak tooling and runtime
         run: |
           sudo apt-get -o Acquire::Retries=3 update
@@ -146,6 +151,8 @@ jobs:
           path: dist
           merge-multiple: true
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
       - name: Install signing tool
         run: cargo install rsign2 --version =0.6.7 --locked
       - name: Sign every download with the release key

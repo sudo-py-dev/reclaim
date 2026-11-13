@@ -49,6 +49,9 @@ tagged by CWE:
 - Debug leftovers, silenced warnings, orphan files, em dashes in user text.
 - An interface message missing from a catalog, dead catalog keys, mismatched
   placeholders, or `ui/app.slint` defaults out of step with their translations.
+- A test fixture, such as a disk image, holding the local user path of whoever
+  made it (`/home/<user>`, `/run/media/<user>`, `C:\Users\<user>`), also
+  inside gzip.
 - An informal "you" in the German, French or Russian catalog (all three address
   the user formally), or a Latin term ending in `+` or `#` ("HFS+") in Hebrew
   or Arabic without the left-to-right mark that keeps the symbol in place.

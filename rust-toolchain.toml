@@ -1,0 +1,6 @@
+# One Rust version for local builds, CI and packages. CI pins the same
+# version in .github/workflows; the Snap recipe pins it in snap/snapcraft.yaml.
+# Update all three together, on purpose, after checking the new Clippy lints.
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]

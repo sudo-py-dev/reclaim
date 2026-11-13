@@ -473,3 +473,53 @@ fn a_second_recovery_cannot_start_while_one_runs() {
     assert!(app.export_receiver.is_none());
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
 }
+
+/// A source that asks recovery to stop while its first block is being read.
+struct StopsDuringFirstRead {
+    data: std::io::Cursor<Vec<u8>>,
+    stop: Arc<AtomicBool>,
+}
+impl std::io::Read for StopsDuringFirstRead {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.stop.store(true, Ordering::Relaxed);
+        self.data.read(buffer)
+    }
+}
+impl std::io::Seek for StopsDuringFirstRead {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.data.seek(position)
+    }
+}
+
+#[test]
+fn stop_recovery_interrupts_a_large_file_and_leaves_nothing_behind() {
+    use std::io::{Read, Seek};
+    let size = 4 << 20;
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut input = StoppableReader {
+        inner: StopsDuringFirstRead {
+            data: std::io::Cursor::new(vec![b'x'; size]),
+            stop: stop.clone(),
+        },
+        stop: stop.clone(),
+    };
+    let file = Found {
+        offset: 0,
+        size: size as u64,
+        kind: "bin",
+        selected: true,
+        validation: reclaim::Validation::Unverified,
+        original_name: Some("large.bin".into()),
+        resident_data: None,
+        ntfs: None,
+        extents: None,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    assert!(reclaim::recover_unique(&mut input, directory.path(), &file, 1).is_err());
+    assert!(stop.load(Ordering::Relaxed));
+    // Neither the file nor its private temporary file is left in the folder.
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    // The wrapper only refuses reads; seeking is unaffected.
+    assert_eq!(input.seek(std::io::SeekFrom::Start(0)).unwrap(), 0);
+    assert!(input.read(&mut [0; 4]).is_err());
+}

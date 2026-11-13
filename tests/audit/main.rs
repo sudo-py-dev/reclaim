@@ -64,6 +64,11 @@ fn no_secrets_in_the_repository() {
 }
 
 #[test]
+fn fixtures_carry_no_local_user_paths() {
+    report(rules::fixture_privacy(workspace()));
+}
+
+#[test]
 fn temporary_files_are_unpredictable() {
     report(rules::temporary_files(workspace()));
 }
