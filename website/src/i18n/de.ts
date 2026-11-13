@@ -4,7 +4,7 @@ const de: Dict = {
   meta: {
     title: 'Reclaim | Gelöschte Dateien kostenlos wiederherstellen unter Windows, macOS & Linux',
     description:
-      'Gelöschte Fotos, Dokumente und andere Dateien von USB-Sticks, SD-Karten und Festplatten wiederherstellen. Reclaim ist kostenlos, Open Source und liest nur. NTFS, FAT32 und exFAT.',
+      'Gelöschte Fotos, Dokumente und andere Dateien von USB-Sticks, SD-Karten und Festplatten wiederherstellen. Reclaim ist kostenlos, Open Source und liest nur. NTFS, FAT32, exFAT, ext2/3/4 und HFS+.',
     downloadTitle: 'Reclaim herunterladen | Kostenlose Datenrettung für Windows, macOS & Linux',
     downloadDescription:
       'Den neuesten Reclaim-Installer für Windows, macOS (Apple Silicon und Intel) oder Debian und Ubuntu herunterladen. Kostenlose Open-Source-Wiederherstellung gelöschter Dateien.',
@@ -86,7 +86,7 @@ const de: Dict = {
       },
       {
         title: 'Für gängige Laufwerke',
-        body: 'NTFS, FAT12/16/32 und exFAT: die Formate von Windows-Laufwerken, USB-Sticks, SD-Karten und Kamera-Speicherkarten.',
+        body: 'NTFS, FAT12/16/32, exFAT, ext2/3/4 und HFS+: die Formate von Windows- und Linux-Laufwerken, externen Mac-Laufwerken, USB-Sticks, SD-Karten und Kamera-Speicherkarten.',
       },
       {
         title: 'In deiner Sprache',
@@ -124,7 +124,7 @@ const de: Dict = {
       'Überschriebene oder per SSD-TRIM gelöschte Daten lassen sich nicht zurückholen.',
       'Ursprüngliche Dateinamen und Ordner werden nicht wiederhergestellt; Dateien erhalten generierte Namen.',
       'Die meisten Dateien sind auf 64 MiB begrenzt, fragmentierte Dateien können unvollständig sein.',
-      'Interne Mac-Laufwerke (APFS), Linux-Systempartitionen (ext4, Btrfs) und komplette Disk-Images mit Partitionstabelle können noch nicht durchsucht werden.',
+      'Interne Mac-Laufwerke (APFS), Linux-Partitionen mit Btrfs oder XFS und komplette Disk-Images mit Partitionstabelle können noch nicht durchsucht werden.',
       'Ergebnisse gehen beim Beenden verloren, also speichere zuerst, was du brauchst.',
     ],
   },
@@ -177,19 +177,19 @@ const de: Dict = {
       windows: {
         name: 'Windows',
         detail: '64-Bit (x86_64)',
-        scans: 'Durchsucht NTFS-, FAT32- und exFAT-Laufwerke: interne Laufwerke, Speicherkarten und USB-Sticks.',
+        scans: 'Durchsucht NTFS-, FAT32- und exFAT-Laufwerke: interne Laufwerke, Speicherkarten und USB-Sticks. Externe Laufwerke mit ext2/3/4 oder HFS+ funktionieren ebenfalls.',
         how: 'Starte den Installer. Er installiert Reclaim für deinen Benutzer, mit Startmenü-Verknüpfung und Deinstallationsprogramm. Lässt sich ein Laufwerk nicht öffnen, klicke mit der rechten Maustaste auf Reclaim und wähle „Als Administrator ausführen“. Dateien auf Laufwerk C: verloren? Nutze stattdessen die portable Version von einem USB-Stick.',
       },
       macos: {
         name: 'macOS',
         detail: 'Apple Silicon (ab M1) oder Intel',
-        scans: 'Durchsucht Speicherkarten, USB-Sticks und externe Laufwerke mit FAT32, exFAT oder NTFS. Das interne Laufwerk deines Macs (APFS) wird noch nicht unterstützt.',
+        scans: 'Durchsucht Speicherkarten, USB-Sticks und externe Laufwerke mit FAT32, exFAT, NTFS oder Mac OS Extended (HFS+). Das interne Laufwerk deines Macs (APFS) wird noch nicht unterstützt.',
         how: 'Öffne das Paket, um Reclaim in „Programme“ zu installieren. Die App ist noch nicht von Apple notarisiert: Blockiert macOS sie, öffne Systemeinstellungen → Datenschutz & Sicherheit und klicke auf „Dennoch öffnen“. Zum Lesen eines ganzen Laufwerks ist ein Administratorpasswort nötig, und macOS fragt eventuell nach Zugriff auf Wechselmedien.',
       },
       linux: {
         name: 'Linux',
         detail: 'Debian 12, Ubuntu 22.04 oder neuer · x86_64',
-        scans: 'Durchsucht FAT32-, exFAT- und NTFS-Laufwerke wie Speicherkarten und USB-Sticks. Linux-Systempartitionen (ext4, Btrfs) werden noch nicht unterstützt.',
+        scans: 'Durchsucht ext2-, ext3- und ext4-Partitionen sowie FAT32-, exFAT- und NTFS-Laufwerke wie Speicherkarten und USB-Sticks. Btrfs und XFS werden noch nicht unterstützt.',
         how: 'Installiere das Paket im Download-Ordner mit dem folgenden Befehl. Wenn du ein Laufwerk auswählst, fragt Reclaim über die übliche Systemabfrage nach einem Administratorpasswort. Portable Versionen benötigen glibc 2.35 oder neuer.',
       },
     },

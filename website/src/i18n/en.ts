@@ -2,7 +2,7 @@ const en = {
   meta: {
     title: 'Reclaim | Free Deleted File Recovery for Windows, macOS & Linux',
     description:
-      'Recover deleted photos, documents and other files from USB drives, SD cards and hard drives. Reclaim is free, open-source and scans read-only. NTFS, FAT32 and exFAT.',
+      'Recover deleted photos, documents and other files from USB drives, SD cards and hard drives. Reclaim is free, open-source and scans read-only. NTFS, FAT32, exFAT, ext2/3/4 and HFS+.',
     downloadTitle: 'Download Reclaim | Free File Recovery for Windows, macOS & Linux',
     downloadDescription:
       'Download the latest Reclaim installer for Windows, macOS (Apple Silicon and Intel) or Debian and Ubuntu. Free, open-source deleted file recovery, signed and checksummed.',
@@ -84,7 +84,7 @@ const en = {
       },
       {
         title: 'Works with common drives',
-        body: 'NTFS, FAT12/16/32 and exFAT: the formats used by Windows drives, USB sticks, SD cards and camera memory cards.',
+        body: 'NTFS, FAT12/16/32, exFAT, ext2/3/4 and HFS+: the formats used by Windows and Linux drives, Mac external drives, USB sticks, SD cards and camera memory cards.',
       },
       {
         title: 'In your language',
@@ -122,7 +122,7 @@ const en = {
       'Overwritten data, or data erased by an SSD’s TRIM, cannot be brought back.',
       'Original file names and folders are not restored; files get generated names.',
       'Most files are limited to 64 MiB, and fragmented files may come back incomplete.',
-      'Mac built-in drives (APFS), Linux system partitions (ext4, Btrfs) and whole-disk images with partition tables can’t be scanned yet.',
+      'Mac built-in drives (APFS), Linux partitions using Btrfs or XFS, and whole-disk images with partition tables can’t be scanned yet.',
       'Scan results are not kept after you quit, so save what you need first.',
     ],
   },
@@ -175,19 +175,19 @@ const en = {
       windows: {
         name: 'Windows',
         detail: '64-bit (x86_64)',
-        scans: 'Scans NTFS, FAT32 and exFAT drives: internal drives, memory cards and USB sticks.',
+        scans: 'Scans NTFS, FAT32 and exFAT drives: internal drives, memory cards and USB sticks. External drives formatted as ext2/3/4 or HFS+ work too.',
         how: 'Run the installer. It installs for your user and adds a Start menu shortcut and an uninstaller. If a drive won’t open, right-click Reclaim and choose Run as administrator. Lost files on drive C:? Use the portable version from a USB stick instead.',
       },
       macos: {
         name: 'macOS',
         detail: 'Apple Silicon (M1 and newer) or Intel',
-        scans: 'Scans memory cards, USB sticks and external drives formatted as FAT32, exFAT or NTFS. Your Mac’s built-in drive (APFS) can’t be scanned yet.',
+        scans: 'Scans memory cards, USB sticks and external drives formatted as FAT32, exFAT, NTFS or Mac OS Extended (HFS+). Your Mac’s built-in drive (APFS) can’t be scanned yet.',
         how: 'Open the package to install Reclaim in Applications. It isn’t notarized by Apple yet, so if macOS blocks it, go to System Settings → Privacy & Security and click Open Anyway. Reading a whole drive needs an administrator password, and macOS may also ask you to allow access to removable volumes.',
       },
       linux: {
         name: 'Linux',
         detail: 'Debian 12, Ubuntu 22.04 or newer · x86_64',
-        scans: 'Scans FAT32, exFAT and NTFS drives, such as memory cards and USB sticks. Linux system partitions (ext4, Btrfs) can’t be scanned yet.',
+        scans: 'Scans ext2, ext3 and ext4 partitions, plus FAT32, exFAT and NTFS drives such as memory cards and USB sticks. Btrfs and XFS can’t be scanned yet.',
         how: 'In the folder you downloaded it to, install the package with the command below. When you choose a drive, Reclaim asks for an administrator password through the usual system prompt. Portable builds need glibc 2.35 or newer.',
       },
     },
