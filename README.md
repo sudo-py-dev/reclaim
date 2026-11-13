@@ -88,7 +88,7 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 | Documents and ebooks | PDF, Word, Excel, PowerPoint, OpenDocument, EPUB |
 | Archives | ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK |
 | Programs and installers | EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG |
-| Audio and video | WAV, AIFF, AU, AVI, Ogg Vorbis, Opus, Theora |
+| Audio and video | WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF) |
 | Databases | SQLite |
 
 Common video formats such as MP4 and MOV can't be found yet. Technical details are in the [format report](docs/FILE_FORMAT_RESEARCH.md).
@@ -137,7 +137,7 @@ To uninstall: use **Settings → Apps** on Windows, move Reclaim from Applicatio
 
 ## For developers
 
-Reclaim is written in Rust with the [Slint](https://slint.dev) interface toolkit. Install stable Rust and your platform's build tools (Linux also needs the [GUI development libraries](docs/DEVELOPMENT.md#build-and-run)), then:
+Reclaim is written in Rust with the [Slint](https://slint.dev) interface toolkit. Install Rust with [rustup](https://rustup.rs) (it picks up the pinned 1.100.0 toolchain from `rust-toolchain.toml`) and your platform's build tools (Linux also needs the [GUI development libraries](docs/DEVELOPMENT.md#build-and-run)), then:
 
 ```sh
 git clone https://github.com/sudo-py-dev/reclaim.git
@@ -150,7 +150,7 @@ The [developer guide](docs/DEVELOPMENT.md) covers building, drive permissions, a
 <details>
 <summary>How scanning works</summary>
 
-Reclaim reads the allocation map of an NTFS, FAT12/16/32 or exFAT volume and searches only free clusters, so files that still exist are skipped. Unsupported or damaged maps produce an error instead of a scan of occupied space. Each match is a possible recovery candidate; it does not prove that a file was deleted or is complete. Recovered files get numbered names when needed so existing files in the output folder are never replaced. The unused-space scan does not search allocated NTFS MFT records for small resident deleted files or their names.
+Reclaim reads the allocation map of an NTFS, FAT12/16/32, exFAT, ext2/3/4 or HFS+ volume and searches only free clusters, so files that still exist are skipped. Unsupported or damaged maps produce an error instead of a scan of occupied space. Each match is a possible recovery candidate; it does not prove that a file was deleted or is complete. Recovered files get numbered names when needed so existing files in the output folder are never replaced. The unused-space scan does not search allocated NTFS MFT records for small resident deleted files or their names.
 
 For repeatable results, scan a saved volume image; a mounted drive can change during scanning.
 

@@ -109,7 +109,7 @@ const en = {
       { name: 'Documents and ebooks', list: 'PDF, Word, Excel, PowerPoint, OpenDocument, EPUB' },
       { name: 'Archives', list: 'ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK' },
       { name: 'Programs and installers', list: 'EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG' },
-      { name: 'Audio and video', list: 'WAV, AIFF, AU, AVI, Ogg Vorbis, Opus, Theora' },
+      { name: 'Audio and video', list: 'WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
       { name: 'Databases', list: 'SQLite' },
     ],
     more: 'Full format coverage',
