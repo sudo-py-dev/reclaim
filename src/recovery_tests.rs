@@ -1,6 +1,19 @@
 use super::*;
 use std::io::Write;
 
+/// A 4100-byte source ending in "data", opened by path as the app opens a
+/// source. An anonymous temporary file is opened delete-on-close on Windows,
+/// and the independent reader recovery uses cannot reopen such a handle.
+/// The returned path deletes the file when dropped.
+fn source_file() -> (tempfile::TempPath, std::fs::File) {
+    let mut named = tempfile::NamedTempFile::new().unwrap();
+    named.write_all(&[0; 4096]).unwrap();
+    named.write_all(b"data").unwrap();
+    let path = named.into_temp_path();
+    let file = std::fs::File::open(&path).unwrap();
+    (path, file)
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires RECLAIM_TEST_DEVICE and RECLAIM_TEST_DESTINATION on that USB volume"]
@@ -23,11 +36,12 @@ fn live_usb_export_to_source_drive_is_blocked_before_any_write() {
         original_name: Some("must-not-be-written.txt".into()),
         resident_data: Some(Arc::from(&b"data"[..])),
         ntfs: None,
+        extents: None,
     }];
     app.export(directory.clone());
-    assert!(!app.busy);
-    assert!(app.receiver.is_none());
-    assert!(app.status.contains("different physical drive"));
+    assert!(!app.exporting);
+    assert!(app.export_receiver.is_none());
+    assert!(app.recovery_status.contains("different physical drive"));
     assert_eq!(std::fs::read_dir(directory).unwrap().count(), before);
 }
 
@@ -66,20 +80,21 @@ fn recovery_exports_only_selected_files_matching_current_filters() {
             original_name: Some(name.into()),
             resident_data: Some(Arc::from(&b"data"[..])),
             ntfs: None,
+            extents: None,
         })
         .collect();
         app.export(directory.clone());
         if expected.is_empty() {
-            assert!(!app.busy);
-            assert!(app.receiver.is_none());
+            assert!(!app.exporting);
+            assert!(app.export_receiver.is_none());
         } else {
             let result = app
-                .receiver
+                .export_receiver
                 .as_ref()
                 .unwrap()
                 .recv_timeout(Duration::from_secs(5))
                 .unwrap();
-            assert!(matches!(result, Message::Export(Ok(count)) if count == expected.len()));
+            assert_eq!(result, Ok(expected.len()));
         }
         let mut actual: Vec<_> = std::fs::read_dir(&directory)
             .unwrap()
@@ -109,6 +124,7 @@ fn stopping_scan_preserves_selected_partial_results() {
         original_name: Some("photo.png".into()),
         resident_data: Some(Arc::from(&b"data"[..])),
         ntfs: None,
+        extents: None,
     })))
     .unwrap();
     tx.send(Message::Done(Ok(()))).unwrap();
@@ -131,6 +147,7 @@ fn automatic_drive_updates_preserve_selection_and_scan_results() {
         mounted: false,
         encrypted: false,
         sector_size: 512,
+        phone: false,
     };
     let mut app = Reclaim::default();
     app.drives = vec![drive("usb1")];
@@ -250,9 +267,7 @@ fn scan_total_stays_unknown_until_unused_space_is_mapped() {
 
 #[test]
 fn recovery_reads_offsets_beyond_the_unused_byte_total() {
-    let mut source = tempfile::tempfile().unwrap();
-    source.write_all(&[0; 4096]).unwrap();
-    source.write_all(b"data").unwrap();
+    let (_path, source) = source_file();
     let directory = tempfile::tempdir().unwrap();
     let mut app = Reclaim::default();
     app.scanned_source = Some("test-volume".into());
@@ -268,14 +283,20 @@ fn recovery_reads_offsets_beyond_the_unused_byte_total() {
         original_name: Some("recovered.txt".into()),
         resident_data: None,
         ntfs: None,
+        extents: None,
     }];
     app.export(directory.path().to_owned());
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while app.busy && std::time::Instant::now() < deadline {
+    while app.exporting && std::time::Instant::now() < deadline {
         app.poll();
         std::thread::yield_now();
     }
-    assert!(!app.busy, "export did not finish");
+    assert!(!app.exporting, "export did not finish");
+    assert!(
+        app.recovery_status.starts_with("Saved"),
+        "{}",
+        app.recovery_status
+    );
     assert_eq!(
         std::fs::read(directory.path().join("recovered.txt")).unwrap(),
         b"data"
@@ -284,22 +305,36 @@ fn recovery_reads_offsets_beyond_the_unused_byte_total() {
 
 #[test]
 fn disconnected_workers_stop_busy_state_without_overwriting_completed_results() {
-    for exporting in [false, true] {
-        let mut app = Reclaim::default();
-        app.busy = true;
-        app.exporting = exporting;
-        let (tx, rx) = mpsc::channel();
-        app.receiver = Some(rx);
-        drop(tx);
-        app.poll();
-        assert!(!app.busy);
-        assert!(!app.exporting);
-        assert!(app.receiver.is_none());
-        assert_eq!(app.scan_error.is_some(), !exporting);
-        let status = app.status.clone();
-        app.poll();
-        assert_eq!(app.status, status);
-    }
+    let mut app = Reclaim::default();
+    app.busy = true;
+    let (tx, rx) = mpsc::sync_channel(1);
+    app.receiver = Some(rx);
+    drop(tx);
+    app.poll();
+    assert!(!app.busy);
+    assert!(app.receiver.is_none());
+    assert!(app.scan_error.is_some());
+    let status = app.status.clone();
+    app.poll();
+    assert_eq!(app.status, status);
+
+    // A lost recovery worker reports beside Recover and leaves a scan alone.
+    let mut app = Reclaim::default();
+    app.busy = true;
+    let (_scan, rx) = mpsc::sync_channel(1);
+    app.receiver = Some(rx);
+    app.status = "Scanning for recoverable files…".into();
+    app.exporting = true;
+    let (tx, rx) = mpsc::sync_channel::<Result<usize, String>>(1);
+    app.export_receiver = Some(rx);
+    drop(tx);
+    app.poll();
+    assert!(!app.exporting);
+    assert!(app.export_receiver.is_none());
+    assert!(app.recovery_status.contains("Recovery ended unexpectedly"));
+    assert!(app.busy);
+    assert!(app.scan_error.is_none());
+    assert_eq!(app.status, "Scanning for recoverable files…");
 }
 
 #[test]
@@ -342,4 +377,99 @@ fn source_access_failure_offers_elevation_only_when_requested_by_the_worker() {
         assert_eq!(app.needs_administrator, denied);
         assert!(app.results.is_empty());
     }
+}
+
+/// A source with a file at 4096, held open the way a running scan holds it.
+fn scanned_source(app: &mut Reclaim) -> (tempfile::TempPath, Arc<std::fs::File>) {
+    let (path, source) = source_file();
+    let handle = Arc::new(source);
+    app.scanned_source = Some("test-volume".into());
+    app.source_handle = Some(handle.clone());
+    app.source_size = Some(4100);
+    app.results = vec![Found {
+        offset: 4096,
+        size: 4,
+        kind: "txt",
+        selected: true,
+        validation: reclaim::Validation::Unverified,
+        original_name: Some("recovered.txt".into()),
+        resident_data: None,
+        ntfs: None,
+        extents: None,
+    }];
+    (path, handle)
+}
+
+fn finish_recovery(app: &mut Reclaim) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while app.exporting && std::time::Instant::now() < deadline {
+        app.poll();
+        std::thread::yield_now();
+    }
+    assert!(!app.exporting, "recovery did not finish");
+    assert!(
+        app.recovery_status.starts_with("Saved"),
+        "{}",
+        app.recovery_status
+    );
+}
+
+#[test]
+fn recovery_while_scanning_keeps_the_scan_running_and_its_cursor_in_place() {
+    use std::io::{Seek, SeekFrom};
+    let mut app = Reclaim::default();
+    let (_path, handle) = scanned_source(&mut app);
+    // The scan is mid-way: it owns the receiver, the stop flag and a cursor.
+    app.busy = true;
+    let (scan, rx) = mpsc::sync_channel(4);
+    app.receiver = Some(rx);
+    app.status = "Scanning for recoverable files…".into();
+    let scan_cancel = app.cancel.clone();
+    (&*handle).seek(SeekFrom::Start(1234)).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    app.export(directory.path().to_owned());
+    assert!(app.exporting);
+    assert!(app.busy);
+    finish_recovery(&mut app);
+    assert_eq!(
+        std::fs::read(directory.path().join("recovered.txt")).unwrap(),
+        b"data"
+    );
+    // A cloned handle shares this cursor; recovery must not have moved it.
+    assert_eq!((&*handle).stream_position().unwrap(), 1234);
+    assert!(app.busy);
+    assert!(!scan_cancel.load(Ordering::Relaxed));
+    assert_eq!(app.status, "Scanning for recoverable files…");
+    assert!(app.recovery_status.starts_with("Saved 1 file."));
+    // The scan keeps reporting into the same state afterwards.
+    scan.send(Message::Scan(Event::Progress(10))).unwrap();
+    app.poll();
+    assert_eq!(app.scanned, 10);
+}
+
+#[test]
+fn stopping_recovery_and_stopping_the_scan_are_independent() {
+    let mut app = Reclaim::default();
+    app.busy = true;
+    app.exporting = true;
+    app.stop_recovery();
+    assert!(app.export_cancel.load(Ordering::Relaxed));
+    assert!(!app.cancel.load(Ordering::Relaxed));
+    let mut app = Reclaim::default();
+    app.busy = true;
+    app.exporting = true;
+    app.stop_operation();
+    assert!(app.cancel.load(Ordering::Relaxed));
+    assert!(!app.export_cancel.load(Ordering::Relaxed));
+}
+
+#[test]
+fn a_second_recovery_cannot_start_while_one_runs() {
+    let mut app = Reclaim::default();
+    let _source = scanned_source(&mut app);
+    app.exporting = true;
+    let directory = tempfile::tempdir().unwrap();
+    app.export(directory.path().to_owned());
+    assert!(app.export_receiver.is_none());
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
 }

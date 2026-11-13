@@ -7,7 +7,7 @@ A Rust desktop app for recovering file candidates from drives and raw disk image
 ## Features
 
 - **Native drive discovery:** Linux sysfs, Windows storage APIs, and macOS IOKit/Disk Arbitration. No `lsblk`, PowerShell, `diskutil`, or `plutil` subprocesses.
-- **Unused-space default:** NTFS, FAT12/16/32, and exFAT volume maps; occupied clusters and filesystem metadata are excluded from signature carving. No full-source fallback.
+- **Unused-space default:** NTFS, FAT12/16/32, exFAT, ext2/3/4, and HFS+/HFSX volume maps (ReFS is detected and refused); occupied clusters and filesystem metadata are excluded from signature carving. No full-source fallback.
 - **Live scan results:** unused-byte progress, cancellation, and recoverable partial results.
 - **Filtered recovery:** search by filename, extension, or source offset; filter by file category. Recovery saves only selected files matching the active filters.
 - **Safe output naming:** original NTFS leaf names when available, generated names otherwise, and numeric suffixes to avoid replacing existing files.
@@ -85,70 +85,30 @@ Reclaim is not a complete filesystem recovery suite. A signature match does not 
 ## Development
 
 ```sh
-cargo fmt --check
+cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-`cargo test` includes the project audit in `tests/audit` (security rules tagged
-by CWE, translation coverage and dead keys, supply-chain policy). Run it alone
-with `cargo test --locked --test audit`. See [the code and UI audit](CODE_UI_AUDIT.md)
-for what it checks and how to accept a reviewed finding.
+`cargo test` includes the project audit and the headless UI renders.
+[TESTING.md](TESTING.md) lists every suite, the audit rules, the layout checks,
+fuzzing, the opt-in hardware tests, CI and the real USB drive results.
 
-Tests cover signature boundaries, image validation, NTFS records, filtered exports, collision protection, sector-aligned reads, native Linux metadata fixtures, cancellation, and Slint page rendering in both themes.
+### Data preservation
 
-### Data preservation and USB checks
-
-Recovery blocks a destination known to share the scanned physical drive, even
-after a confirmation dialog. Unknown topology still requires explicit review;
-choose a destination you know is on another physical drive. Linux refuses to
+Recovery blocks a destination known to share the scanned physical drive. The
+in-app destination dialog names the folder and offers only "Choose another
+folder" or Cancel; the drive is checked again just before writing. When the
+drive cannot be determined, the dialog also offers "Save here anyway", for a
+destination you know is on another physical drive. The dialog is drawn by
+Reclaim itself, not a native message box, so it starts no helper program
+(such as zenity on Linux) and cannot fail silently when one is missing.
+The folder picker opens where the last recovery saved. Linux refuses to
 certify separation for anonymous filesystem device numbers (including Btrfs)
 or incomplete device-mapper/RAID topology. A single mountinfo source does not
 describe every disk in a multi-device filesystem.
 
-The security regression tests simulate a USB disconnect after a partial read,
-competing exports with the same filename, invalid candidate ranges, existing
-files and symlinks. Failed exports must leave no published partial file or
-temporary staging file, and successful exports must preserve existing data:
-
-```sh
-cargo test --locked --test security
-```
-
-Two opt-in Linux hardware tests only read the selected device or verify that
-same-drive export is rejected. They do not format, delete, write test files, or
-export recovery candidates. Set the device and its existing mount directory
-explicitly, checking their identity first:
-
-```sh
-RECLAIM_TEST_DEVICE=/dev/sdX1 cargo test --locked --bin reclaim live_named_volume_can_read_data -- --ignored --nocapture
-RECLAIM_TEST_DEVICE=/dev/sdX1 RECLAIM_TEST_DESTINATION=/media/user/USB cargo test --locked --bin reclaim live_usb_export_to_source_drive_is_blocked_before_any_write -- --ignored
-```
-
-The read test scans only the first 16 MiB. Normal read permissions or the
-desktop's read-only UDisks authorization are required. Disconnect/error behavior
-is simulated in automated tests; do not unplug a device during an actual export
-or use a failing drive for repeated hardware tests. Mounted source contents and
-mount topology can still change externally; these checks are not a guarantee
-against every hardware failure or mount race.
-
-Optional headless UI previews:
-
-```sh
-mkdir -p /tmp/reclaim-previews
-RECLAIM_PREVIEW_DIR=/tmp/reclaim-previews cargo test --locked --bin reclaim slint_workspace
-```
-
-The same test run also checks layout automatically: no control leaves the window or overlaps another on any page, state, language or window size, and the scan status line does not move between states (see [the code and UI audit](CODE_UI_AUDIT.md)).
-
-The previews are PNG images rendered from the actual Slint components using its software renderer. They do not test native window management, authentication prompts, or real-device recovery.
-
-[Desktop CI](../.github/workflows/build.yml) runs locked tests (including the UI
-and project audit) and Clippy with warnings as errors on Linux, Windows, and
-macOS. Formatting runs once on Linux. Separate jobs check dependency advisories,
-bans and sources, and install the website's locked dependencies, type-check it,
-and build it. Checks run on pull requests, main, and weekly; newer commits cancel
-older PR runs. Third-party actions are pinned to immutable revisions.
+### Builds and releases
 
 Tests compile the app and UI in the test profile; PR checks do not perform a
 second optimized build, package installers, or upload executable artifacts.
@@ -157,8 +117,17 @@ workflow before building optimized binaries and native installers for all four
 shipping targets. Only releases upload artifacts, sign updates, and publish
 GitHub downloads. Release runs are serialized per tag and artifacts expire after
 seven days. macOS binaries use ad-hoc signing; Developer ID signing and
-notarization are not configured. Native desktop and hardware testing remain
-necessary; headless tests do not replace them.
+notarization are not configured.
+
+### Rules for changes
+
+- Keep disk reads, decoding, downloads, and authentication off the render thread.
+- Keep scan queues bounded and cancellation checks inside long-running loops.
+- Preserve read-only source access and export without overwriting existing files.
+- Use unique, stable widget IDs; preserve virtualization of long result lists.
+- Keep image decoding and candidate parsing bounded; validate untrusted sizes.
+- Check minimum and default window sizes in light, dark and right-to-left layouts.
+- Prefer existing components and dependencies; simplify only with equivalent behavior.
 
 ## License and credits
 

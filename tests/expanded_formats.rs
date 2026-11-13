@@ -1,10 +1,7 @@
-#![expect(
-    clippy::unwrap_used,
-    reason = "fixture helpers fail the test by panicking"
-)]
 use reclaim::{Event, Found, recover, scan};
 use std::sync::atomic::AtomicBool;
 
+#[cfg(test)]
 fn carve_and_check(fixtures: &[(&str, Vec<u8>)]) {
     let dir_temp = tempfile::tempdir().unwrap();
     let dir = dir_temp.path().join("work");
@@ -90,6 +87,7 @@ fn zip_packages_have_correct_extensions_and_no_duplicate_local_entries() {
     );
 }
 
+#[cfg(test)]
 fn chunk_container(head: &[u8], kind: &[u8], little: bool) -> Vec<u8> {
     let mut bytes = head.to_vec();
     let size = 16u32;
@@ -197,6 +195,7 @@ fn generated_names_are_readable_and_keep_the_correct_extension() {
             original_name: None,
             resident_data: None,
             ntfs: None,
+            extents: None,
         };
         assert_eq!(found.recovery_name(3), expected);
         assert_eq!(

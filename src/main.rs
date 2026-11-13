@@ -46,7 +46,6 @@ enum Message {
     SourceAccessDenied,
     Opened(Arc<std::fs::File>),
     Done(Result<(), String>),
-    Export(Result<usize, String>),
 }
 struct Reclaim {
     inspected: Option<usize>,
@@ -77,10 +76,20 @@ struct Reclaim {
     status: String,
     filter: String,
     category: usize,
+    /// Recovery has its own worker, channel and stop flag, so it can run while
+    /// a scan continues and stopping one never stops the other.
     exporting: bool,
+    export_receiver: Option<mpsc::Receiver<Result<usize, String>>>,
+    export_cancel: Arc<AtomicBool>,
+    /// The latest recovery message, shown beside Recover; empty when none.
+    recovery_status: String,
     started: Option<std::time::Instant>,
     source_stamp: Option<(u64, Option<std::time::SystemTime>)>,
-    recovery_folder: Option<(PathBuf, drives::Destination)>,
+    /// A chosen folder that may share a drive with the source, waiting for the
+    /// user in the destination dialog.
+    destination_review: Option<(PathBuf, drives::Destination)>,
+    /// The folder the last recovery saved to; the folder picker opens there next.
+    last_destination: Option<PathBuf>,
     shown: ShownFiles,
     /// A slow candidate check named in the status line, and since when.
     long_check: Option<(&'static str, std::time::Instant)>,
@@ -90,6 +99,25 @@ struct Reclaim {
 const LONG_CHECK_AFTER: Duration = Duration::from_millis(1500);
 /// Once named, a check stays on screen at least this long, so it can be read.
 const LONG_CHECK_SHOWN: Duration = Duration::from_millis(1500);
+/// A source reader that fails once `stop` is set, so a copy in progress ends
+/// within one read. `io::copy` retries `Interrupted`, so this uses `Other`.
+struct StoppableReader<R> {
+    inner: R,
+    stop: Arc<AtomicBool>,
+}
+impl<R: std::io::Read> std::io::Read for StoppableReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.stop.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("Recovery stopped"));
+        }
+        self.inner.read(buffer)
+    }
+}
+impl<R: std::io::Seek> std::io::Seek for StoppableReader<R> {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
 /// What the file list model currently holds, so a sync appends new results and
 /// patches changed selections instead of rebuilding every row. A scan tick then
 /// costs the same with 30 results or 30,000.
@@ -137,9 +165,13 @@ impl Default for Reclaim {
             filter: String::new(),
             category: 0,
             exporting: false,
+            export_receiver: None,
+            export_cancel: Arc::new(AtomicBool::new(false)),
+            recovery_status: String::new(),
             started: None,
             source_stamp: None,
-            recovery_folder: None,
+            destination_review: None,
+            last_destination: None,
             shown: ShownFiles::default(),
             long_check: None,
         }
@@ -151,6 +183,14 @@ impl Reclaim {
     fn stop_operation(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
         self.status = "Stopping after the current step…".into();
+    }
+    fn stop_recovery(&mut self) {
+        self.export_cancel.store(true, Ordering::Relaxed);
+        self.recovery_status = "Stopping after the current step…".into();
+    }
+    /// A scan or a recovery is running, so the source must not change.
+    fn working(&self) -> bool {
+        self.busy || self.exporting
     }
     fn start(&mut self) {
         let Some(path) = self.source.clone() else {
@@ -164,7 +204,7 @@ impl Reclaim {
         self.scan_error = None;
         self.needs_administrator = false;
         self.unreadable.clear();
-        self.exporting = false;
+        self.recovery_status.clear();
         self.started = Some(std::time::Instant::now());
         self.source_stamp = path.metadata().ok().map(|m| (m.len(), m.modified().ok()));
         self.scan_activity = None;
@@ -330,14 +370,26 @@ impl Reclaim {
             })
             .collect()
     }
+    /// Asks for a recovery folder. The picker opens where the last recovery
+    /// saved, unless that folder is gone or is the one just turned down.
     fn choose_recovery_folder(&mut self) {
-        let Some(directory) = rfd::FileDialog::new()
+        let rejected = self
+            .destination_review
+            .take()
+            .map(|(directory, _)| directory);
+        let mut picker = rfd::FileDialog::new()
             .set_title(i18n::t("Save to a different physical drive"))
-            .pick_folder()
-        else {
-            return;
-        };
-        self.review_recovery_folder(directory);
+            .set_can_create_directories(true);
+        if let Some(folder) = self
+            .last_destination
+            .as_ref()
+            .filter(|folder| Some(*folder) != rejected.as_ref() && folder.is_dir())
+        {
+            picker = picker.set_directory(folder);
+        }
+        if let Some(directory) = picker.pick_folder() {
+            self.review_recovery_folder(directory);
+        }
     }
     /// Saves straight away only when the folder provably cannot overwrite the
     /// scanned data; otherwise the destination dialog explains the risk.
@@ -347,17 +399,28 @@ impl Reclaim {
         };
         match drives::destination(source, &directory) {
             drives::Destination::Separate => self.export(directory),
-            destination => self.recovery_folder = Some((directory, destination)),
+            destination => self.destination_review = Some((directory, destination)),
+        }
+    }
+    /// Saves to a folder whose drive could not be determined, after the user
+    /// confirmed it is on another drive. A same-drive folder is never accepted,
+    /// and `export` checks the drive again before writing.
+    fn save_to_unconfirmed_destination(&mut self) {
+        if let Some((directory, drives::Destination::Unknown)) = self.destination_review.take() {
+            self.export(directory);
         }
     }
     fn export(&mut self, directory: PathBuf) {
         let Some(source) = self.scanned_source.clone() else {
             return;
         };
+        if self.exporting {
+            return;
+        }
         // Recheck after the dialog: a mount or drive may have changed while it
         // was open. Never allow an affirmative click to write onto the source.
         if drives::destination(&source, &directory) == drives::Destination::SameDrive {
-            self.status = "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.".into();
+            self.recovery_status = "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.".into();
             return;
         }
         let files = self.recovery_files();
@@ -368,42 +431,89 @@ impl Reclaim {
         if needs_source_bytes
             && source.metadata().ok().map(|m| (m.len(), m.modified().ok())) != self.source_stamp
         {
-            self.status = "Source changed since scanning. Scan it again before recovering.".into();
+            self.recovery_status =
+                "Source changed since scanning. Scan it again before recovering.".into();
             return;
         }
         let Some(handle) = self.source_handle.clone() else {
-            self.status = "Scan the selected source before recovering files.".into();
+            self.recovery_status = "Scan the selected source before recovering files.".into();
             return;
         };
-        let (tx, rx) = mpsc::sync_channel(256);
-        self.receiver = Some(rx);
-        self.busy = true;
-        self.status = "Recovering selected files…".into();
+        self.last_destination = Some(directory.clone());
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.export_receiver = Some(rx);
+        self.recovery_status = "Recovering selected files…".into();
         self.exporting = true;
-        self.cancel = Arc::new(AtomicBool::new(false));
-        let cancel = self.cancel.clone();
+        self.export_cancel = Arc::new(AtomicBool::new(false));
+        let cancel = self.export_cancel.clone();
         let alignment = self.source_alignment;
         let source_size = self.source_size;
         std::thread::spawn(move || {
             let result = (|| {
-                let input = handle
-                    .try_clone()
+                // Never a cloned handle: it would share the running scan's cursor.
+                let input = preview::Input::new(handle)
                     .map_err(|e| format!("Could not read the scanned source: {e}"))?;
-                let mut input = reclaim::SourceReader::new(input, alignment, source_size)
+                let input = reclaim::SourceReader::new(input, alignment, source_size)
                     .map_err(|e| e.to_string())?;
+                // Stop recovery interrupts a large file mid-copy; its private
+                // temporary file is discarded, never published.
+                let mut input = StoppableReader {
+                    inner: input,
+                    stop: cancel.clone(),
+                };
                 let mut count = 0usize;
+                let stopped = |count: usize| {
+                    if count == 1 {
+                        format!("Recovery stopped. {count} file saved.")
+                    } else {
+                        format!("Recovery stopped. {count} files saved.")
+                    }
+                };
                 for (f, number) in files {
                     if cancel.load(Ordering::Relaxed) {
-                        return Err(format!("Recovery stopped. {count} files saved."));
+                        return Err(stopped(count));
                     }
-                    reclaim::recover_unique(&mut input, &directory, &f, number)
-                        .map_err(|e| format!("Recovered {count} files before error: {e}"))?;
+                    reclaim::recover_unique(&mut input, &directory, &f, number).map_err(|e| {
+                        if cancel.load(Ordering::Relaxed) {
+                            stopped(count)
+                        } else if count == 1 {
+                            format!("Recovered {count} file before error: {e}")
+                        } else {
+                            format!("Recovered {count} files before error: {e}")
+                        }
+                    })?;
                     count = count.saturating_add(1);
                 }
                 Ok(count)
             })();
-            tx.send(Message::Export(result)).ok();
+            tx.send(result).ok();
         });
+    }
+    /// Collects a finished recovery; returns whether anything changed.
+    fn poll_recovery(&mut self) -> bool {
+        let Some(rx) = &self.export_receiver else {
+            return false;
+        };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return false,
+            Err(mpsc::TryRecvError::Disconnected) => Err(
+                "Recovery ended unexpectedly. Check the destination folder before trying again."
+                    .into(),
+            ),
+        };
+        self.export_receiver = None;
+        self.exporting = false;
+        self.recovery_status = match result {
+            Ok(n @ 1) => {
+                format!("Saved {n} file. Open the destination folder and verify their contents.")
+            }
+            Ok(n) => {
+                format!("Saved {n} files. Open the destination folder and verify their contents.")
+            }
+            Err(e) => e,
+        };
+        true
     }
 }
 impl Reclaim {
@@ -472,13 +582,8 @@ impl Reclaim {
                             changed = true;
                             self.busy = false;
                             self.scan_activity = None;
-                            if self.exporting {
-                                self.exporting = false;
-                                self.status = "Recovery ended unexpectedly. Check the destination folder before trying again.".into();
-                            } else {
-                                self.scan_error = Some("The scan ended unexpectedly. You can recover the files already found or scan again.".into());
-                                self.status = "Scan failed. See the message above.".into();
-                            }
+                            self.scan_error = Some("The scan ended unexpectedly. You can recover the files already found or scan again.".into());
+                            self.status = "Scan failed. See the message above.".into();
                         }
                         break;
                     }
@@ -572,22 +677,13 @@ impl Reclaim {
                             }
                         };
                     }
-                    Message::Export(result) => {
-                        self.busy = false;
-                        self.exporting = false;
-                        self.status = match result {
-                            Ok(n) => format!(
-                                "Saved {n} files. Open the destination folder and verify their contents."
-                            ),
-                            Err(e) => e,
-                        };
-                    }
                 }
             }
         }
         if !self.busy {
             self.receiver = None;
         }
+        changed |= self.poll_recovery();
         changed
     }
     fn choose_source(&mut self) {
@@ -668,8 +764,20 @@ impl Reclaim {
         );
         ui.set_busy(self.busy);
         ui.set_drives_refreshing(self.drives_loading);
-        ui.set_can_scan(!self.busy && self.source.is_some());
-        ui.set_can_recover(!self.busy && selected > 0);
+        ui.set_can_scan(!self.working() && self.source.is_some());
+        // While recovering, the same button stops the recovery.
+        ui.set_can_recover(self.exporting || selected > 0);
+        ui.set_recovering(self.exporting);
+        ui.set_recovery_status(i18n::t(&self.recovery_status).into());
+        let review = self.destination_review.as_ref();
+        ui.set_destination_review(review.is_some());
+        ui.set_destination_same_drive(matches!(review, Some((_, drives::Destination::SameDrive))));
+        ui.set_destination_path(
+            review
+                .map(|(folder, _)| i18n::isolate(&folder.display().to_string()))
+                .unwrap_or_default()
+                .into(),
+        );
         ui.set_all_selected(visible > 0 && selected == visible);
         ui.set_has_results(!self.results.is_empty());
         ui.set_show_status(
@@ -681,7 +789,7 @@ impl Reclaim {
         let (status, detail) = self.scan_status(std::time::Instant::now());
         ui.set_status(status.into());
         ui.set_scan_detail(detail.into());
-        ui.set_needs_administrator(self.needs_administrator && !self.busy);
+        ui.set_needs_administrator(self.needs_administrator && !self.working());
         ui.set_error(
             self.scan_error
                 .as_ref()
@@ -735,7 +843,13 @@ impl Reclaim {
             .iter()
             .map(|d| DriveItem {
                 name: i18n::isolate(&d.display_name()).into(),
-                device: device_tag(&d.path).into(),
+                // A phone's path is a USB port in sysfs, which means nothing to people.
+                device: if d.phone {
+                    String::new()
+                } else {
+                    device_tag(&d.path)
+                }
+                .into(),
                 icon: drive_icon(d),
                 detail: format!(
                     "{} · {}{}",
@@ -751,11 +865,17 @@ impl Reclaim {
                     }
                 )
                 .into(),
-                size: format_bytes(d.size).into(),
-                available: !d.encrypted,
+                size: if d.phone {
+                    String::new()
+                } else {
+                    format_bytes(d.size)
+                }
+                .into(),
+                available: d.scannable(),
             })
             .collect();
         replace_model(ui.get_drives(), drives, |m| ui.set_drives(m));
+        ui.set_phone_connected(self.drives.iter().any(|d| d.phone));
     }
 }
 /// One row of the file list for result `index`.
@@ -784,7 +904,9 @@ fn device_tag(path: &std::path::Path) -> String {
 }
 /// `kind` holds the fixed English labels set by the platform drive discovery.
 fn drive_icon(drive: &drives::Drive) -> DriveIcon {
-    if drive.encrypted {
+    if drive.phone {
+        DriveIcon::Phone
+    } else if drive.encrypted {
         DriveIcon::Locked
     } else if drive.kind == "USB drive" {
         DriveIcon::Usb
@@ -936,7 +1058,7 @@ fn run() -> Result<(), slint::PlatformError> {
         let state = state.clone();
         let weak = ui.as_weak();
         ui.on_restart_as_administrator(move || {
-            if state.borrow().busy || !state.borrow().needs_administrator {
+            if state.borrow().working() || !state.borrow().needs_administrator {
                 return;
             }
             let error = match native_process::restart_elevated() {
@@ -985,7 +1107,7 @@ fn run() -> Result<(), slint::PlatformError> {
         }};
     }
     action!(on_open_image, |s: &mut Reclaim, _: &AppWindow| {
-        if !s.busy {
+        if !s.working() {
             s.choose_source();
         }
     });
@@ -993,7 +1115,7 @@ fn run() -> Result<(), slint::PlatformError> {
         s.refresh_drives();
     });
     action!(on_scan, |s: &mut Reclaim, ui: &AppWindow| {
-        if !s.busy {
+        if !s.working() {
             s.start();
             ui.set_page(1);
             ui.set_query("".into());
@@ -1009,40 +1131,31 @@ fn run() -> Result<(), slint::PlatformError> {
         s.category = usize::try_from(ui.get_category()).unwrap_or(0);
     });
     action!(on_recover, |s: &mut Reclaim, _: &AppWindow| {
-        if s.busy {
+        // Recovery may start while a scan runs; a second press stops it.
+        if s.exporting {
+            s.stop_recovery();
             return;
         }
         s.choose_recovery_folder();
-        if let Some((directory, destination)) = s.recovery_folder.take() {
-            let explanation = match destination {
-                drives::Destination::SameDrive => {
-                    "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive."
-                }
-                _ => {
-                    "Saving recovered files to the same physical drive you scanned can overwrite and permanently damage data you are trying to recover. Choose a folder on a different physical drive. Continue only if this destination is on another drive."
-                }
-            };
-            if rfd::MessageDialog::new()
-                .set_title(i18n::t("Review recovery destination"))
-                .set_description(i18n::t(explanation))
-                .set_buttons(if destination == drives::Destination::SameDrive {
-                    rfd::MessageButtons::Ok
-                } else {
-                    rfd::MessageButtons::OkCancel
-                })
-                .set_level(rfd::MessageLevel::Warning)
-                .show()
-                == rfd::MessageDialogResult::Ok
-                && destination != drives::Destination::SameDrive
-            {
-                s.export(directory);
-            }
+    });
+    // The destination dialog: pick again, accept a folder on an undetermined
+    // drive, or drop it.
+    action!(
+        on_choose_another_destination,
+        |s: &mut Reclaim, _: &AppWindow| {
+            s.choose_recovery_folder();
         }
+    );
+    action!(on_save_here_anyway, |s: &mut Reclaim, _: &AppWindow| {
+        s.save_to_unconfirmed_destination();
+    });
+    action!(on_cancel_destination, |s: &mut Reclaim, _: &AppWindow| {
+        s.destination_review = None;
     });
     action_with!(on_select_drive, |s, i: i32| {
-        if !s.busy
+        if !s.working()
             && let Ok(i) = usize::try_from(i)
-            && let Some(d) = s.drives.get(i).filter(|d| !d.encrypted)
+            && let Some(d) = s.drives.get(i).filter(|d| d.scannable())
         {
             s.source = Some(d.path.clone());
             s.needs_administrator = false;
@@ -1127,7 +1240,7 @@ fn run() -> Result<(), slint::PlatformError> {
         let state = state.clone();
         let weak = ui.as_weak();
         ui.on_apply_update(move || {
-            if !state.borrow().busy {
+            if !state.borrow().working() {
                 updates.borrow_mut().apply();
                 if updates.borrow().installing()
                     && let Some(ui) = weak.upgrade()
@@ -1156,7 +1269,7 @@ fn run() -> Result<(), slint::PlatformError> {
                         s.sync_ui(&ui);
                     }
                     let mut updates = updates.borrow_mut();
-                    if !s.busy && started.elapsed() >= Duration::from_secs(30) {
+                    if !s.working() && started.elapsed() >= Duration::from_secs(30) {
                         updates.check_automatically();
                     }
                     let was_updating = updates.installing();
@@ -1249,6 +1362,7 @@ mod slint_ui_tests;
 impl Drop for Reclaim {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
+        self.export_cancel.store(true, Ordering::Relaxed);
     }
 }
 // Prevent process-backed D-Bus addresses (including unixexec) from reaching

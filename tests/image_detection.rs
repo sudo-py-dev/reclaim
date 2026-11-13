@@ -1,10 +1,7 @@
-#![expect(
-    clippy::unwrap_used,
-    reason = "fixture helpers fail the test by panicking"
-)]
 use reclaim::{Event, Found, Validation, recover_reader, scan_reader};
 use std::{io::Cursor, sync::atomic::AtomicBool};
 
+#[cfg(test)]
 fn scan(bytes: &[u8]) -> Vec<Found> {
     let mut found = vec![];
     scan_reader(&mut Cursor::new(bytes), &AtomicBool::new(false), |event| {

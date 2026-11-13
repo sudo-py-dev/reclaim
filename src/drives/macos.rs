@@ -333,6 +333,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             mounted: in_use,
             encrypted: locked,
             sector_size: 1,
+            phone: false,
         });
     }
     let active_parents: HashSet<_> = rows

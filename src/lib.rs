@@ -34,13 +34,13 @@ pub const FILE_CATEGORIES: &[&str] = &[
 ];
 pub fn category_index(kind: &str) -> usize {
     match kind {
-        "jpg" | "png" | "gif" | "bmp" | "webp" | "qoi" => 1,
+        "jpg" | "png" | "gif" | "bmp" | "webp" | "qoi" | "heic" => 1,
         "ico" => 7,
         "pdf" | "docx" | "xlsx" | "pptx" | "docm" | "xlsm" | "pptm" | "odt" | "ods" | "odp"
         | "epub" | "ole" | "txt" | "csv" | "json" | "xml" | "md" | "html" | "log" | "sqlite" => 2,
         "zip" | "7z" | "cab" | "rar" | "tar" | "gz" | "xar" => 3,
-        "wav" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" | "mid" => 4,
-        "avi" | "mp4" | "ogv" => 5,
+        "wav" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" | "mid" | "m4a" => 4,
+        "avi" | "mp4" | "ogv" | "mov" | "3gp" | "mkv" | "webm" => 5,
         "jar" | "apk" | "exe" | "dll" | "elf" | "msi" | "msp" | "mst" | "deb" | "rpm" | "dex"
         | "pkg" | "swf" => 6,
         _ => 0,
@@ -85,6 +85,10 @@ pub struct Found {
     pub original_name: Option<String>,
     pub resident_data: Option<std::sync::Arc<[u8]>>,
     pub ntfs: Option<NtfsMetadata>,
+    /// The file's data as `(offset, length)` byte ranges of the source, in
+    /// order, when a filesystem record says it was stored in pieces. `offset`
+    /// is then the first range and `size` the exact file length.
+    pub extents: Option<std::sync::Arc<[(u64, u64)]>>,
 }
 impl Found {
     /// A portable original filename when available, otherwise a generated name.
@@ -439,6 +443,13 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
             continue;
         }
         let end = from + index + fmt.tail.len();
+        if fmt.ext == "pdf" {
+            match pdf_after_eof(bytes, end, false) {
+                PdfAfterEof::Ends(end) => return CandidateEnd::Complete(end),
+                PdfAfterEof::Continues => continue,
+                PdfAfterEof::Undecided => return CandidateEnd::More,
+            }
+        }
         if fmt.ext != "zip" {
             return CandidateEnd::Complete(end);
         }
@@ -456,6 +467,119 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
         }
     }
     CandidateEnd::More
+}
+
+/// What follows a PDF `%%EOF`.
+#[derive(Debug, PartialEq, Eq)]
+enum PdfAfterEof {
+    /// The file ends at this byte: nothing of the PDF follows.
+    Ends(usize),
+    /// Another revision follows; the search goes on to a later `%%EOF`.
+    Continues,
+    /// The bytes read so far stop before this can be decided.
+    Undecided,
+}
+
+/// Most whitespace looked past after `%%EOF` for another revision.
+const MAX_PDF_GAP: usize = 1024;
+
+/// PDF whitespace (ISO 32000-1, 7.2.2): NUL, tab, line feed, form feed,
+/// carriage return and space.
+fn pdf_space(byte: u8) -> bool {
+    matches!(byte, 0 | b'\t' | b'\n' | 0x0c | b'\r' | b' ')
+}
+
+/// What follows the `%%EOF` that finishes at `eof`.
+///
+/// The line break after `%%EOF` belongs to the file. Linearized ("fast web
+/// view") PDFs and files saved with incremental updates hold several `%%EOF`
+/// markers; stopping at the first one would cut off most of the document.
+/// When `bytes` ends before the next token is whole, the answer waits for
+/// more data, unless `at_end` says the source has no more.
+fn pdf_after_eof(bytes: &[u8], eof: usize, at_end: bool) -> PdfAfterEof {
+    let mut end = eof;
+    for expected in *b"\r\n" {
+        if bytes.get(end) == Some(&expected) {
+            end = end.saturating_add(1);
+        }
+    }
+    let next = bytes.get(end..).unwrap_or_default();
+    // Line whitespace only: free space after a file is often zero-filled, and
+    // NUL there is padding, not a gap before another revision.
+    let gap = next
+        .iter()
+        .take_while(|b| **b != 0 && pdf_space(**b))
+        .count();
+    if gap > MAX_PDF_GAP {
+        return PdfAfterEof::Ends(end);
+    }
+    let next = next.get(gap..).unwrap_or_default();
+    let keyword = |word: &[u8]| {
+        if next.starts_with(word) {
+            Some(true)
+        } else if word.starts_with(next) {
+            None
+        } else {
+            Some(false)
+        }
+    };
+    let answers = [
+        keyword(b"xref"),
+        keyword(b"trailer"),
+        keyword(b"startxref"),
+        pdf_object_header(next),
+    ];
+    if answers.contains(&Some(true)) {
+        PdfAfterEof::Continues
+    } else if answers.contains(&None) && !at_end {
+        PdfAfterEof::Undecided
+    } else {
+        PdfAfterEof::Ends(end)
+    }
+}
+
+/// Whether `bytes` starts with an indirect object header such as `12 0 obj`,
+/// or `None` when `bytes` ends before that is known.
+fn pdf_object_header(bytes: &[u8]) -> Option<bool> {
+    let mut rest = bytes;
+    for _ in 0..2 {
+        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == rest.len() && digits <= 10 {
+            return None;
+        }
+        if digits == 0 || digits > 10 {
+            return Some(false);
+        }
+        rest = rest.get(digits..).unwrap_or_default();
+        let spaces = rest.iter().take_while(|b| pdf_space(**b)).count();
+        if spaces == rest.len() {
+            return None;
+        }
+        if spaces == 0 {
+            return Some(false);
+        }
+        rest = rest.get(spaces..).unwrap_or_default();
+    }
+    if rest.starts_with(b"obj") {
+        Some(true)
+    } else if b"obj".starts_with(rest) {
+        None
+    } else {
+        Some(false)
+    }
+}
+
+/// Where a PDF read to the end of the source ends: after its last `%%EOF`.
+fn pdf_end_at_source_end(bytes: &[u8]) -> CandidateEnd {
+    let mut last = None;
+    for (index, window) in bytes.windows(5).enumerate() {
+        if window == b"%%EOF"
+            && let PdfAfterEof::Ends(end) = pdf_after_eof(bytes, index + 5, true)
+        {
+            last = Some(end);
+        }
+    }
+    last.map_or(CandidateEnd::Invalid, CandidateEnd::Complete)
 }
 
 fn valid_zip(bytes: &[u8], eocd: usize) -> bool {
@@ -511,6 +635,58 @@ fn valid_zip(bytes: &[u8], eocd: usize) -> bool {
         cursor = next;
     }
     cursor == eocd
+}
+
+/// The file type a file's first bytes announce, from the carving signatures
+/// plus the ISO media (MP4, MOV, HEIC) and Matroska headers. `None` when the
+/// bytes carry no known signature.
+pub(crate) fn sniff_kind(head: &[u8]) -> Option<&'static str> {
+    if head.get(4..8) == Some(b"ftyp".as_slice()) {
+        return Some(match head.get(8..12)? {
+            b"qt  " => "mov",
+            b"heic" | b"heix" | b"heim" | b"heis" | b"mif1" | b"msf1" => "heic",
+            b"M4A " | b"M4B " => "m4a",
+            b"3gp4" | b"3gp5" | b"3gp6" | b"3g2a" => "3gp",
+            _ => "mp4",
+        });
+    }
+    if head.starts_with(b"\x1a\x45\xdf\xa3") {
+        let webm = head.windows(4).any(|window| window == b"webm");
+        return Some(if webm { "webm" } else { "mkv" });
+    }
+    let fmt = FORMATS
+        .iter()
+        .find(|fmt| !fmt.head.is_empty() && head.starts_with(fmt.head))?;
+    Some(match fmt.ext {
+        "riff" => match head.get(8..12)? {
+            b"WEBP" => "webp",
+            b"AVI " => "avi",
+            b"WAVE" => "wav",
+            _ => return None,
+        },
+        "aiff" if head.get(8..12) == Some(b"AIFC".as_slice()) => "aifc",
+        "zip" => "zip",
+        other => formats::kind(other, head),
+    })
+}
+
+/// Whether `head`, the first bytes of a file, carries a signature of the file
+/// type `kind`. Unknown types and plain text never match.
+pub(crate) fn starts_like(kind: &str, head: &[u8]) -> bool {
+    fn family(kind: &str) -> &str {
+        match kind {
+            "docx" | "xlsx" | "pptx" | "docm" | "xlsm" | "pptm" | "odt" | "ods" | "odp"
+            | "epub" | "jar" | "apk" => "zip",
+            "opus" | "ogv" => "ogg",
+            "dll" => "exe",
+            "mov" | "3gp" | "m4a" => "mp4",
+            "webm" => "mkv",
+            "aifc" => "aiff",
+            "msi" | "msp" | "mst" | "ole" => "cfb",
+            other => other,
+        }
+    }
+    sniff_kind(head).is_some_and(|found| family(found) == family(kind))
 }
 
 fn candidate_kind(fmt: &Format, bytes: &[u8]) -> &'static str {
@@ -792,12 +968,17 @@ pub(crate) fn scan_reader_with_filter(
                     }
                     let remaining = (candidate_limit - candidate.len()).min(chunk.len());
                     let count = read_chunk(file, &mut chunk[..remaining], cancel)?;
-                    if count == 0 {
+                    // A PDF whose end was waiting on more data ends at the
+                    // source's end after its last `%%EOF`.
+                    let at_source_end = count == 0;
+                    if at_source_end && fmt.ext != "pdf" {
                         break;
                     }
                     let from = candidate.len().saturating_sub(fmt.tail.len());
                     candidate.extend_from_slice(&chunk[..count]);
-                    let boundary = if fmt.ext == "ogg" {
+                    let boundary = if at_source_end {
+                        pdf_end_at_source_end(&candidate)
+                    } else if fmt.ext == "ogg" {
                         ogg.push(&candidate, cancel)
                     } else if fmt.ext == "gz" {
                         gzip.push(&candidate, cancel)
@@ -861,6 +1042,7 @@ pub(crate) fn scan_reader_with_filter(
                         original_name: None,
                         resident_data: None,
                         ntfs: None,
+                        extents: None,
                     }));
                 }
             }
@@ -874,6 +1056,78 @@ pub(crate) fn scan_reader_with_filter(
         }
     }
     Ok(())
+}
+
+/// Reads a found file's bytes: resident data, one range, or its extents in order.
+pub struct FoundReader<'a, R> {
+    input: &'a mut R,
+    resident: Option<&'a [u8]>,
+    extents: Vec<(u64, u64)>,
+    /// Index of the current extent and bytes already read from it.
+    current: usize,
+    used: u64,
+    remaining: u64,
+}
+impl<'a, R: Read + Seek> FoundReader<'a, R> {
+    pub fn new(input: &'a mut R, found: &'a Found) -> io::Result<Self> {
+        let extents = match &found.extents {
+            Some(extents) => {
+                let stored = extents
+                    .iter()
+                    .try_fold(0u64, |sum, (_, length)| sum.checked_add(*length));
+                if stored.is_none_or(|stored| stored < found.size) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Candidate range is invalid",
+                    ));
+                }
+                extents.to_vec()
+            }
+            None => vec![(found.offset, found.size)],
+        };
+        Ok(Self {
+            input,
+            resident: found.resident_data.as_deref(),
+            extents,
+            current: 0,
+            used: 0,
+            remaining: found.size,
+        })
+    }
+}
+impl<R: Read + Seek> Read for FoundReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if let Some(resident) = &mut self.resident {
+            return resident.read(buffer);
+        }
+        while self.remaining > 0 {
+            let Some(&(start, length)) = self.extents.get(self.current) else {
+                return Ok(0);
+            };
+            if self.used >= length {
+                self.current = self.current.saturating_add(1);
+                self.used = 0;
+                continue;
+            }
+            let wanted = (length - self.used).min(self.remaining);
+            let count = buffer.len().min(to_usize(wanted));
+            let at = start
+                .checked_add(self.used)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid extent"))?;
+            self.input.seek(SeekFrom::Start(at))?;
+            let Some(buffer) = buffer.get_mut(..count) else {
+                return Ok(0);
+            };
+            let read = self.input.read(buffer)?;
+            if read == 0 {
+                return Ok(0);
+            }
+            self.used += read as u64;
+            self.remaining -= read as u64;
+            return Ok(read);
+        }
+        Ok(0)
+    }
 }
 
 /// Never overwrite an existing output; open the source only for reading.
@@ -925,6 +1179,7 @@ pub fn recover_reader(
 ) -> io::Result<()> {
     if (found.size == 0 && found.resident_data.is_none())
         || (found.size > LIMIT as u64
+            && found.extents.is_none()
             && !(found.kind == "zip" && found.size <= u32::MAX as u64 + 65557))
         || found
             .resident_data
@@ -937,9 +1192,7 @@ pub fn recover_reader(
             "Candidate range is invalid",
         ));
     }
-    if found.resident_data.is_none() {
-        input.seek(SeekFrom::Start(found.offset))?;
-    }
+
     // Keep incomplete or unvalidated data private. Publish without replacing an
     // existing entry, including a symlink, only after all checks succeed.
     let parent = destination
@@ -947,18 +1200,24 @@ pub fn recover_reader(
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let mut output = tempfile::NamedTempFile::new_in(parent)?;
-    let copied = if let Some(bytes) = &found.resident_data {
-        io::copy(&mut bytes.as_ref(), &mut output)?
-    } else {
-        io::copy(&mut input.take(found.size), &mut output)?
-    };
+    let copied = io::copy(&mut FoundReader::new(input, found)?, &mut output)?;
     if copied != found.size {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
             "Source changed or candidate is truncated",
         ));
     }
-    if found.kind == "zip" && found.size > LIMIT as u64 {
+    if found.extents.is_some()
+        && !matches!(
+            found.validation,
+            Validation::ImageDecoded | Validation::StructureChecked
+        )
+    {
+        // The filesystem record gave the exact pieces and length; the bytes
+        // are copied as stored, without second-guessing them by content.
+        // Carved files that cross free-space pieces also carry extents, but
+        // were checked by content when found, so they are checked again below.
+    } else if found.kind == "zip" && found.size > LIMIT as u64 {
         if zip::large_end(output.as_file_mut(), 0, &AtomicBool::new(false))? != Some(found.size) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -999,6 +1258,83 @@ pub fn recover_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn carved_files_across_pieces_are_checked_again_on_recovery() {
+        let png = include_bytes!("../tests/fixtures/real.png");
+        let split = png.len() / 2;
+        // The image in two pieces with a used gap between them.
+        let mut source = png[..split].to_vec();
+        source.extend_from_slice(&[0xAA; 512]);
+        source.extend_from_slice(&png[split..]);
+        let gap_end = (split + 512) as u64;
+        let found = Found {
+            offset: 0,
+            size: png.len() as u64,
+            kind: "png",
+            selected: true,
+            validation: Validation::ImageDecoded,
+            original_name: None,
+            resident_data: None,
+            ntfs: None,
+            extents: Some(vec![(0, split as u64), (gap_end, (png.len() - split) as u64)].into()),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        recover_reader(
+            &mut io::Cursor::new(source.clone()),
+            &dir.path().join("ok.png"),
+            &found,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(dir.path().join("ok.png")).unwrap(), png);
+        // The second piece was overwritten after the scan.
+        source[split + 512 + 8..].fill(0);
+        let changed = dir.path().join("changed.png");
+        assert!(recover_reader(&mut io::Cursor::new(source), &changed, &found).is_err());
+        assert!(!changed.exists());
+    }
+
+    #[test]
+    fn pdf_end_waits_for_the_next_token_and_accepts_pdf_whitespace() {
+        let eof = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".len();
+        let pdf = |after: &[u8]| {
+            let mut bytes = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".to_vec();
+            bytes.extend_from_slice(after);
+            bytes
+        };
+        // A revision with tab-separated header tokens follows.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\n2\t0\tobj"), eof, false),
+            PdfAfterEof::Continues
+        );
+        // The read stops right after %%EOF or inside the next token: wait.
+        for cut in [&b"\n"[..], b"\n2 0 o", b"\nxr", b"\nstartx", b"\n12"] {
+            assert_eq!(
+                pdf_after_eof(&pdf(cut), eof, false),
+                PdfAfterEof::Undecided,
+                "{cut:?}"
+            );
+        }
+        // At the source's end, the same bytes end the file.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\n2 0 o"), eof, true),
+            PdfAfterEof::Ends(eof + 1)
+        );
+        // Anything else after %%EOF ends the file.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\nGIF89a"), eof, false),
+            PdfAfterEof::Ends(eof + 1)
+        );
+        // Zero padding after the file, as in free space, ends it at once.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\n\0\0\0"), eof, false),
+            PdfAfterEof::Ends(eof + 1)
+        );
+        assert!(matches!(
+            pdf_end_at_source_end(&pdf(b"\n")),
+            CandidateEnd::Complete(end) if end == eof + 1
+        ));
+    }
+
     #[test]
     fn zip_classification_handles_maximum_comment_and_false_footer() {
         let mut bytes = include_bytes!("../tests/fixtures/package.docx").to_vec();
@@ -1055,6 +1391,34 @@ mod tests {
         assert_eq!(std::fs::read(&out).unwrap(), b"%PDF-1.7\nhello\n%%EOF");
         assert!(recover(&source, &out, &results[0]).is_err());
         assert_eq!(std::fs::read(&source).unwrap(), bytes);
+    }
+    #[test]
+    fn pdf_keeps_its_final_line_break_and_every_revision() {
+        let carve = |pdf: &[u8]| {
+            let mut bytes = pdf.to_vec();
+            bytes.extend_from_slice(&[0; 64]);
+            let mut results = vec![];
+            scan_reader(
+                &mut std::io::Cursor::new(&bytes),
+                &AtomicBool::new(false),
+                |e| {
+                    if let Event::Found(f) = e {
+                        results.push(f)
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(results.len(), 1);
+            let found = &results[0];
+            bytes[to_usize(found.offset)..to_usize(found.offset + found.size)].to_vec()
+        };
+        let simple = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\r\n";
+        assert_eq!(carve(simple), simple);
+        // Linearized and incrementally saved files continue after a %%EOF.
+        let revised = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n2 0 obj\n<<>>\nendobj\nxref\n0 1\ntrailer\n<<>>\n%%EOF\n";
+        assert_eq!(carve(revised), revised);
+        let updated = b"%PDF-1.4\n%%EOF\nxref\n0 1\ntrailer\n<<>>\nstartxref\n9\n%%EOF\n";
+        assert_eq!(carve(updated), updated);
     }
     #[test]
     fn all_supported_signatures() {

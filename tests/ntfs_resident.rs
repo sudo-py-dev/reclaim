@@ -1,19 +1,17 @@
-#![expect(
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "fixture helpers fail the test by panicking"
-)]
 use reclaim::{Event, Found, Validation, recover_reader, recover_unique, scan_reader};
 use std::{
     io::{self, Cursor, Read, Seek, SeekFrom},
     sync::atomic::AtomicBool,
 };
+#[cfg(test)]
 fn put16(bytes: &mut [u8], at: usize, n: u16) {
     bytes[at..at + 2].copy_from_slice(&n.to_le_bytes());
 }
+#[cfg(test)]
 fn put32(bytes: &mut [u8], at: usize, n: u32) {
     bytes[at..at + 4].copy_from_slice(&n.to_le_bytes());
 }
+#[cfg(test)]
 fn attribute(record: &mut [u8], at: &mut usize, kind: u32, value: &[u8]) -> usize {
     let start = *at;
     let length = (24 + value.len()).next_multiple_of(8);
@@ -25,6 +23,7 @@ fn attribute(record: &mut [u8], at: &mut usize, kind: u32, value: &[u8]) -> usiz
     *at += length;
     start
 }
+#[cfg(test)]
 fn record(name: &str, contents: &[u8], flags: u16, external: bool) -> Vec<u8> {
     let mut bytes = vec![0; 1024];
     bytes[..4].copy_from_slice(b"FILE");
@@ -59,6 +58,7 @@ fn record(name: &str, contents: &[u8], flags: u16, external: bool) -> Vec<u8> {
     }
     bytes
 }
+#[cfg(test)]
 fn scan(bytes: &[u8]) -> Vec<Found> {
     let mut found = vec![];
     scan_reader(&mut Cursor::new(bytes), &AtomicBool::new(false), |e| {
@@ -69,7 +69,9 @@ fn scan(bytes: &[u8]) -> Vec<Found> {
     .unwrap();
     found
 }
+#[cfg(test)]
 struct Unreadable;
+#[cfg(test)]
 impl Read for Unreadable {
     #[expect(
         clippy::panic_in_result_fn,
@@ -79,6 +81,7 @@ impl Read for Unreadable {
         panic!("Resident exports must not read the raw source");
     }
 }
+#[cfg(test)]
 impl Seek for Unreadable {
     #[expect(
         clippy::panic_in_result_fn,

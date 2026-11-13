@@ -1,3 +1,4 @@
+use super::directory;
 use super::*;
 use crate::bytes::to_usize;
 use std::collections::HashSet;
@@ -158,7 +159,186 @@ pub(super) fn classic(
             plan.add(first * sector + (cluster - 2) * cluster_size, cluster_size)?;
         }
     }
+    let heap = directory::Heap {
+        start: first * sector,
+        cluster_size,
+        last: clusters + 1,
+    };
+    let root_directory = if bits == 32 {
+        Root::Chain(root)
+    } else {
+        Root::Fixed((reserved + fats * fat_sectors) * sector, roots * 32)
+    };
+    let Some(table) = tables.first_mut() else {
+        return Ok(plan);
+    };
+    plan.files = super::files_or_none(
+        classic_files(
+            input,
+            table,
+            bits,
+            root_directory,
+            heap,
+            &plan,
+            total,
+            cancel,
+        ),
+        "FAT",
+        cancel,
+    )?;
     Ok(plan)
+}
+
+/// Where a FAT volume keeps its root directory.
+enum Root {
+    /// FAT12/16: a fixed region (byte offset, length) before the data heap.
+    Fixed(u64, u64),
+    /// FAT32: an ordinary cluster chain.
+    Chain(u64),
+}
+
+/// Follows a cluster chain from `start`, bounded and loop-safe. Returns the
+/// clusters in order, or `None` for a broken chain.
+fn chain(
+    input: &mut (impl Read + Seek),
+    table: &mut Table,
+    start: u64,
+    bits: u32,
+    heap: directory::Heap,
+    total: u64,
+    cancel: &AtomicBool,
+) -> io::Result<Option<Vec<u64>>> {
+    let end_of_chain = match bits {
+        12 => 0xff8,
+        16 => 0xfff8,
+        32 => 0x0fff_fff8,
+        _ => 0xffff_fff8,
+    };
+    let mut clusters = Vec::new();
+    let mut seen = HashSet::new();
+    let mut current = start;
+    loop {
+        if current < 2 || current > heap.last || !seen.insert(current) {
+            return Ok(None);
+        }
+        clusters.push(current);
+        if clusters.len() >= directory::MAX_CHAIN {
+            return Ok(None);
+        }
+        if clusters.len().is_multiple_of(4096) {
+            check(cancel)?;
+        }
+        let next = table.entry(input, current, bits, total, cancel)?;
+        if next >= end_of_chain {
+            return Ok(Some(clusters));
+        }
+        current = next;
+    }
+}
+
+/// Reads whole clusters of directory data within the walk budget.
+fn read_clusters(
+    input: &mut (impl Read + Seek),
+    clusters: &[u64],
+    heap: directory::Heap,
+    budget: &mut directory::Budget,
+    total: u64,
+    cancel: &AtomicBool,
+) -> io::Result<Option<Vec<u8>>> {
+    let Some(length) = (clusters.len() as u64).checked_mul(heap.cluster_size) else {
+        return Ok(None);
+    };
+    if !budget.take(length) || clusters.iter().any(|c| !budget.visited.insert(*c)) {
+        return Ok(None);
+    }
+    let mut data = Vec::new();
+    for (start, length) in heap.extents(clusters).unwrap_or_default() {
+        data.extend(read_at(input, start, to_usize(length), total, cancel)?);
+    }
+    Ok(Some(data))
+}
+
+/// The clusters a deleted file stored in one piece from `start` would use,
+/// if all of them are still unused.
+fn free_run(plan: &Plan, heap: directory::Heap, start: u64, size: u64) -> Option<Vec<u64>> {
+    let count = heap.cluster_count(size)?;
+    let end = start.checked_add(count)?;
+    if end.checked_sub(1)? > heap.last {
+        return None;
+    }
+    let clusters: Vec<u64> = (start..end).collect();
+    let extents = heap.extents(&clusters)?;
+    extents
+        .iter()
+        .all(|(at, length)| plan.is_unused(*at, *length))
+        .then_some(clusters)
+}
+
+/// Deleted files named in FAT12/16/32 directories, assumed stored in one
+/// piece: the FAT chain of a deleted file is cleared, so its order is lost.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "volume geometry passed once, read-only"
+)]
+fn classic_files(
+    input: &mut (impl Read + Seek),
+    table: &mut Table,
+    bits: u32,
+    root: Root,
+    heap: directory::Heap,
+    plan: &Plan,
+    total: u64,
+    cancel: &AtomicBool,
+) -> io::Result<Vec<crate::Found>> {
+    let mut budget = directory::Budget::new();
+    let mut files = Vec::new();
+    let mut pending: Vec<(Option<u64>, usize)> = vec![(None, 0)];
+    while let Some((start, depth)) = pending.pop() {
+        check(cancel)?;
+        let data = match (start.as_ref(), &root) {
+            (None, Root::Fixed(at, length)) => {
+                if !budget.take(*length) {
+                    break;
+                }
+                read_at(input, *at, to_usize(*length), total, cancel)?
+            }
+            (None, Root::Chain(cluster)) | (Some(cluster), _) => {
+                let cluster = *cluster;
+                let Some(clusters) = chain(input, table, cluster, bits, heap, total, cancel)?
+                else {
+                    continue;
+                };
+                match read_clusters(input, &clusters, heap, &mut budget, total, cancel)? {
+                    Some(data) => data,
+                    None => continue,
+                }
+            }
+        };
+        for entry in directory::fat_entries(&data, bits == 32) {
+            match entry {
+                directory::FatEntry::Directory(cluster) => {
+                    if depth < directory::MAX_DEPTH {
+                        pending.push((Some(cluster), depth + 1));
+                    }
+                }
+                directory::FatEntry::Deleted(name, size, cluster) => {
+                    let Some(clusters) = free_run(plan, heap, cluster, size) else {
+                        continue;
+                    };
+                    if let Some(found) = heap
+                        .extents(&clusters)
+                        .and_then(|extents| directory::found(name, size, extents))
+                    {
+                        files.push(found);
+                    }
+                    if files.len() >= directory::MAX_FILES {
+                        return Ok(files);
+                    }
+                }
+            }
+        }
+    }
+    Ok(files)
 }
 
 pub(super) fn exfat(
@@ -307,12 +487,100 @@ pub(super) fn exfat(
             return Err(invalid("exFAT metadata is incorrectly marked unused"));
         }
     }
-    from_bitmap(
+    let mut plan = from_bitmap(
         &bytes,
         clusters,
         heap * sector,
         cluster_size,
+        BitOrder::LeastSignificantFirst,
         "exFAT",
         cancel,
-    )
+    )?;
+    let heap = directory::Heap {
+        start: heap * sector,
+        cluster_size,
+        last: clusters + 1,
+    };
+    plan.files = super::files_or_none(
+        exfat_files(input, &mut table, root, heap, &plan, total, cancel),
+        "exFAT",
+        cancel,
+    )?;
+    Ok(plan)
+}
+
+/// Deleted files named in exFAT directories. Files flagged as stored in one
+/// piece come back exactly; others follow their FAT chain when it is intact
+/// and unused, and otherwise are assumed contiguous.
+fn exfat_files(
+    input: &mut (impl Read + Seek),
+    table: &mut Table,
+    root: u64,
+    heap: directory::Heap,
+    plan: &Plan,
+    total: u64,
+    cancel: &AtomicBool,
+) -> io::Result<Vec<crate::Found>> {
+    let mut budget = directory::Budget::new();
+    let mut files = Vec::new();
+    // (first cluster, length or None for a chained root, contiguous, depth)
+    let mut pending: Vec<(u64, Option<u64>, bool, usize)> = vec![(root, None, false, 0)];
+    while let Some((start, length, contiguous, depth)) = pending.pop() {
+        check(cancel)?;
+        let clusters = if contiguous {
+            let Some(count) = length.and_then(|length| heap.cluster_count(length)) else {
+                continue;
+            };
+            let Some(end) = start.checked_add(count) else {
+                continue;
+            };
+            if end.saturating_sub(1) > heap.last || count > directory::MAX_CHAIN as u64 {
+                continue;
+            }
+            (start..end).collect()
+        } else {
+            match chain(input, table, start, 64, heap, total, cancel)? {
+                Some(clusters) => clusters,
+                None => continue,
+            }
+        };
+        let Some(data) = read_clusters(input, &clusters, heap, &mut budget, total, cancel)? else {
+            continue;
+        };
+        for entry in directory::exfat_entries(&data) {
+            match entry {
+                directory::ExfatEntry::Directory(cluster, length, contiguous) => {
+                    if depth < directory::MAX_DEPTH {
+                        pending.push((cluster, Some(length), contiguous, depth + 1));
+                    }
+                }
+                directory::ExfatEntry::Deleted(name, size, cluster, contiguous) => {
+                    let mut clusters = None;
+                    if !contiguous
+                        && let Some(found) = chain(input, table, cluster, 64, heap, total, cancel)?
+                        && heap.cluster_count(size) == Some(found.len() as u64)
+                        && heap.extents(&found).is_some_and(|extents| {
+                            extents.iter().all(|(at, len)| plan.is_unused(*at, *len))
+                        })
+                    {
+                        clusters = Some(found);
+                    }
+                    let Some(clusters) = clusters.or_else(|| free_run(plan, heap, cluster, size))
+                    else {
+                        continue;
+                    };
+                    if let Some(found) = heap
+                        .extents(&clusters)
+                        .and_then(|extents| directory::found(name, size, extents))
+                    {
+                        files.push(found);
+                    }
+                    if files.len() >= directory::MAX_FILES {
+                        return Ok(files);
+                    }
+                }
+            }
+        }
+    }
+    Ok(files)
 }

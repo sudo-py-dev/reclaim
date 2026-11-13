@@ -21,9 +21,16 @@ pub struct Drive {
     pub mounted: bool,
     pub encrypted: bool,
     pub sector_size: usize,
+    /// A phone or camera connected for file transfer (MTP/PTP). It is listed
+    /// so the user can see why it cannot be scanned; it is never opened.
+    pub phone: bool,
 }
 
 impl Drive {
+    /// Whether this entry can be selected and scanned.
+    pub fn scannable(&self) -> bool {
+        !self.encrypted && !self.phone
+    }
     pub fn display_name(&self) -> String {
         if self.name_is_message {
             reclaim::i18n::t(&self.name)

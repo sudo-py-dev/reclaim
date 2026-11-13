@@ -27,10 +27,11 @@ A deleted file usually stays on the drive until something new is written on top 
 | Your situation | Can Reclaim help? |
 | --- | --- |
 | SD card, camera card or USB stick | **Usually yes.** These usually use FAT32 or exFAT, which Reclaim reads. |
-| External hard drive | **Yes**, if it's formatted as NTFS, FAT32 or exFAT. |
+| External hard drive | **Yes**, if it's formatted as NTFS, FAT32, exFAT, ext2, ext3, ext4 or HFS+ (Mac OS Extended). |
 | Windows computer's internal drive | **Yes** for hard drives. For SSDs, chances are low (see [SSDs](#why-are-ssds-different)). |
-| Your Mac's built-in drive | **Not yet.** Macs use APFS, which Reclaim can't read yet. Memory cards and USB drives used on a Mac are fine. |
-| Linux system drive | **Not yet.** It's usually ext4 or Btrfs, which Reclaim can't read yet. |
+| Your Mac's built-in drive | **Not yet** on current Macs, which use APFS. Older Macs and external drives formatted as **Mac OS Extended (HFS+)** work. Memory cards and USB drives used on a Mac are fine. |
+| Linux drive | **Yes** for ext2, ext3 and ext4. **Not yet** for Btrfs or XFS. On an SSD, chances are low (see [SSDs](#why-are-ssds-different)). |
+| Windows Server or Dev Drive using ReFS | **Not yet.** Reclaim recognizes ReFS but can't read it yet. |
 | Files that were overwritten | **No.** No software can bring back data that new files have replaced. |
 
 Reclaim is an **early preview**, and no recovery tool can promise every file will come back.
@@ -62,7 +63,7 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 ## How to recover your files
 
 1. **Choose the drive** where the files were. Connected drives appear on their own; click **Refresh** after plugging one in. If the drive is encrypted (BitLocker, FileVault, LUKS), unlock it first.
-2. **Click Start scanning.** Files appear while the scan runs. You can stop as soon as you see what you need.
+2. **Click Start scanning.** Files appear while the scan runs. You can recover them right away, without waiting for the scan to finish, or stop the scan as soon as you see what you need.
 3. **Look through the results.** Search by name or type, filter by category (photos, documents…), and click a file to see its details and a preview for pictures.
 4. **Tick the files you want and click Recover selected.** Pick a folder on a **different drive**. Then open the recovered files to check they are complete.
 
@@ -121,7 +122,7 @@ No. Everything stays on your computer. Reclaim only contacts GitHub to check for
 | **Windows: access denied** | Close Reclaim, right-click it and choose **Run as administrator**. |
 | **Mac: access denied** | Reading a whole drive needs an administrator password. Also check **System Settings → Privacy & Security** for a request to allow access to removable volumes or Full Disk Access. |
 | **Linux: access denied** | Accept the password prompt that appears when you open a drive. If no prompt appears, install your desktop's polkit authentication agent and UDisks2. |
-| **"Unused-space scanning needs a supported formatted volume"** | Choose the partition or volume (for example `sdb1`), not the whole disk (`sdb`). The drive must be NTFS, FAT or exFAT. |
+| **"Unused-space scanning needs a supported formatted volume"** | Choose the partition or volume (for example `sdb1`), not the whole disk (`sdb`). The drive must be NTFS, FAT, exFAT, ext2/3/4 or HFS+. ReFS, APFS, Btrfs and XFS can't be scanned yet. |
 | **Scan finished with unreadable areas, or the drive stopped responding** | Check the cable and try once more. If it happens again, the drive may be failing: recover the files already found and stop using it. |
 | **A recovered file won't open** | It may be incomplete or overwritten. Try other results of the same type. |
 | **Windows: Reclaim won't start** | An error message explains why. A log is saved at `%LOCALAPPDATA%\Reclaim\logs\reclaim.log`; attach it when you [report a problem](https://github.com/sudo-py-dev/reclaim/issues). |
@@ -144,7 +145,7 @@ cd reclaim
 cargo run --release --locked
 ```
 
-The [developer guide](docs/DEVELOPMENT.md) covers tests, drive permissions, architecture and detailed limits. See also the [format research](docs/FILE_FORMAT_RESEARCH.md), [translation notes](locales/README.md), [screenshot instructions](docs/screenshots/README.md), [code and UI audit](docs/CODE_UI_AUDIT.md) and the [website](website/README.md).
+The [developer guide](docs/DEVELOPMENT.md) covers building, drive permissions, architecture and detailed limits, and [TESTING.md](docs/TESTING.md) every test and its results. See also the [format research](docs/FILE_FORMAT_RESEARCH.md), [translation notes](locales/README.md) and the [website](website/README.md).
 
 <details>
 <summary>How scanning works</summary>

@@ -16,20 +16,22 @@
 //! Suppressions that no longer match a finding are reported too, so they cannot
 //! outlive the code they excused.
 
-#![expect(
-    clippy::expect_used,
-    clippy::panic,
-    clippy::string_slice,
-    reason = "a test harness reports by panicking, and the rules slice ASCII-delimited text"
-)]
+#![expect(clippy::string_slice, reason = "the rules slice ASCII-delimited text")]
 
+// Test-only code, so Clippy treats the harness helpers as tests on every
+// toolchain: they report findings by panicking.
+#[cfg(test)]
 mod rules;
+#[cfg(test)]
 mod supply_chain;
+#[cfg(test)]
 mod translations;
+#[cfg(test)]
 mod workspace;
 
 use workspace::{Workspace, report};
 
+#[cfg(test)]
 fn workspace() -> &'static Workspace {
     use std::sync::OnceLock;
     static WORKSPACE: OnceLock<Workspace> = OnceLock::new();

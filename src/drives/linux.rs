@@ -18,13 +18,80 @@ pub fn discover() -> Result<Vec<Drive>, String> {
     if Path::new("/.flatpak-info").exists() {
         return Ok(Vec::new());
     }
-    discover_at(
+    let mut drives = discover_at(
         Path::new("/sys/class/block"),
         Path::new("/dev"),
         Path::new("/proc/self/mountinfo"),
         Path::new("/run/udev/data"),
     )
-    .map_err(|error| format!("Could not list drives: {error}. You can still open a disk image."))
+    .map_err(|error| format!("Could not list drives: {error}. You can still open a disk image."))?;
+    drives.extend(phones_at(Path::new("/sys/bus/usb/devices")));
+    Ok(drives)
+}
+
+/// Longest device-supplied name shown for a phone.
+const MAX_PHONE_NAME: usize = 64;
+/// Most USB entries examined, so a strange sysfs cannot stall discovery.
+const MAX_USB_ENTRIES: usize = 512;
+
+/// Phones and cameras that offer only file transfer (MTP or PTP). They have
+/// no block device, so without this they would silently be missing from the
+/// list. USB storage never uses the still-image interface class (6).
+fn phones_at(usb: &Path) -> Vec<Drive> {
+    let Ok(entries) = fs::read_dir(usb) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .take(MAX_USB_ENTRIES)
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    let mut phones = Vec::new();
+    for device in names.iter().filter(|name| !name.contains(':')) {
+        let interface_prefix = format!("{device}:");
+        let transfers_files = names
+            .iter()
+            .filter(|name| name.starts_with(&interface_prefix))
+            .any(|interface| {
+                let at = usb.join(interface);
+                read(at.join("bInterfaceClass")) == "06"
+                    || read(at.join("interface")).eq_ignore_ascii_case("MTP")
+            });
+        if !transfers_files {
+            continue;
+        }
+        let at = usb.join(device);
+        let name = [read(at.join("manufacturer")), read(at.join("product"))]
+            .iter()
+            .filter(|part| !part.is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
+        // Device strings come from the device itself: keep them printable and short.
+        let name: String = name
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(MAX_PHONE_NAME)
+            .collect();
+        phones.push(Drive {
+            path: at,
+            name_is_message: name.is_empty(),
+            name: if name.is_empty() {
+                "Phone or camera".into()
+            } else {
+                name
+            },
+            size: 0,
+            kind: "Phone or camera".into(),
+            location: "File transfer only".into(),
+            mounted: false,
+            encrypted: false,
+            sector_size: 512,
+            phone: true,
+        });
+    }
+    phones
 }
 
 /// Kernel and udev text files are small; the cap keeps a misbehaving
@@ -268,6 +335,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             mounted: in_use,
             encrypted,
             sector_size,
+            phone: false,
         });
     }
     // Prefer named volumes over their parent disk. The volume retains its
@@ -392,6 +460,44 @@ mod tests {
                 &self.0.path().join("udev"),
             )
         }
+    }
+
+    #[test]
+    fn phones_and_cameras_are_listed_but_storage_and_other_devices_are_not() {
+        let root = tempfile::tempdir().unwrap();
+        let write = |path: &str, text: &str| {
+            let path = root.path().join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        // An Android phone (MTP over the still-image class).
+        write("1-2/manufacturer", "Unihertz\n");
+        write("1-2/product", "F21 Pro\n");
+        write("1-2:1.0/bInterfaceClass", "06\n");
+        write("1-2:1.0/interface", "MTP\n");
+        // A phone exposing MTP on a vendor class, with a hostile name.
+        write(
+            "1-5/product",
+            "Phone\u{1b}[2J with a very long name that keeps going and going and going past the limit",
+        );
+        write("1-5:1.0/bInterfaceClass", "ff\n");
+        write("1-5:1.0/interface", "mtp\n");
+        // A USB stick (mass storage) and a Wi-Fi adapter.
+        write("1-3/product", "USB Flash Disk\n");
+        write("1-3:1.0/bInterfaceClass", "08\n");
+        write("1-4/product", "Wireless_Device\n");
+        write("1-4:1.0/bInterfaceClass", "e0\n");
+        let phones = phones_at(root.path());
+        assert_eq!(phones.len(), 2);
+        assert_eq!(phones[0].name, "Unihertz F21 Pro");
+        assert!(
+            phones
+                .iter()
+                .all(|p| p.phone && !p.scannable() && p.size == 0)
+        );
+        assert!(!phones[1].name.contains('\u{1b}'));
+        assert!(phones[1].name.chars().count() <= MAX_PHONE_NAME);
+        assert!(phones_at(&root.path().join("missing")).is_empty());
     }
 
     #[test]

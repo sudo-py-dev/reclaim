@@ -5,7 +5,7 @@
 [index]
 "src/allocation/fat.rs" = 19
 "src/allocation/ntfs.rs" = 17
-"src/allocation.rs" = 6
+"src/allocation.rs" = 2
 "src/detection.rs" = 19
 "src/drives/linux.rs" = 0
 "src/drives/macos.rs" = 0

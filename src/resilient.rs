@@ -23,6 +23,10 @@ struct Reader<'a, R> {
     input: &'a mut R,
     damage: Rc<RefCell<Damage>>,
     cancel: &'a AtomicBool,
+    /// End of the physically contiguous area holding an offset. A retry, and
+    /// so a damage mark, never crosses it: in joined free space the next area
+    /// is elsewhere on the disk and may be healthy.
+    area_end: &'a dyn Fn(u64) -> u64,
 }
 impl<R: Read + Seek> Read for Reader<'_, R> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
@@ -62,7 +66,10 @@ impl<R: Read + Seek> Read for Reader<'_, R> {
             Err(error) if is_media_error(&error) => {
                 self.input.seek(SeekFrom::Start(at))?;
                 // Retry one bounded block. Preserve healthy data surrounding the fault.
-                let count = bytes.len().min(to_usize(4096u64.saturating_sub(at % 4096)));
+                let count = bytes
+                    .len()
+                    .min(to_usize(4096u64.saturating_sub(at % 4096)))
+                    .min(to_usize((self.area_end)(at).saturating_sub(at)).max(1));
                 let Some(block) = bytes.get_mut(..count) else {
                     return Err(io::Error::from(io::ErrorKind::InvalidInput));
                 };
@@ -115,12 +122,14 @@ pub(crate) fn scan(
     cancel: &AtomicBool,
     mut event: impl FnMut(Event),
     buffer_size: usize,
+    area_end: &dyn Fn(u64) -> u64,
 ) -> io::Result<()> {
     let damage = Rc::new(RefCell::new(Damage::default()));
     let mut reader = Reader {
         input,
         damage: damage.clone(),
         cancel,
+        area_end,
     };
     let result = crate::scan_reader_with_filter(
         &mut reader,
@@ -204,6 +213,7 @@ mod tests {
                     _ => {}
                 },
                 32768,
+                &|_| u64::MAX,
             )
             .unwrap();
             assert_eq!(found, vec![0, 12288, 28672], "alignment {alignment}");
@@ -214,9 +224,17 @@ mod tests {
     fn permission_errors_remain_fatal_and_cancellation_does_not_probe() {
         let mut source = device();
         source.error = if cfg!(windows) { 5 } else { 13 };
-        assert!(scan(&mut source, &AtomicBool::new(false), |_| {}, 32768).is_err());
+        assert!(
+            scan(&mut source, &AtomicBool::new(false), |_| {}, 32768, &|_| {
+                u64::MAX
+            })
+            .is_err()
+        );
         let mut source = device();
-        scan(&mut source, &AtomicBool::new(true), |_| {}, 32768).unwrap();
+        scan(&mut source, &AtomicBool::new(true), |_| {}, 32768, &|_| {
+            u64::MAX
+        })
+        .unwrap();
         assert_eq!(source.reads, 0);
     }
     #[test]
@@ -228,6 +246,7 @@ mod tests {
             input: &mut input,
             damage,
             cancel: &cancel,
+            area_end: &|_| u64::MAX,
         };
         reader.seek(SeekFrom::Start(8192)).unwrap();
         assert_eq!(reader.read(&mut [0; 4096]).unwrap(), 4096);
@@ -289,6 +308,7 @@ mod overlap_tests {
                 }
             },
             16384,
+            &|_| u64::MAX,
         )
         .unwrap();
         assert_eq!(found, vec![(12288, "pdf")]);

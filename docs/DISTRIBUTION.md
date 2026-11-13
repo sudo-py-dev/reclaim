@@ -86,6 +86,28 @@ Build committed source without copying local credentials, caches or disk images:
 packaging/snap/build.sh
 ```
 
+If a local LXD build cannot obtain network access, use Canonical's remote builders
+from a full Git checkout of the committed public source (shallow clones are not
+supported). Authorize Snapcraft in Launchpad when prompted. Remote builds publish
+the source snapshot to Launchpad. Keep build logs private:
+
+```sh
+umask 077
+snapcraft remote-build --build-for=amd64 --launchpad-accept-public-upload
+```
+
+A remote build downloads the snap into the current directory. Move it where the
+upload steps below expect it, replacing any older local build:
+
+```sh
+mkdir -p dist
+mv -f reclaim_*_amd64.snap dist/
+```
+
+The recipe installs Ubuntu's Rustup package and invokes Rust 1.99.0 explicitly.
+Toolchain files are installed only in the build environment; they are not shipped
+in the application snap.
+
 The result is `dist/reclaim_<version>_amd64.snap`. Upload and request release with:
 
 ```sh
