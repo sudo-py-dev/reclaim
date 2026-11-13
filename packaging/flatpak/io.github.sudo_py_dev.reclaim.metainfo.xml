@@ -25,6 +25,9 @@
   </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.4" date="2026-11-13">
+      <description><p>Unused-space scanning on ext2/3/4 and HFS+ volumes, a cleaner colour palette, links to the source code, issues, releases and license in Settings, and more natural Hebrew wording.</p></description>
+    </release>
     <release version="0.2.3" date="2026-11-12">
       <description><p>Read-only file recovery with multilingual desktop controls and image previews.</p></description>
     </release>

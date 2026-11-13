@@ -40,7 +40,7 @@ export interface Release {
 }
 
 /** Used when the API is unreachable at build time (rate limit, offline build). */
-const FALLBACK_VERSION = '0.2.3';
+const FALLBACK_VERSION = '0.2.4';
 
 const debName = (version: string) => `reclaim_${version}_amd64.deb`;
 
