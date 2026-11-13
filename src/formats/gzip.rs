@@ -78,7 +78,7 @@ impl Gzip {
                     &mut output,
                     flate2::FlushDecompress::None,
                 )
-                .map_err(|_| CandidateEnd::Invalid)?;
+                .map_err(CandidateEnd::malformed)?;
             // flate2's totals only grow; a decrease would be a decoder bug.
             let consumed = to_usize(decoder.total_in().saturating_sub(before_in));
             let produced = to_usize(decoder.total_out().saturating_sub(before_out));

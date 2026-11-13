@@ -8,6 +8,8 @@ description = "Read-only disk image carving and file recovery"
 [dependencies]
 slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2", "accessibility"] }
 log = "=0.4.34"
+# One error type for app-level failures (updater, installer, processes); parsers keep io::Result.
+anyhow = { version = "=1.0.104", default-features = false, features = ["std"] }
 rfd = "=0.17.2"
 serde_json = "=1.0.151"
 image = { version = "=0.25.10", default-features = false, features = ["ico", "png", "bmp", "jpeg", "gif", "webp"] }
@@ -54,8 +56,35 @@ version = "=3.27.0"
 # Compiler-enforced half of the project audit (tests/audit checks these stay on).
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+# Peak tier: compiler lints that catch dead, unclear or misused code.
+unused_must_use = "deny"
+unused_qualifications = "deny"
+unused_lifetimes = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+let_underscore_drop = "deny"
+elided_lifetimes_in_paths = "deny"
+meta_variable_misuse = "deny"
+non_ascii_idents = "deny"
+redundant_lifetimes = "deny"
+unit_bindings = "deny"
+missing_debug_implementations = "deny"
 
 [lints.clippy]
+# Peak tier: whole Clippy groups. A lint here is a likely bug, not taste.
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+# Pedantic lints that are taste, not bugs: opted out on purpose.
+must_use_candidate = "allow"
+too_many_lines = "allow"
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+struct_excessive_bools = "allow"
+similar_names = "allow"
 # Panics on malformed input are a denial of service (CWE-248).
 unwrap_used = "deny"
 expect_used = "deny"
@@ -86,6 +115,53 @@ fallible_impl_from = "deny"
 get_unwrap = "deny"
 exit = "deny"
 let_underscore_must_use = "deny"
+# Peak tier, bug-catching picks from nursery and restriction.
+wildcard_enum_match_arm = "deny"
+match_wildcard_for_single_variants = "deny"
+map_err_ignore = "deny"
+let_underscore_untyped = "deny"
+significant_drop_in_scrutinee = "deny"
+significant_drop_tightening = "deny"
+collection_is_never_read = "deny"
+read_zero_byte_vec = "deny"
+literal_string_with_formatting_args = "deny"
+debug_assert_with_mut_call = "deny"
+path_buf_push_overwrite = "deny"
+suspicious_operation_groupings = "deny"
+iter_over_hash_type = "deny"
+mixed_read_write_in_expression = "deny"
+lossy_float_literal = "deny"
+float_cmp_const = "deny"
+rc_mutex = "deny"
+mutex_atomic = "deny"
+mutex_integer = "deny"
+clone_on_ref_ptr = "deny"
+try_err = "deny"
+verbose_file_reads = "deny"
+filetype_is_file = "deny"
+fn_to_numeric_cast_any = "deny"
+same_name_method = "deny"
+rest_pat_in_fully_bound_structs = "deny"
+assertions_on_result_states = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unnecessary_safety_comment = "deny"
+unnecessary_safety_doc = "deny"
+infinite_loop = "deny"
+error_impl_error = "deny"
+string_lit_chars_any = "deny"
+suspicious_xor_used_as_pow = "deny"
+redundant_clone = "deny"
+needless_collect = "deny"
+or_fun_call = "deny"
+useless_let_if_seq = "deny"
+equatable_if_let = "deny"
+branches_sharing_code = "deny"
+set_contains_or_insert = "deny"
+while_float = "deny"
+unused_peekable = "deny"
+non_send_fields_in_send_ty = "deny"
+trait_duplication_in_bounds = "deny"
+type_repetition_in_bounds = "deny"
 
 [profile.release]
 opt-level = "z"

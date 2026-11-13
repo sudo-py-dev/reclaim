@@ -1,6 +1,18 @@
 //! IOKit/Disk Arbitration discovery; no diskutil or plist conversion process.
 use super::{Destination, Drive};
-use core_foundation_sys::{base::*, dictionary::*, number::*, string::*, url::*};
+use core_foundation_sys::{
+    base::{CFAllocatorRef, CFGetTypeID, CFRelease, CFTypeID, CFTypeRef},
+    dictionary::{CFDictionaryGetValue, CFDictionaryRef, CFMutableDictionaryRef},
+    number::{
+        CFBooleanGetTypeID, CFBooleanGetValue, CFNumberGetTypeID, CFNumberGetValue,
+        kCFNumberSInt64Type,
+    },
+    string::{
+        CFStringCreateWithCString, CFStringGetCString, CFStringGetLength,
+        CFStringGetMaximumSizeForEncoding, CFStringGetTypeID, CFStringRef, kCFStringEncodingUTF8,
+    },
+    url::{CFURLCopyFileSystemPath, CFURLGetTypeID, kCFURLPOSIXPathStyle},
+};
 use std::{
     collections::{HashMap, HashSet},
     ffi::{CStr, CString},
@@ -62,7 +74,7 @@ impl Drop for Cf {
         }
     }
 }
-/// A CFString for a registry or dictionary key; null if the key contains NUL.
+/// A `CFString` for a registry or dictionary key; null if the key contains NUL.
 fn cf_string(text: &str) -> Cf {
     let Ok(value) = CString::new(text) else {
         return Cf(ptr::null());
@@ -73,16 +85,26 @@ fn cf_string(text: &str) -> Cf {
             .cast(),
     )
 }
-fn string(value: CFTypeRef) -> Option<String> {
+/// Whether `value` is a non-null CF object of the type `type_id` names.
+fn is_type(value: CFTypeRef, type_id: unsafe extern "C" fn() -> CFTypeID) -> bool {
+    if value.is_null() {
+        return false;
+    }
+    // SAFETY: the CF `*GetTypeID` functions take no arguments and return a constant.
+    let expected = unsafe { type_id() };
     // SAFETY: value is a non-null CF object borrowed for the duration of the call.
-    if value.is_null() || unsafe { CFGetTypeID(value) != CFStringGetTypeID() } {
+    let actual = unsafe { CFGetTypeID(value) };
+    actual == expected
+}
+fn string(value: CFTypeRef) -> Option<String> {
+    if !is_type(value, CFStringGetTypeID) {
         return None;
     }
     let value = value.cast();
     // SAFETY: value was checked above to be a CFString.
-    let length = unsafe {
-        CFStringGetMaximumSizeForEncoding(CFStringGetLength(value), kCFStringEncodingUTF8)
-    };
+    let characters = unsafe { CFStringGetLength(value) };
+    // SAFETY: a plain size calculation on a character count; no pointers.
+    let length = unsafe { CFStringGetMaximumSizeForEncoding(characters, kCFStringEncodingUTF8) };
     if !(0..=1024 * 1024).contains(&length) {
         return None;
     }
@@ -109,24 +131,18 @@ fn string(value: CFTypeRef) -> Option<String> {
     )
 }
 fn boolean(value: CFTypeRef) -> bool {
-    !value.is_null()
-        // SAFETY: the type ID is checked before value is read as a CFBoolean.
-        && unsafe { CFGetTypeID(value) == CFBooleanGetTypeID() && CFBooleanGetValue(value.cast()) }
+    is_type(value, CFBooleanGetTypeID)
+        // SAFETY: value was checked to be a CFBoolean just before it is read.
+        && unsafe { CFBooleanGetValue(value.cast()) }
 }
 fn number(value: CFTypeRef) -> Option<u64> {
-    // SAFETY: value is a non-null CF object borrowed for the duration of the call.
-    if value.is_null() || unsafe { CFGetTypeID(value) != CFNumberGetTypeID() } {
+    if !is_type(value, CFNumberGetTypeID) {
         return None;
     }
     let mut number = 0i64;
     // SAFETY: value is a CFNumber (checked above) and number is a valid i64 out-pointer.
-    let ok = unsafe {
-        CFNumberGetValue(
-            value.cast(),
-            kCFNumberSInt64Type,
-            (&mut number as *mut i64).cast(),
-        )
-    };
+    let ok =
+        unsafe { CFNumberGetValue(value.cast(), kCFNumberSInt64Type, (&raw mut number).cast()) };
     if ok { u64::try_from(number).ok() } else { None }
 }
 fn property(entry: u32, key: &str) -> Cf {
@@ -159,7 +175,7 @@ fn valid_id(id: &str) -> bool {
 fn registry_id(object: u32) -> Option<u64> {
     let mut id = 0;
     // SAFETY: object is a live registry entry and id a valid out-pointer.
-    (unsafe { IORegistryEntryGetRegistryEntryID(object, &mut id) } == 0).then_some(id)
+    (unsafe { IORegistryEntryGetRegistryEntryID(object, &raw mut id) } == 0).then_some(id)
 }
 fn ancestors(object: u32) -> Vec<u64> {
     let mut ids = Vec::new();
@@ -168,7 +184,7 @@ fn ancestors(object: u32) -> Vec<u64> {
     for _ in 0..128 {
         let mut parent = 0;
         // SAFETY: current is a live entry, the plane name is a static C string, parent is an out-pointer.
-        if unsafe { IORegistryEntryGetParentEntry(current, c"IOService".as_ptr(), &mut parent) }
+        if unsafe { IORegistryEntryGetParentEntry(current, c"IOService".as_ptr(), &raw mut parent) }
             != 0
         {
             break;
@@ -200,7 +216,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
                 entries.as_mut_ptr(),
                 // At most 65,536 entries of a few KiB, far below i32::MAX; a
                 // larger buffer would be reported as smaller, which is safe.
-                i32::try_from(std::mem::size_of_val(entries.as_slice())).unwrap_or(i32::MAX),
+                i32::try_from(size_of_val(entries.as_slice())).unwrap_or(i32::MAX),
                 libc::MNT_NOWAIT,
             )
         };
@@ -243,7 +259,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
     let mut iterator = 0;
     // IOKit consumes the matching dictionary even on failure.
     // SAFETY: matching is a fresh dictionary that IOKit consumes; iterator is an out-pointer.
-    if unsafe { IOServiceGetMatchingServices(0, matching, &mut iterator) } != 0 {
+    if unsafe { IOServiceGetMatchingServices(0, matching, &raw mut iterator) } != 0 {
         return Err("macOS could not inspect drives. Open a raw disk image instead.".into());
     }
     let iterator = Object(iterator);
@@ -306,8 +322,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
                 .map(|(_, point)| point.clone());
         }
         let url = field(dictionary, "DAVolumePath");
-        // SAFETY: url is a non-null CF object borrowed from a live dictionary.
-        if mount.is_none() && !url.is_null() && unsafe { CFGetTypeID(url) == CFURLGetTypeID() } {
+        if mount.is_none() && is_type(url, CFURLGetTypeID) {
             let value =
                 // SAFETY: url was checked to be a CFURL; the copied path is owned by Cf.
                 Cf(unsafe { CFURLCopyFileSystemPath(url.cast(), kCFURLPOSIXPathStyle) }.cast());
@@ -384,7 +399,7 @@ pub fn destination(source: &std::path::Path, folder: &std::path::Path) -> Destin
     // SAFETY: statfs is plain old data, for which all zero bytes is a valid value.
     let mut mount: libc::statfs = unsafe { std::mem::zeroed() };
     // SAFETY: folder is NUL-terminated and mount is a writable statfs.
-    if unsafe { libc::statfs(folder.as_ptr(), &mut mount) } != 0 {
+    if unsafe { libc::statfs(folder.as_ptr(), &raw mut mount) } != 0 {
         return Destination::Unknown;
     }
     // SAFETY: the kernel fills f_mntfromname with a NUL-terminated name.

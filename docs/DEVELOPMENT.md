@@ -90,6 +90,14 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
+Clippy runs every lint group (including `pedantic`) at `deny`, plus selected
+lints that catch likely bugs: unhandled enum variants, discarded error causes,
+lock guards held across a `match`, and output that depends on hash order. An
+intended exception is a scoped `#[expect(lint, reason = "...")]`. `#[allow]` is
+denied, and the audit fails if a required lint is removed from `Cargo.toml`.
+Also run Clippy with `--target x86_64-pc-windows-gnu`, because the Windows-only
+code is not checked on Linux.
+
 `cargo test` includes the project audit and the headless UI renders.
 [TESTING.md](TESTING.md) lists every suite, the audit rules, the layout checks,
 fuzzing, the opt-in hardware tests, CI and the real USB drive results.

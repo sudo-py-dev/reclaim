@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn monitor_reports_plug_unplug_and_manual_refresh_without_unchanged_updates() {
         let state = Arc::new(Mutex::new(Ok(vec![drive("one")])));
-        let worker_state = state.clone();
+        let worker_state = Arc::clone(&state);
         let monitor = watch_with(Duration::from_millis(10), move || {
             worker_state.lock().unwrap().clone()
         })
@@ -110,12 +110,10 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
-            monitor
-                .updates
-                .recv_timeout(Duration::from_millis(40))
-                .is_err()
-        );
+        monitor
+            .updates
+            .recv_timeout(Duration::from_millis(40))
+            .unwrap_err();
         *state.lock().unwrap() = Ok(vec![drive("one"), drive("two")]);
         assert_eq!(
             monitor
@@ -147,20 +145,16 @@ mod tests {
             1
         );
         *state.lock().unwrap() = Err("temporary discovery error".into());
-        assert!(
-            monitor
-                .updates
-                .recv_timeout(Duration::from_secs(1))
-                .unwrap()
-                .is_err()
-        );
+        monitor
+            .updates
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap_err();
         *state.lock().unwrap() = Ok(vec![drive("two")]);
-        assert!(
-            monitor
-                .updates
-                .recv_timeout(Duration::from_secs(1))
-                .unwrap()
-                .is_ok()
-        );
+        monitor
+            .updates
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
     }
 }

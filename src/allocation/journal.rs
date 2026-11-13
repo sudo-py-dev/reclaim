@@ -301,7 +301,7 @@ fn directory_names(block: &[u8], names: &mut HashMap<u64, String>) {
             && let Some(name) = entry
                 .get(8..length.saturating_add(8))
                 .and_then(|raw| std::str::from_utf8(raw).ok())
-                .and_then(|name| directory::clean_name(name.to_owned()))
+                .and_then(directory::clean_name)
         {
             names.insert(inode, name);
         }

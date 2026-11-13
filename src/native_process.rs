@@ -4,6 +4,7 @@
     not(test),
     deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
 )]
+use anyhow::bail;
 use std::path::Path;
 
 #[cfg(windows)]
@@ -16,7 +17,7 @@ pub fn is_administrator() -> bool {
 /// Relaunch only this executable via Windows UAC, without forwarding arguments
 /// or starting a scan. Cancellation leaves the current window running.
 #[cfg(windows)]
-pub fn restart_elevated() -> Result<bool, String> {
+pub fn restart_elevated() -> anyhow::Result<bool> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::{
         Foundation::ERROR_CANCELLED,
@@ -24,7 +25,7 @@ pub fn restart_elevated() -> Result<bool, String> {
             SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
         },
     };
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    let executable = std::env::current_exe()?;
     let file: Vec<u16> = executable
         .as_os_str()
         .encode_wide()
@@ -34,20 +35,19 @@ pub fn restart_elevated() -> Result<bool, String> {
     // audit-allow(SEC-UNINIT): Windows documents zero initialization of unused fields.
     // SAFETY: SHELLEXECUTEINFOW is plain data; unused pointers/handles may be null.
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
-    info.cbSize =
-        u32::try_from(std::mem::size_of::<SHELLEXECUTEINFOW>()).map_err(|e| e.to_string())?;
+    info.cbSize = u32::try_from(size_of::<SHELLEXECUTEINFOW>())?;
     info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
     info.lpVerb = verb.as_ptr();
     info.lpFile = file.as_ptr();
     info.nShow = 1;
     // SAFETY: both UTF-16 strings are terminated and live through this synchronous
     // call. The target is our own executable; no shell commands or arguments.
-    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+    if unsafe { ShellExecuteExW(&raw mut info) } == 0 {
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == i32::try_from(ERROR_CANCELLED).ok() {
             return Ok(false);
         }
-        return Err(error.to_string());
+        return Err(error.into());
     }
     if info.hProcess.is_null() {
         return Ok(false);
@@ -65,7 +65,7 @@ pub struct Child(windows_sys::Win32::Foundation::HANDLE);
 pub struct Child;
 
 #[cfg(target_os = "linux")]
-pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
+pub fn spawn(program: &Path, arguments: &[String]) -> anyhow::Result<Child> {
     let environment = std::env::vars_os()
         .map(|(key, value)| {
             let mut item = key;
@@ -84,12 +84,12 @@ pub fn spawn_with_environment(
     program: &Path,
     arguments: &[String],
     environment: Vec<std::ffi::OsString>,
-) -> Result<Child, String> {
+) -> anyhow::Result<Child> {
     use std::{ffi::CString, os::unix::ffi::OsStrExt};
-    let program = CString::new(program.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    let program = CString::new(program.as_os_str().as_bytes())?;
     let mut args = vec![program.clone()];
     for arg in arguments {
-        args.push(CString::new(arg.as_bytes()).map_err(|e| e.to_string())?);
+        args.push(CString::new(arg.as_bytes())?);
     }
     let argv: Vec<_> = args
         .iter()
@@ -98,7 +98,7 @@ pub fn spawn_with_environment(
         .collect();
     let environment: Vec<_> = environment
         .into_iter()
-        .map(|item| CString::new(item.as_bytes()).map_err(|e| e.to_string()))
+        .map(|item| CString::new(item.as_bytes()))
         .collect::<Result<_, _>>()?;
     let envp: Vec<_> = environment
         .iter()
@@ -110,7 +110,7 @@ pub fn spawn_with_environment(
     // remain live through posix_spawn. No inherited custom file actions.
     let result = unsafe {
         libc::posix_spawn(
-            &mut pid,
+            &raw mut pid,
             program.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
@@ -119,23 +119,26 @@ pub fn spawn_with_environment(
         )
     };
     if result != 0 {
-        return Err(std::io::Error::from_raw_os_error(result).to_string());
+        return Err(std::io::Error::from_raw_os_error(result).into());
     }
     Ok(Child(pid))
 }
 
 #[cfg(windows)]
-pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
+pub fn spawn(program: &Path, arguments: &[String]) -> anyhow::Result<Child> {
+    use anyhow::Context;
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::System::Threading::*;
+    use windows_sys::Win32::System::Threading::{
+        CREATE_NO_WINDOW, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
     let application: Vec<_> = program.as_os_str().encode_wide().chain(Some(0)).collect();
     let program_text = program
         .to_str()
-        .ok_or_else(|| reclaim::i18n::diagnostic("Update path is not valid Unicode"))?;
+        .with_context(|| reclaim::i18n::diagnostic("Update path is not valid Unicode"))?;
     let mut parts = vec![quote_argument(program_text)];
     for arg in arguments {
         if arg.contains('\0') {
-            return Err(reclaim::i18n::diagnostic("Invalid update argument"));
+            bail!(reclaim::i18n::diagnostic("Invalid update argument"));
         }
         parts.push(quote_argument(arg));
     }
@@ -147,7 +150,7 @@ pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
         clippy::cast_possible_truncation,
         reason = "STARTUPINFOW is about 100 bytes; Win32 requires its exact size in cb"
     )]
-    let size = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let size = size_of::<STARTUPINFOW>() as u32;
     startup.cb = size;
     // audit-allow(SEC-UNINIT): an output structure that CreateProcessW fills in.
     // SAFETY: PROCESS_INFORMATION is plain old data; CreateProcessW overwrites it.
@@ -164,12 +167,12 @@ pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
             CREATE_NO_WINDOW,
             std::ptr::null(),
             std::ptr::null(),
-            &startup,
-            &mut process,
+            &raw const startup,
+            &raw mut process,
         )
     };
     if ok == 0 {
-        return Err(std::io::Error::last_os_error().to_string());
+        return Err(std::io::Error::last_os_error().into());
     }
     // SAFETY: CreateProcessW returned this thread handle and nothing else owns it.
     unsafe {
@@ -179,8 +182,8 @@ pub fn spawn(program: &Path, arguments: &[String]) -> Result<Child, String> {
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-pub fn spawn(_program: &Path, _arguments: &[String]) -> Result<Child, String> {
-    Err("Automatic restart is unavailable on this platform".into())
+pub fn spawn(_program: &Path, _arguments: &[String]) -> anyhow::Result<Child> {
+    bail!("Automatic restart is unavailable on this platform")
 }
 
 #[cfg(target_os = "linux")]
@@ -197,26 +200,26 @@ impl Drop for Child {
 impl Child {
     /// Waits for the child to exit and returns its exit code.
     #[cfg(any(test, target_os = "linux"))]
-    pub fn wait(self) -> Result<u32, String> {
+    pub fn wait(self) -> anyhow::Result<u32> {
         #[cfg(target_os = "linux")]
         {
             let mut status = 0;
             loop {
                 // SAFETY: self owns a child PID returned by posix_spawn.
-                if unsafe { libc::waitpid(self.0, &mut status, 0) } >= 0 {
+                if unsafe { libc::waitpid(self.0, &raw mut status, 0) } >= 0 {
                     break;
                 }
                 let error = std::io::Error::last_os_error();
                 if error.kind() != std::io::ErrorKind::Interrupted {
-                    return Err(error.to_string());
+                    return Err(error.into());
                 }
             }
             if libc::WIFEXITED(status) {
                 // WEXITSTATUS is the low 8 bits of the status, so it is never negative.
                 return Ok(libc::WEXITSTATUS(status).cast_unsigned());
             }
-            Err(reclaim::i18n::diagnostic(
-                "Update process terminated unexpectedly",
+            bail!(reclaim::i18n::diagnostic(
+                "Update process terminated unexpectedly"
             ))
         }
         #[cfg(windows)]
@@ -224,18 +227,18 @@ impl Child {
             use windows_sys::Win32::System::Threading::*;
             // SAFETY: self.0 is the live process handle this Child owns.
             if unsafe { WaitForSingleObject(self.0, INFINITE) } != 0 {
-                return Err(std::io::Error::last_os_error().to_string());
+                return Err(std::io::Error::last_os_error().into());
             }
             let mut code = 0;
             // SAFETY: self.0 is the live process handle and code a valid out-pointer.
-            if unsafe { GetExitCodeProcess(self.0, &mut code) } == 0 {
-                return Err(std::io::Error::last_os_error().to_string());
+            if unsafe { GetExitCodeProcess(self.0, &raw mut code) } == 0 {
+                return Err(std::io::Error::last_os_error().into());
             }
             Ok(code)
         }
         #[cfg(not(any(target_os = "linux", windows)))]
-        Err(reclaim::i18n::diagnostic(
-            "Native process waiting is unavailable",
+        bail!(reclaim::i18n::diagnostic(
+            "Native process waiting is unavailable"
         ))
     }
 }

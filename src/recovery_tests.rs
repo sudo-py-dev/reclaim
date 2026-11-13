@@ -384,7 +384,7 @@ fn scanned_source(app: &mut Reclaim) -> (tempfile::TempPath, Arc<std::fs::File>)
     let (path, source) = source_file();
     let handle = Arc::new(source);
     app.scanned_source = Some("test-volume".into());
-    app.source_handle = Some(handle.clone());
+    app.source_handle = Some(Arc::clone(&handle));
     app.source_size = Some(4100);
     app.results = vec![Found {
         offset: 4096,
@@ -424,7 +424,7 @@ fn recovery_while_scanning_keeps_the_scan_running_and_its_cursor_in_place() {
     let (scan, rx) = mpsc::sync_channel(4);
     app.receiver = Some(rx);
     app.status = "Scanning for recoverable files…".into();
-    let scan_cancel = app.cancel.clone();
+    let scan_cancel = Arc::clone(&app.cancel);
     (&*handle).seek(SeekFrom::Start(1234)).unwrap();
     let directory = tempfile::tempdir().unwrap();
     app.export(directory.path().to_owned());
@@ -499,9 +499,9 @@ fn stop_recovery_interrupts_a_large_file_and_leaves_nothing_behind() {
     let mut input = StoppableReader {
         inner: StopsDuringFirstRead {
             data: std::io::Cursor::new(vec![b'x'; size]),
-            stop: stop.clone(),
+            stop: Arc::clone(&stop),
         },
-        stop: stop.clone(),
+        stop: Arc::clone(&stop),
     };
     let file = Found {
         offset: 0,
@@ -515,11 +515,11 @@ fn stop_recovery_interrupts_a_large_file_and_leaves_nothing_behind() {
         extents: None,
     };
     let directory = tempfile::tempdir().unwrap();
-    assert!(reclaim::recover_unique(&mut input, directory.path(), &file, 1).is_err());
+    reclaim::recover_unique(&mut input, directory.path(), &file, 1).unwrap_err();
     assert!(stop.load(Ordering::Relaxed));
     // Neither the file nor its private temporary file is left in the folder.
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
     // The wrapper only refuses reads; seeking is unaffected.
     assert_eq!(input.seek(std::io::SeekFrom::Start(0)).unwrap(), 0);
-    assert!(input.read(&mut [0; 4]).is_err());
+    input.read(&mut [0; 4]).unwrap_err();
 }

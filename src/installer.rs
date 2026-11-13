@@ -3,24 +3,26 @@
     not(test),
     deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
 )]
+#[cfg(unix)]
+use anyhow::Context;
+use anyhow::{anyhow, bail};
 /// Hand a verified local package to the operating system without a shell or
 /// command helper. Installation remains visible and controlled by the user.
-pub fn open_installer(path: &std::path::Path) -> Result<(), String> {
+pub fn open_installer(path: &std::path::Path) -> anyhow::Result<()> {
     // ShellExecute expects a shell path, rather than Windows canonicalize's
     // verbatim \?\ path prefix. Other platforms can resolve symlinks normally.
     let path = if cfg!(windows) {
         std::path::absolute(path)
     } else {
         path.canonicalize()
-    }
-    .map_err(|e| e.to_string())?;
+    }?;
     #[cfg(target_os = "linux")]
     {
         portal_open(Some(&path), None)?;
     }
     #[cfg(windows)]
     shell_open(path.as_os_str()).map_err(|code| {
-        format!(
+        anyhow!(
             "Could not open installer (Windows error {code}). Open the downloaded file from Explorer."
         )
     })?;
@@ -40,9 +42,11 @@ pub fn open_installer(path: &std::path::Path) -> Result<(), String> {
             )
         };
         launch(url)
-            .ok_or_else(|| reclaim::i18n::diagnostic("Could not create installer file URL"))?
+            .with_context(|| reclaim::i18n::diagnostic("Could not create installer file URL"))?
             .map_err(|status| {
-                reclaim::i18n::diagnostic(&format!("Could not open installer: {status}"))
+                anyhow!(reclaim::i18n::diagnostic(&format!(
+                    "Could not open installer: {status}"
+                )))
             })?;
     }
     Ok(())
@@ -80,35 +84,29 @@ fn launch(url: core_foundation_sys::url::CFURLRef) -> Option<Result<(), i32>> {
     if url.is_null() {
         return None;
     }
-    // SAFETY: `url` is a live, owned CFURL; it is released exactly once here.
-    let status = unsafe {
-        let status = LSOpenCFURLRef(url, std::ptr::null_mut());
-        CFRelease(url.cast());
-        status
-    };
+    // SAFETY: `url` is a live, owned CFURL; a null out-pointer is allowed.
+    let status = unsafe { LSOpenCFURLRef(url, std::ptr::null_mut()) };
+    // SAFETY: `url` is owned here and released exactly once, after its last use.
+    unsafe { CFRelease(url.cast()) };
     Some(if status == 0 { Ok(()) } else { Err(status) })
 }
 
 #[cfg(target_os = "linux")]
-fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> Result<(), String> {
+fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> anyhow::Result<()> {
     use std::{collections::HashMap, os::fd::AsFd};
-    let file = path
-        .map(std::fs::File::open)
-        .transpose()
-        .map_err(|e| e.to_string())?;
-    let connection = zbus::blocking::Connection::session().map_err(|e| e.to_string())?;
+    let file = path.map(std::fs::File::open).transpose()?;
+    let connection = zbus::blocking::Connection::session()?;
     let portal = zbus::blocking::Proxy::new(
         &connection,
         "org.freedesktop.portal.Desktop",
         "/org/freedesktop/portal/desktop",
         "org.freedesktop.portal.OpenURI",
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     // Subscribe before requesting the launch, and keep the connection alive
     // until the portal responds (disconnecting early can cancel its dialog).
     let sender = connection
         .unique_name()
-        .ok_or_else(|| reclaim::i18n::diagnostic("Desktop session has no connection name"))?
+        .with_context(|| reclaim::i18n::diagnostic("Desktop session has no connection name"))?
         .as_str()
         .trim_start_matches(':')
         .replace('.', "_");
@@ -116,8 +114,7 @@ fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> Result<(), 
         "reclaim_{}_{}",
         std::process::id(),
         std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
+            .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos()
     );
     let request_path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
@@ -126,11 +123,8 @@ fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> Result<(), 
         "org.freedesktop.portal.Desktop",
         request_path.as_str(),
         "org.freedesktop.portal.Request",
-    )
-    .map_err(|e| e.to_string())?;
-    let mut responses = request
-        .receive_signal("Response")
-        .map_err(|e| e.to_string())?;
+    )?;
+    let mut responses = request.receive_signal("Response")?;
     let mut options = HashMap::<&str, zbus::zvariant::Value<'_>>::new();
     options.insert("handle_token", zbus::zvariant::Value::from(token.as_str()));
     let handle: zbus::zvariant::OwnedObjectPath = (if let Some(file) = &file {
@@ -142,35 +136,39 @@ fn portal_open(path: Option<&std::path::Path>, uri: Option<&str>) -> Result<(), 
         portal.call("OpenURI", &("", uri.unwrap_or_default(), options))
     })
     .map_err(|e| {
-        format!(
+        anyhow!(
             "Could not open link or file: {e}. Try opening it from your browser or file manager."
         )
     })?;
     if handle.as_str() != request_path {
-        return Err("The desktop returned an unexpected open request. Try opening the link or file manually.".into());
+        bail!(
+            "The desktop returned an unexpected open request. Try opening the link or file manually."
+        );
     }
-    let response = responses.next().ok_or_else(|| {
+    let response = responses.next().with_context(|| {
         reclaim::i18n::diagnostic("The desktop link or file request ended without a response")
     })?;
     let (status, _): (u32, HashMap<String, zbus::zvariant::OwnedValue>) =
-        response.body().deserialize().map_err(|e| e.to_string())?;
+        response.body().deserialize()?;
     if status != 0 {
-        return Err("The desktop did not open the link or file. Try opening it manually.".into());
+        bail!("The desktop did not open the link or file. Try opening it manually.");
     }
 
     Ok(())
 }
 
 /// Open an HTTPS link using the desktop's native URL handler, without helpers.
-pub fn open_url(url: &str) -> Result<(), String> {
+pub fn open_url(url: &str) -> anyhow::Result<()> {
     if !url.starts_with("https://") || url.contains(['\0', '\r', '\n']) {
-        return Err(reclaim::i18n::diagnostic("Only HTTPS links can be opened."));
+        bail!(reclaim::i18n::diagnostic("Only HTTPS links can be opened."));
     }
     #[cfg(target_os = "linux")]
     portal_open(None, Some(url))?;
     #[cfg(windows)]
     shell_open(std::ffi::OsStr::new(url)).map_err(|code| {
-        reclaim::i18n::diagnostic(&format!("Could not open browser (Windows error {code})."))
+        anyhow!(reclaim::i18n::diagnostic(&format!(
+            "Could not open browser (Windows error {code})."
+        )))
     })?;
     #[cfg(target_os = "macos")]
     {
@@ -185,13 +183,15 @@ pub fn open_url(url: &str) -> Result<(), String> {
             )
         };
         launch(native_url)
-            .ok_or_else(|| reclaim::i18n::diagnostic("Could not create browser URL."))?
+            .with_context(|| reclaim::i18n::diagnostic("Could not create browser URL."))?
             .map_err(|status| {
-                reclaim::i18n::diagnostic(&format!("Could not open browser: {status}"))
+                anyhow!(reclaim::i18n::diagnostic(&format!(
+                    "Could not open browser: {status}"
+                )))
             })?;
     }
     #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
-    return Err(reclaim::i18n::diagnostic(
+    bail!(reclaim::i18n::diagnostic(
         "Opening browser links is unavailable on this platform.",
     ));
     Ok(())

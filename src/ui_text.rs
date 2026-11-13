@@ -104,8 +104,8 @@ ui_strings! {
 }
 
 pub fn apply(ui: &AppWindow) {
-    ui.global::<Locale>().set_rtl(i18n::is_rtl());
-    let strings = ui.global::<Strings>();
+    ui.global::<Locale<'_>>().set_rtl(i18n::is_rtl());
+    let strings = ui.global::<Strings<'_>>();
     apply_labels(&strings);
     strings.set_recovery_step_list(slint::ModelRc::new(slint::VecModel::from(recovery_steps())));
     strings.set_window_title(

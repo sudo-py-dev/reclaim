@@ -11,6 +11,7 @@
     deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
 )]
 use crate::i18n::diagnostic;
+use anyhow::{Context, anyhow, bail};
 use minisign_verify::{PublicKey, Signature};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -71,21 +72,30 @@ fn release_url(tag: &str, asset: &str) -> String {
     format!("https://github.com/{REPO}/releases/download/{tag}/{asset}")
 }
 
-fn check_error(error: ureq::Error) -> String {
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a map_err adapter: it takes the error the way map_err hands it over"
+)]
+fn check_error(error: ureq::Error) -> anyhow::Error {
     log::warn!("Could not check GitHub releases: {error}");
-    match error {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "ureq::Error is non_exhaustive, so a catch-all arm is required"
+    )]
+    let message = match error {
         ureq::Error::Io(_)
         | ureq::Error::HostNotFound
         | ureq::Error::ConnectionFailed
         | ureq::Error::Timeout(_) => {
             "Could not connect to the update server. Check your internet connection and try again."
         }
+        // ureq::Error is non_exhaustive: every other failure, including future ones.
         _ => "Could not check for updates. Please try again later.",
-    }
-    .into()
+    };
+    anyhow!(message)
 }
 
-pub fn check() -> Result<Option<Release>, String> {
+pub fn check() -> anyhow::Result<Option<Release>> {
     let mut response = get(&format!(
         "https://api.github.com/repos/{REPO}/releases/latest"
     ))
@@ -98,15 +108,14 @@ pub fn check() -> Result<Option<Release>, String> {
         .limit(2 * 1024 * 1024)
         .read_to_string()
         .map_err(check_error)?;
-    let json: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let json: Value = serde_json::from_str(&json)?;
     let version = semver::Version::parse(
         json.get("tag_name")
             .and_then(Value::as_str)
             .unwrap_or("")
             .trim_start_matches('v'),
-    )
-    .map_err(|e| e.to_string())?;
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    )?;
+    let executable = std::env::current_exe()?;
     let asset = installer_name(&executable, &version).unwrap_or_else(asset_name);
     let Some(mut release) = parse_release(&json, &asset)? else {
         return Ok(None);
@@ -141,22 +150,23 @@ pub fn deb_asset(version: &semver::Version) -> String {
 
 /// Decode `text` and check it was made by the release key with exactly
 /// `comment`. The file contents are verified separately, while streaming.
-fn checked_signature(text: &str, comment: &str) -> Result<(PublicKey, Signature), String> {
-    let key =
-        PublicKey::decode(TRUSTED_KEY).map_err(|_| diagnostic("Invalid built-in release key"))?;
-    let signature = Signature::decode(text).map_err(|_| UNSIGNED)?;
+fn checked_signature(text: &str, comment: &str) -> anyhow::Result<(PublicKey, Signature)> {
+    let key = PublicKey::decode(TRUSTED_KEY)
+        .ok()
+        .with_context(|| diagnostic("Invalid built-in release key"))?;
+    let signature = Signature::decode(text).ok().context(UNSIGNED)?;
     // Binds file name and version; the comment itself is covered by the signature.
     if signature.trusted_comment() != comment {
-        return Err(UNSIGNED.into());
+        bail!(UNSIGNED);
     }
     // Rejects other keys and legacy (non-prehashed) signatures before any download.
-    key.verify_stream(&signature).map_err(|_| UNSIGNED)?;
+    key.verify_stream(&signature).ok().context(UNSIGNED)?;
     Ok((key, signature))
 }
 
 /// Decode the signature and check it was made by the release key for exactly
 /// this file and version. The file contents are verified while downloading.
-fn signed_by_release_key(release: &Release) -> Result<(PublicKey, Signature), String> {
+fn signed_by_release_key(release: &Release) -> anyhow::Result<(PublicKey, Signature)> {
     checked_signature(&release.signature, &signed_comment(release))
 }
 
@@ -172,6 +182,7 @@ pub const INSTALL_DEB_FLAG: &str = "--install-deb-update";
 
 /// A verified package in a root-only folder, removed again when dropped.
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub struct ProtectedPackage {
     _dir: tempfile::TempDir,
     pub path: std::path::PathBuf,
@@ -189,27 +200,28 @@ pub struct ProtectedPackage {
 /// folder while being verified. Only versions newer than the installed one
 /// are accepted, so an older signed package cannot be used to downgrade.
 #[cfg(target_os = "linux")]
-pub fn protect_deb_update(args: &[std::ffi::OsString]) -> Result<ProtectedPackage, String> {
+pub fn protect_deb_update(args: &[std::ffi::OsString]) -> anyhow::Result<ProtectedPackage> {
     let [flag, version, package] = args else {
-        return Err(diagnostic("This command is used only by Reclaim's updater"));
+        bail!(diagnostic("This command is used only by Reclaim's updater"));
     };
     if flag != INSTALL_DEB_FLAG {
-        return Err(diagnostic("This command is used only by Reclaim's updater"));
+        bail!(diagnostic("This command is used only by Reclaim's updater"));
     }
     let current = current_version();
     let version = version
         .to_str()
         .and_then(|v| semver::Version::parse(v).ok())
         .filter(|v| v.pre.is_empty() && v.build.is_empty() && *v > current)
-        .ok_or_else(|| diagnostic("Not a newer Reclaim version"))?;
+        .with_context(|| diagnostic("Not a newer Reclaim version"))?;
     let package = std::path::Path::new(package);
     let mut text = String::new();
     regular_file(&signature_path(package))?
         .take(MAX_SIGNATURE + 1)
         .read_to_string(&mut text)
-        .map_err(|_| UNSIGNED)?;
+        .ok()
+        .context(UNSIGNED)?;
     if text.len() as u64 > MAX_SIGNATURE {
-        return Err(UNSIGNED.into());
+        bail!(UNSIGNED);
     }
     let asset = deb_asset(&version);
     let (key, signature) = checked_signature(&text, &trusted_comment(&asset, &version))?;
@@ -223,29 +235,29 @@ pub fn protect_deb_update(args: &[std::ffi::OsString]) -> Result<ProtectedPackag
 /// Opens `path` only if it is a regular file, so a planted FIFO or device
 /// cannot stall or feed the privileged step.
 #[cfg(target_os = "linux")]
-fn regular_file(path: &std::path::Path) -> Result<std::fs::File, String> {
+fn regular_file(path: &std::path::Path) -> anyhow::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     // Non-blocking, so opening a FIFO returns at once and is refused below.
     let file = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(path)
-        .map_err(|e| diagnostic(&format!("Could not open the update: {e}")))?;
+        .map_err(|e| anyhow!(diagnostic(&format!("Could not open the update: {e}"))))?;
     let is_file = file.metadata().is_ok_and(|m| m.is_file());
     is_file
         .then_some(file)
-        .ok_or_else(|| diagnostic("The staged update is not a regular file"))
+        .with_context(|| diagnostic("The staged update is not a regular file"))
 }
 
 /// A new folder inside `parent` that only its owner (root, when elevated) can use.
 #[cfg(target_os = "linux")]
-fn protected_dir(parent: &std::path::Path) -> Result<tempfile::TempDir, String> {
+fn protected_dir(parent: &std::path::Path) -> anyhow::Result<tempfile::TempDir> {
     use std::os::unix::fs::PermissionsExt;
     tempfile::Builder::new()
         .prefix("reclaim-update-")
         .permissions(std::fs::Permissions::from_mode(0o700))
         .tempdir_in(parent)
-        .map_err(|e| diagnostic(&format!("Could not prepare the update: {e}")))
+        .map_err(|e| anyhow!(diagnostic(&format!("Could not prepare the update: {e}"))))
 }
 
 /// Copies `source` into a new file at `protected`, verifying the signature
@@ -256,30 +268,33 @@ fn copy_verified_package(
     protected: &std::path::Path,
     key: &PublicKey,
     signature: &Signature,
-) -> Result<(), String> {
-    let mut dest = std::fs::File::create_new(protected).map_err(|e| e.to_string())?;
-    let mut verifier = key.verify_stream(signature).map_err(|_| UNSIGNED)?;
+) -> anyhow::Result<()> {
+    let mut dest = std::fs::File::create_new(protected)?;
+    let mut verifier = key.verify_stream(signature).ok().context(UNSIGNED)?;
     let mut reader = regular_file(source)?.take(MAX_BINARY + 1);
     let mut buffer = vec![0u8; 64 * 1024];
     let mut size = 0u64;
     loop {
-        let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        let count = reader.read(&mut buffer)?;
         if count == 0 {
             break;
         }
         // `Read` promises count <= buffer.len(); refuse a reader that breaks it.
-        let chunk = buffer.get(..count).ok_or("Update exceeds expected size")?;
+        let chunk = buffer
+            .get(..count)
+            .context("Update exceeds expected size")?;
         size = size.saturating_add(count as u64);
         if size > MAX_BINARY {
-            return Err("Update exceeds expected size".into());
+            bail!("Update exceeds expected size");
         }
         verifier.update(chunk);
-        dest.write_all(chunk).map_err(|e| e.to_string())?;
+        dest.write_all(chunk)?;
     }
     verifier
         .finalize()
-        .map_err(|_| "Update signature verification failed")?;
-    dest.sync_all().map_err(|e| e.to_string())
+        .ok()
+        .context("Update signature verification failed")?;
+    Ok(dest.sync_all()?)
 }
 
 /// This build's version, from Cargo's always-numeric version parts.
@@ -291,7 +306,7 @@ fn current_version() -> semver::Version {
         part(env!("CARGO_PKG_VERSION_PATCH")),
     )
 }
-fn parse_release(json: &Value, asset_name: &str) -> Result<Option<Release>, String> {
+fn parse_release(json: &Value, asset_name: &str) -> anyhow::Result<Option<Release>> {
     parse_release_after(json, asset_name, &current_version())
 }
 
@@ -299,23 +314,23 @@ fn parse_release_after(
     json: &Value,
     asset_name: &str,
     current: &semver::Version,
-) -> Result<Option<Release>, String> {
+) -> anyhow::Result<Option<Release>> {
     if json["draft"].as_bool() != Some(false) || json["prerelease"].as_bool() != Some(false) {
         return Ok(None);
     }
     let tag = json["tag_name"]
         .as_str()
-        .ok_or_else(|| diagnostic("Missing release version"))?;
-    let version = semver::Version::parse(tag.trim_start_matches('v')).map_err(|e| e.to_string())?;
+        .with_context(|| diagnostic("Missing release version"))?;
+    let version = semver::Version::parse(tag.trim_start_matches('v'))?;
     if !version.pre.is_empty() || version <= *current {
         return Ok(None);
     }
     let asset = json["assets"]
         .as_array()
-        .ok_or_else(|| diagnostic("Missing release assets"))?
+        .with_context(|| diagnostic("Missing release assets"))?
         .iter()
         .find(|a| a["name"].as_str() == Some(asset_name))
-        .ok_or("No update for this platform yet")?;
+        .context("No update for this platform yet")?;
     let signature_name = format!("{asset_name}.minisig");
     let signature_url = json["assets"]
         .as_array()
@@ -324,24 +339,24 @@ fn parse_release_after(
         .find(|a| a["name"].as_str() == Some(&signature_name))
         .and_then(|a| a["browser_download_url"].as_str())
         .filter(|url| *url == release_url(tag, &signature_name))
-        .ok_or("This update is not signed by the Reclaim release key")?
+        .context("This update is not signed by the Reclaim release key")?
         .to_owned();
     let url = asset["browser_download_url"]
         .as_str()
-        .ok_or_else(|| diagnostic("Missing download URL"))?;
+        .with_context(|| diagnostic("Missing download URL"))?;
     if url != release_url(tag, asset_name) {
-        return Err(diagnostic("Unexpected release download URL"));
+        bail!(diagnostic("Unexpected release download URL"));
     }
     let digest = asset["digest"]
         .as_str()
         .and_then(|s| s.strip_prefix("sha256:"))
         .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or_else(|| diagnostic("Release has no valid SHA-256 digest"))?
+        .with_context(|| diagnostic("Release has no valid SHA-256 digest"))?
         .to_ascii_lowercase();
     let size = asset["size"]
         .as_u64()
         .filter(|s| *s > 0 && *s <= MAX_BINARY)
-        .ok_or_else(|| diagnostic("Invalid update size"))?;
+        .with_context(|| diagnostic("Invalid update size"))?;
     let release = Release {
         version,
         asset: asset_name.into(),
@@ -362,6 +377,10 @@ pub fn installer_download(release: &Release) -> Option<String> {
     is_installer(&release.asset).then(|| release.url.clone())
 }
 
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "release asset names are exact; another case is not one of our assets"
+)]
 fn is_installer(name: &str) -> bool {
     name.ends_with("-setup.exe") || name.ends_with(".deb") || name.ends_with(".pkg")
 }
@@ -372,11 +391,11 @@ pub fn download_installer(
     release: &Release,
     destination: &std::path::Path,
     progress: impl Fn(u64, u64),
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     expect_installer(release)?;
     let mut response = get(&release.url)
         .call()
-        .map_err(|e| format!("Could not download update: {e}"))?;
+        .map_err(|e| anyhow!("Could not download update: {e}"))?;
     publish_download(
         response.body_mut().as_reader(),
         release,
@@ -390,22 +409,20 @@ fn publish_download(
     release: &Release,
     destination: &std::path::Path,
     progress: impl Fn(u64, u64),
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let parent = destination
         .parent()
-        .ok_or_else(|| diagnostic("Download destination has no parent folder"))?;
-    let mut pending = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        .with_context(|| diagnostic("Download destination has no parent folder"))?;
+    let mut pending = tempfile::NamedTempFile::new_in(parent)?;
     verify_download_progress(reader, &mut pending, release, progress)?;
-    pending.as_file().sync_all().map_err(|e| e.to_string())?;
-    pending
-        .persist(destination)
-        .map_err(|e| e.error.to_string())?;
+    pending.as_file().sync_all()?;
+    pending.persist(destination).map_err(|e| e.error)?;
     Ok(())
 }
 
-fn validate_url(release: &Release) -> Result<(), String> {
+fn validate_url(release: &Release) -> anyhow::Result<()> {
     if release.asset.is_empty() || release.asset.contains(['/', '\\', '?', '#', '%']) {
-        return Err(diagnostic("Unexpected release asset name"));
+        bail!(diagnostic("Unexpected release asset name"));
     }
     let version = release.version.to_string();
     if [format!("v{version}"), version]
@@ -414,15 +431,15 @@ fn validate_url(release: &Release) -> Result<(), String> {
     {
         Ok(())
     } else {
-        Err(diagnostic("Unexpected release download URL"))
+        bail!(diagnostic("Unexpected release download URL"))
     }
 }
 
 /// The release must be the package format this installation was installed with.
-fn expect_installer(release: &Release) -> Result<(), String> {
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+fn expect_installer(release: &Release) -> anyhow::Result<()> {
+    let executable = std::env::current_exe()?;
     if installer_name(&executable, &release.version).as_deref() != Some(&release.asset) {
-        return Err(diagnostic("Unexpected installer for this installation"));
+        bail!(diagnostic("Unexpected installer for this installation"));
     }
     validate_url(release)
 }
@@ -448,36 +465,36 @@ fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Op
     }
 }
 
-pub fn install(release: &Release) -> Result<(), String> {
+pub fn install(release: &Release) -> anyhow::Result<()> {
     install_with_progress(release, |_, _| {})
 }
 
-pub fn install_with_progress(release: &Release, progress: impl Fn(u64, u64)) -> Result<(), String> {
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+pub fn install_with_progress(release: &Release, progress: impl Fn(u64, u64)) -> anyhow::Result<()> {
+    let executable = std::env::current_exe()?;
     if installer_name(&executable, &release.version).is_some()
         || installer_download(release).is_some()
     {
-        return Err("This installation must be updated using the matching installer.".into());
+        bail!("This installation must be updated using the matching installer.");
     }
     if release.asset != asset_name() {
-        return Err(diagnostic("Unexpected executable update asset"));
+        bail!(diagnostic("Unexpected executable update asset"));
     }
     validate_url(release)?;
     if cfg!(windows) {
-        return Err("This installation must be updated using the matching installer.".into());
+        bail!("This installation must be updated using the matching installer.");
     }
     // Private temporary file, bounded streaming download, verify before replacing anything.
-    let mut file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
-    let mut response = get(&release.url).call().map_err(|e| e.to_string())?;
+    let mut file = tempfile::NamedTempFile::new()?;
+    let mut response = get(&release.url).call()?;
     verify_download_progress(
         response.body_mut().as_reader(),
         &mut file,
         release,
         progress,
     )?;
-    file.as_file().sync_all().map_err(|e| e.to_string())?;
+    file.as_file().sync_all()?;
     replace_executable(&executable, file.path()).map_err(|e| {
-        format!("Could not install update: {e}. Move Reclaim to a writable folder and retry.")
+        anyhow!("Could not install update: {e}. Move Reclaim to a writable folder and retry.")
     })
 }
 
@@ -500,10 +517,10 @@ fn replace_executable(
 }
 
 /// Recheck a staged package immediately before handing it to the native installer.
-pub fn verify_installer_file(release: &Release, path: &std::path::Path) -> Result<(), String> {
+pub fn verify_installer_file(release: &Release, path: &std::path::Path) -> anyhow::Result<()> {
     expect_installer(release)?;
     verify_download_progress(
-        std::fs::File::open(path).map_err(|e| e.to_string())?,
+        std::fs::File::open(path)?,
         std::io::sink(),
         release,
         |_, _| {},
@@ -515,7 +532,7 @@ fn verify_download(
     reader: impl Read,
     mut file: impl Write,
     release: &Release,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     verify_download_progress(reader, &mut file, release, |_, _| {})
 }
 
@@ -524,44 +541,45 @@ fn verify_download_progress(
     mut file: impl Write,
     release: &Release,
     progress: impl Fn(u64, u64),
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     // Release is public: enforce bounds here as well as when parsing the API.
     if release.size == 0
         || release.size > MAX_BINARY
         || release.digest.len() != 64
         || !release.digest.bytes().all(|b| b.is_ascii_hexdigit())
     {
-        return Err(diagnostic("Invalid update metadata"));
+        bail!(diagnostic("Invalid update metadata"));
     }
     let (key, signature) = signed_by_release_key(release)?;
-    let mut verifier = key
-        .verify_stream(&signature)
-        .map_err(|_| "This update is not signed by the Reclaim release key")?;
+    let mut verifier = key.verify_stream(&signature).ok().context(UNSIGNED)?;
     let mut reader = reader.take(release.size.saturating_add(1));
     let mut hash = Sha256::new();
     let mut size = 0u64;
     let mut buffer = vec![0u8; 64 * 1024];
     loop {
-        let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        let count = reader.read(&mut buffer)?;
         if count == 0 {
             break;
         }
-        let chunk = buffer.get(..count).ok_or("Update exceeds expected size")?;
+        let chunk = buffer
+            .get(..count)
+            .context("Update exceeds expected size")?;
         size = size.saturating_add(count as u64);
         if size > release.size {
-            return Err("Update exceeds expected size".into());
+            bail!("Update exceeds expected size");
         }
         hash.update(chunk);
         verifier.update(chunk);
         progress(size, release.size);
-        file.write_all(chunk).map_err(|e| e.to_string())?;
+        file.write_all(chunk)?;
     }
     if size != release.size || format!("{:x}", hash.finalize()) != release.digest {
-        return Err("Update checksum verification failed".into());
+        bail!("Update checksum verification failed");
     }
     verifier
         .finalize()
-        .map_err(|_| "Update signature verification failed".into())
+        .ok()
+        .context("Update signature verification failed")
 }
 
 #[cfg(test)]
@@ -643,13 +661,14 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
                 &version
             )
             .unwrap()
+            .to_ascii_lowercase()
             .ends_with(".pkg")
         );
     }
     #[test]
     fn download_rejects_corruption_truncation_and_oversize() {
         let r = signed_abc();
-        assert!(verify_download(&b"abc"[..], Vec::new(), &r).is_ok());
+        verify_download(&b"abc"[..], Vec::new(), &r).unwrap();
         for bad in [b"abd".as_slice(), b"ab".as_slice(), b"abcd".as_slice()] {
             assert!(verify_download(bad, Vec::new(), &r).is_err());
         }
@@ -674,7 +693,7 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
             let mut r = release();
             r["assets"][0]["browser_download_url"] =
                 format!("https://github.com/{REPO}/releases/download/v99.0.0/{suffix}").into();
-            assert!(parse_release(&r, "test").is_err());
+            parse_release(&r, "test").unwrap_err();
         }
     }
 
@@ -770,7 +789,7 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
     #[test]
     fn only_updates_signed_by_the_release_key_for_this_version_install() {
         let good = signed_abc();
-        assert!(verify_download(&b"abc"[..], Vec::new(), &good).is_ok());
+        verify_download(&b"abc"[..], Vec::new(), &good).unwrap();
         // Unsigned, garbage, or a valid signature for a different version/file.
         for signature in ["", "not a signature", SIGNED_ABC_AS_1_0_0] {
             let mut r = good.clone();
@@ -784,19 +803,19 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
         renamed.asset = "other".into();
         assert!(signed_by_release_key(&renamed).is_err());
         // Contents that match a forged digest but not the signature.
-        let mut forged = good.clone();
+        let mut forged = good;
         forged.digest = format!("{:x}", Sha256::digest(b"abd"));
         assert!(verify_download(&b"abd"[..], Vec::new(), &forged).is_err());
         // A release without a matching .minisig asset is not offered at all.
         let mut json = release();
         json["assets"].as_array_mut().unwrap().pop();
-        assert!(parse_release(&json, "test").is_err());
+        parse_release(&json, "test").unwrap_err();
         json["assets"]
             .as_array_mut()
             .unwrap()
             .push(serde_json::json!({"name": "test.minisig",
                 "browser_download_url": "https://evil.example/test.minisig"}));
-        assert!(parse_release(&json, "test").is_err());
+        parse_release(&json, "test").unwrap_err();
     }
 
     #[cfg(target_os = "linux")]
@@ -890,13 +909,13 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
             parse_release(&release(), "test").unwrap().unwrap().notes,
             "What's new"
         );
-        assert!(parse_release(&release(), "other").is_err());
+        parse_release(&release(), "other").unwrap_err();
         let mut r = release();
         r["assets"][0]["digest"] = Value::Null;
-        assert!(parse_release(&r, "test").is_err());
+        parse_release(&r, "test").unwrap_err();
         r = release();
         r["assets"][0]["browser_download_url"] = "https://evil.example/app".into();
-        assert!(parse_release(&r, "test").is_err());
+        parse_release(&r, "test").unwrap_err();
         r = release();
         r["prerelease"] = true.into();
         assert!(parse_release(&r, "test").unwrap().is_none());
@@ -905,7 +924,7 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
         assert!(parse_release(&r, "test").unwrap().is_none());
         r = release();
         r["assets"][0]["size"] = (MAX_BINARY + 1).into();
-        assert!(parse_release(&r, "test").is_err());
+        parse_release(&r, "test").unwrap_err();
     }
 }
 
@@ -924,14 +943,14 @@ mod connection_message_tests {
             ureq::Error::HostNotFound,
             ureq::Error::ConnectionFailed,
         ] {
-            assert_eq!(check_error(error), expected);
+            assert_eq!(check_error(error).to_string(), expected);
         }
     }
 
     #[test]
     fn server_errors_do_not_claim_the_user_is_offline() {
         assert_eq!(
-            check_error(ureq::Error::StatusCode(503)),
+            check_error(ureq::Error::StatusCode(503)).to_string(),
             "Could not check for updates. Please try again later."
         );
     }

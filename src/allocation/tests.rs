@@ -169,7 +169,7 @@ fn run(b: &[u8]) -> (Vec<crate::Found>, u64, u64) {
                 assert!(n <= free);
                 progress = n;
             }
-            _ => {}
+            crate::Event::Unreadable { .. } | crate::Event::Checking { .. } => {}
         },
     )
     .unwrap();
@@ -177,11 +177,6 @@ fn run(b: &[u8]) -> (Vec<crate::Found>, u64, u64) {
 }
 #[test]
 fn occupied_files_are_not_read_or_found_and_free_offsets_export_correctly() {
-    let (mut b, heap) = fat12();
-    let occupied = b"%PDF-1.7\noccupied\n%%EOF";
-    let free = b"%PDF-1.7\ndeleted\n%%EOF";
-    b[heap..heap + occupied.len()].copy_from_slice(occupied);
-    b[heap + 512..heap + 512 + free.len()].copy_from_slice(free);
     struct Audit {
         input: Cursor<Vec<u8>>,
         forbidden: (u64, u64),
@@ -206,6 +201,11 @@ fn occupied_files_are_not_read_or_found_and_free_offsets_export_correctly() {
             self.input.seek(from)
         }
     }
+    let (mut b, heap) = fat12();
+    let occupied = b"%PDF-1.7\noccupied\n%%EOF";
+    let free = b"%PDF-1.7\ndeleted\n%%EOF";
+    b[heap..heap + occupied.len()].copy_from_slice(occupied);
+    b[heap + 512..heap + 512 + free.len()].copy_from_slice(free);
     let mut input = Audit {
         input: Cursor::new(b.clone()),
         forbidden: (heap as u64, heap as u64 + 512),
@@ -213,7 +213,7 @@ fn occupied_files_are_not_read_or_found_and_free_offsets_export_correctly() {
     let mut files = Vec::new();
     scan(&mut input, b.len() as u64, &AtomicBool::new(false), |e| {
         if let crate::Event::Found(f) = e {
-            files.push(f)
+            files.push(f);
         }
     })
     .unwrap();
@@ -297,14 +297,12 @@ fn exfat_bitmap_is_authoritative_and_metadata_cannot_be_marked_free() {
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].offset, at as u64);
     b[65 * 512] &= !1;
-    assert!(
-        plan(
-            &mut Cursor::new(&b),
-            b.len() as u64,
-            &AtomicBool::new(false)
-        )
-        .is_err()
-    );
+    plan(
+        &mut Cursor::new(&b),
+        b.len() as u64,
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
 }
 #[test]
 fn unsupported_and_corrupt_maps_never_fall_back_to_full_disk_scanning() {
@@ -333,11 +331,10 @@ fn unsupported_and_corrupt_maps_never_fall_back_to_full_disk_scanning() {
     );
     assert_eq!(events, 0);
     let cancel = AtomicBool::new(true);
-    assert!(
-        scan(&mut Cursor::new(&b), b.len() as u64, &cancel, |_| events +=
-            1)
-        .is_ok()
-    );
+    scan(&mut Cursor::new(&b), b.len() as u64, &cancel, |_| {
+        events += 1;
+    })
+    .unwrap();
     assert_eq!(events, 0);
 }
 #[test]
@@ -399,11 +396,13 @@ fn media_faults_skip_free_data_but_never_fabricate_an_allocation_map() {
     scan(&mut fault, total, &cancel, |e| match e {
         crate::Event::Found(f) => found.push(f.offset),
         crate::Event::Unreadable { offset, bytes } => skipped.push((offset, bytes)),
-        _ => {}
+        crate::Event::UnusedSpace { .. }
+        | crate::Event::Progress(_)
+        | crate::Event::Checking { .. } => {}
     })
     .unwrap();
     assert_eq!(found, vec![good_start as u64]);
-    assert!(!skipped.is_empty());
+    assert_ne!(skipped, Vec::<(u64, u64)>::new());
     let mut fault = Fault {
         input: Cursor::new(bytes),
         bad: 512..1024,
@@ -524,7 +523,7 @@ fn hfs_plus_damaged_or_overflowing_maps_fail_closed() {
     assert_eq!(map(&b).unwrap_err().kind(), io::ErrorKind::Unsupported);
     let mut b = hfs_plus();
     b[1024 + 132..1024 + 136].copy_from_slice(&u32::MAX.to_be_bytes());
-    assert!(map(&b).is_err());
+    map(&b).unwrap_err();
 }
 #[test]
 fn refs_volumes_are_named_and_never_scanned() {

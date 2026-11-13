@@ -6,15 +6,16 @@
 )]
 use reclaim::updater::{self, Release};
 use std::{
+    fmt::Write as _,
     io::{Read, Write},
     path::PathBuf,
     sync::mpsc::{self, Receiver},
 };
 enum Message {
-    Checked(Result<Option<Release>, String>),
+    Checked(anyhow::Result<Option<Release>>),
     Progress(u64, u64),
     Phase(&'static str),
-    Finished(Result<Option<PathBuf>, String>),
+    Finished(anyhow::Result<Option<PathBuf>>),
 }
 #[derive(Default)]
 pub struct Updates {
@@ -94,12 +95,9 @@ impl Updates {
         }
     }
     pub fn title(&self) -> String {
-        self.release
-            .as_ref()
-            .map(|release| {
-                reclaim::i18n::message("Version {0} is available.", &[&release.version.to_string()])
-            })
-            .unwrap_or_default()
+        self.release.as_ref().map_or_default(|release| {
+            reclaim::i18n::message("Version {0} is available.", &[&release.version.to_string()])
+        })
     }
     pub fn busy(&self) -> bool {
         self.receiver.is_some()
@@ -203,14 +201,12 @@ impl Updates {
                             self.notice_visible = release
                                 .as_ref()
                                 .is_some_and(|r| self.dismissed.as_ref() != Some(&r.version));
-                            self.status = release
-                                .as_ref()
-                                .map(|r| format!("Version {} is available.", r.version))
-                                .unwrap_or_else(|| "You’re up to date.".into());
-                            self.notes = release
-                                .as_ref()
-                                .map(|r| format_notes(&r.notes))
-                                .unwrap_or_default();
+                            self.status = release.as_ref().map_or_else(
+                                || "You’re up to date.".into(),
+                                |r| format!("Version {} is available.", r.version),
+                            );
+                            self.notes =
+                                release.as_ref().map_or_default(|r| format_notes(&r.notes));
                             self.release = release;
                         }
                         Err(e) => {
@@ -223,7 +219,14 @@ impl Updates {
                         }
                     }
                 }
-                Message::Progress(done, total) => self.progress = done as f32 / total.max(1) as f32,
+                Message::Progress(done, total) => {
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "a progress bar fraction; lost low bits cannot show"
+                    )]
+                    let progress = done as f32 / total.max(1) as f32;
+                    self.progress = progress;
+                }
                 Message::Phase(phase) => self.status = phase.into(),
                 Message::Finished(result) => {
                     self.receiver = None;
@@ -309,7 +312,8 @@ fn format_notes(notes: &str) -> Vec<NoteBlock> {
                 kind = 2;
                 text.push_str(&"  ".repeat(lists.len().saturating_sub(1)));
                 if let Some(Some(number)) = lists.last_mut() {
-                    text.push_str(&format!("{number}. "));
+                    // Writing to a String cannot fail.
+                    write!(text, "{number}. ").ok();
                     *number = number.saturating_add(1);
                 } else {
                     text.push_str("• ");
@@ -336,7 +340,11 @@ fn format_notes(notes: &str) -> Vec<NoteBlock> {
                 flush(&mut blocks, &mut text, kind);
             }
             Event::TaskListMarker(checked) => text.push_str(if checked { "☑ " } else { "☐ " }),
-            _ => {}
+            Event::Start(_)
+            | Event::End(_)
+            | Event::InlineMath(_)
+            | Event::DisplayMath(_)
+            | Event::FootnoteReference(_) => {}
         }
     }
     flush(&mut blocks, &mut text, kind);
@@ -358,7 +366,7 @@ mod tests {
             signature: String::new(),
         }
     }
-    fn checked(updates: &mut Updates, result: Result<Option<Release>, String>) {
+    fn checked(updates: &mut Updates, result: anyhow::Result<Option<Release>>) {
         let (tx, rx) = mpsc::channel();
         updates.receiver = Some(rx);
         tx.send(Message::Checked(result)).unwrap();
@@ -394,8 +402,8 @@ mod tests {
         updates.receiver = Some(rx);
         assert!(updates.busy());
         assert!(!updates.installing());
-        checked(&mut updates, Err("offline".into()));
-        assert!(updates.status.is_empty());
+        checked(&mut updates, Err(anyhow::anyhow!("offline")));
+        assert_eq!(updates.status, "");
         assert!(!updates.notice_visible);
         updates.checked = true;
         updates.check_automatically();
@@ -404,8 +412,8 @@ mod tests {
             "a completed automatic check is not repeated"
         );
         updates.manual_check = true;
-        checked(&mut updates, Err("offline".into()));
-        assert!(!updates.status.is_empty());
+        checked(&mut updates, Err(anyhow::anyhow!("offline")));
+        assert_ne!(updates.status, "");
     }
     #[test]
     fn release_notes_render_markdown_with_bounds() {
@@ -424,7 +432,7 @@ mod tests {
                 (3, "let x = 1;")
             ]
         );
-        assert!(format_notes("No release notes.").is_empty());
+        assert_eq!(format_notes("No release notes."), Vec::<NoteBlock>::new());
         assert!(format_notes(&"א".repeat(10000))[0].text.chars().count() <= 6000);
         assert!(format_notes(&"line\n\n".repeat(100)).len() <= 40);
     }

@@ -40,7 +40,7 @@ const INCOMPAT_INLINE_DATA: u32 = 0x8000;
 const INCOMPAT_ENCRYPT: u32 = 0x10000;
 const INCOMPAT_CASEFOLD: u32 = 0x20000;
 /// Features that do not change where block bitmaps live or what a bit means.
-/// Compression, external journal devices and META_BG descriptor placement are
+/// Compression, external journal devices and `META_BG` descriptor placement are
 /// not in this list, so those volumes are rejected instead of misread.
 const INCOMPAT_KNOWN: u32 = INCOMPAT_FILETYPE
     | INCOMPAT_RECOVER

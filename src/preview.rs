@@ -3,6 +3,7 @@
     not(test),
     deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
 )]
+use anyhow::{Context, bail};
 use reclaim::Found;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -24,6 +25,17 @@ pub(crate) struct Input {
     position: u64,
 }
 impl Input {
+    #[cfg_attr(
+        not(windows),
+        expect(clippy::unnecessary_wraps, reason = "only the Windows reopen can fail")
+    )]
+    #[cfg_attr(
+        windows,
+        expect(
+            clippy::needless_pass_by_value,
+            reason = "kept elsewhere; on Windows it is reopened with its own cursor"
+        )
+    )]
     pub(crate) fn new(file: Arc<std::fs::File>) -> std::io::Result<Self> {
         #[cfg(windows)]
         let file = {
@@ -68,7 +80,7 @@ impl Input {
                     0,
                     std::ptr::null_mut(),
                     0,
-                    &mut returned,
+                    &raw mut returned,
                     std::ptr::null_mut(),
                 );
             }
@@ -105,8 +117,14 @@ impl Seek for Input {
                 i128::from(self.file.metadata()?.len()).saturating_add(i128::from(value))
             }
         };
-        self.position = u64::try_from(position)
-            .map_err(|_| std::io::Error::other("Invalid preview position"))?;
+        // The user sees this message translated; the conversion error adds nothing.
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "a catalog message replaces the detail"
+        )]
+        let position =
+            u64::try_from(position).map_err(|_| std::io::Error::other("Invalid preview position"));
+        self.position = position?;
         Ok(self.position)
     }
 }
@@ -115,40 +133,31 @@ pub fn load(
     found: &Found,
     handle: Option<Arc<std::fs::File>>,
     alignment: usize,
-) -> Result<image::RgbaImage, String> {
+) -> anyhow::Result<image::RgbaImage> {
     if found.size > 32 * 1024 * 1024 {
-        return Err(
-            "This image is too large to preview. Recover it to view the full image.".into(),
-        );
+        bail!("This image is too large to preview. Recover it to view the full image.");
     }
     let bytes = if let Some(bytes) = &found.resident_data {
         std::borrow::Cow::Borrowed(bytes.as_ref())
     } else {
-        let file = handle.ok_or("The source is no longer available.")?;
-        let mut input = reclaim::SourceReader::new(
-            Input::new(file).map_err(|e| e.to_string())?,
-            alignment,
-            None,
-        )
-        .map_err(|e| e.to_string())?;
+        let file = handle.context("The source is no longer available.")?;
+        let mut input = reclaim::SourceReader::new(Input::new(file)?, alignment, None)?;
         // audit-allow(DOS-ALLOC): previews are refused above 32 MiB at the top of this function.
-        let mut bytes = vec![0; usize::try_from(found.size).map_err(|e| e.to_string())?];
+        let mut bytes = vec![0; usize::try_from(found.size)?];
         reclaim::FoundReader::new(&mut input, found)
-            .and_then(|mut reader| reader.read_exact(&mut bytes))
-            .map_err(|e| e.to_string())?;
+            .and_then(|mut reader| reader.read_exact(&mut bytes))?;
         std::borrow::Cow::Owned(bytes)
     };
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(16384);
     limits.max_image_height = Some(16384);
     limits.max_alloc = Some(128 * 1024 * 1024);
     reader.limits(limits);
-    let image = reader.decode().map_err(|_| {
-        "This image could not be previewed. Its contents may be incomplete or damaged.".to_string()
-    })?;
+    let image = reader
+        .decode()
+        .ok()
+        .context("This image could not be previewed. Its contents may be incomplete or damaged.")?;
     let image = if image.width() > 512 || image.height() > 512 {
         image.thumbnail(512, 512)
     } else {
@@ -184,10 +193,15 @@ mod tests {
         image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
         let preview = load(&candidate(bytes.get_ref()), None, 1).unwrap();
         assert_eq!(preview.dimensions(), (2, 3));
-        assert!(load(&candidate(b"damaged"), None, 1).is_err());
+        load(&candidate(b"damaged"), None, 1).unwrap_err();
         let mut large = candidate(b"");
         large.size = 33 * 1024 * 1024;
-        assert!(load(&large, None, 1).unwrap_err().contains("too large"));
+        assert!(
+            load(&large, None, 1)
+                .unwrap_err()
+                .to_string()
+                .contains("too large")
+        );
     }
 
     #[test]
@@ -202,7 +216,7 @@ mod tests {
         let mut file = crate::drives::open_source(&path).unwrap();
         file.seek(SeekFrom::Start(7)).unwrap();
         let file = Arc::new(file);
-        let mut input = Input::new(file.clone()).unwrap();
+        let mut input = Input::new(Arc::clone(&file)).unwrap();
         input.seek(SeekFrom::Start(2)).unwrap();
         let mut bytes = [0; 3];
         input.read_exact(&mut bytes).unwrap();

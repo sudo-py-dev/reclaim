@@ -165,8 +165,8 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
         i18n::with_language(language, || {
             ui_text::apply(&ui);
             state.sync_ui(&ui);
-            assert_eq!(ui.global::<Locale>().get_rtl(), i18n::is_rtl());
-            assert_eq!(ui.global::<Strings>().get_sources(), i18n::t("Sources"));
+            assert_eq!(ui.global::<Locale<'_>>().get_rtl(), i18n::is_rtl());
+            assert_eq!(ui.global::<Strings<'_>>().get_sources(), i18n::t("Sources"));
             assert_eq!(ui.get_query(), "תמונות report العربية");
             assert_eq!(state.source, original_path);
             assert_eq!(
@@ -178,8 +178,9 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
                 original_names
             );
             for dark in [true, false] {
-                ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
-                assert_eq!(ui.global::<Palette>().get_dark(), dark);
+                ui.global::<Palette<'_>>()
+                    .set_theme(if dark { 2 } else { 1 });
+                assert_eq!(ui.global::<Palette<'_>>().get_dark(), dark);
                 for (width, height) in [(1160, 780), (900, 640)] {
                     if width == 900 && !matches!(code, "en" | "he" | "ar") {
                         continue;
@@ -223,7 +224,7 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
                         // The sidebar must physically switch edges, not just align its text.
                         let edge = if i18n::is_rtl() { width - 2 } else { 1 };
                         let pixel = snapshot.as_slice()[(300 * width + edge) as usize];
-                        let surface = ui.global::<Palette>().get_surface();
+                        let surface = ui.global::<Palette<'_>>().get_surface();
                         assert_eq!(
                             (pixel.r, pixel.g, pixel.b),
                             (surface.red(), surface.green(), surface.blue()),
@@ -291,9 +292,10 @@ fn recovery_scrollbar_keeps_controls_clear_and_reaches_the_last_file() {
     ui.show().unwrap();
     ui.window().set_size(slint::PhysicalSize::new(900, 640));
     for (code, rtl) in [("en", false), ("he", true)] {
-        ui.global::<Locale>().set_rtl(rtl);
+        ui.global::<Locale<'_>>().set_rtl(rtl);
         for dark in [false, true] {
-            ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+            ui.global::<Palette<'_>>()
+                .set_theme(if dark { 2 } else { 1 });
             ui.window().take_snapshot().unwrap();
             let list = i_slint_backend_testing::ElementHandle::find_by_element_id(
                 &ui,
@@ -409,7 +411,7 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
         .into(),
     );
     let installed = Rc::new(std::cell::Cell::new(false));
-    let flag = installed.clone();
+    let flag = Rc::clone(&installed);
     ui.on_apply_update(move || flag.set(true));
     let weak = ui.as_weak();
     ui.on_dismiss_update(move || weak.upgrade().unwrap().set_update_notice(false));
@@ -424,7 +426,8 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
             ui.set_update_title(i18n::message("Version {0} is available.", &["0.3.0"]).into());
             ui.set_update_label(i18n::t("Update and restart").into());
             for dark in [false, true] {
-                ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+                ui.global::<Palette<'_>>()
+                    .set_theme(if dark { 2 } else { 1 });
                 ui.set_page(0);
                 ui.set_update_notice(true);
                 ui.set_update_details_open(false);
@@ -547,9 +550,9 @@ fn refresh_buttons_animate_even_when_results_do_not_change() {
     ui_text::apply(&ui);
     let drives = Rc::new(std::cell::Cell::new(0));
     let checks = Rc::new(std::cell::Cell::new(0));
-    let count = drives.clone();
+    let count = Rc::clone(&drives);
     ui.on_refresh(move || count.set(count.get() + 1));
-    let count = checks.clone();
+    let count = Rc::clone(&checks);
     ui.on_check_update(move || count.set(count.get() + 1));
     ui.show().unwrap();
     ui.window().set_size(slint::PhysicalSize::new(900, 640));
@@ -892,19 +895,22 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
             ui_text::apply(&ui);
             ui.set_update_title(i18n::message("Version {0} is available.", &["0.3.0"]).into());
             ui.set_update_label(i18n::t("Update and restart").into());
-            for (width, height) in [(900u32, 640u32), (1160, 780)] {
-                ui.window()
-                    .set_size(slint::PhysicalSize::new(width, height));
-                let window = (width as f32, height as f32);
+            for (width, height) in [(900u16, 640u16), (1160, 780)] {
+                ui.window().set_size(slint::PhysicalSize::new(
+                    u32::from(width),
+                    u32::from(height),
+                ));
+                let window = (f32::from(width), f32::from(height));
                 for page in 0..3 {
                     ui.set_page(page);
-                    for (name, make, notice) in [
-                        ("first run", &first_run as &dyn Fn() -> Reclaim, false),
+                    let states: [(&str, &dyn Fn() -> Reclaim, bool); 5] = [
+                        ("first run", &first_run, false),
                         ("phone connected", &with_phone, false),
                         ("scanning", &scanning, false),
                         ("recovering while scanning", &recovering, false),
                         ("update notice", &first_run, true),
-                    ] {
+                    ];
+                    for (name, make, notice) in states {
                         let mut state = make();
                         state.sync_ui(&ui);
                         ui.set_update_notice(notice);
@@ -1091,7 +1097,7 @@ fn windows_drive_access_failure_has_an_actionable_aligned_restart_button() {
     .unwrap();
     let ui = AppWindow::new().unwrap();
     let restarted = Rc::new(std::cell::Cell::new(false));
-    let flag = restarted.clone();
+    let flag = Rc::clone(&restarted);
     ui.on_restart_as_administrator(move || flag.set(true));
     ui.show().unwrap();
     for (code, language) in [
@@ -1107,7 +1113,7 @@ fn windows_drive_access_failure_has_an_actionable_aligned_restart_button() {
             ui.set_needs_administrator(true);
             ui.window().set_size(slint::PhysicalSize::new(900, 640));
             let snapshot = ui.window().take_snapshot().unwrap();
-            crate::layout_checks::assert_controls_clear(&ui, (900., 640.), code);
+            layout_checks::assert_controls_clear(&ui, (900., 640.), code);
             let action = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
                 &ui,
                 &i18n::t("Restart as administrator"),
@@ -1171,9 +1177,11 @@ fn destination_review_offers_a_safe_choice_and_never_accepts_the_source_drive() 
     ] {
         i18n::with_language(language, || {
             ui_text::apply(&ui);
-            for (width, height) in [(900u32, 640u32), (1160, 780)] {
-                ui.window()
-                    .set_size(slint::PhysicalSize::new(width, height));
+            for (width, height) in [(900u16, 640u16), (1160, 780)] {
+                ui.window().set_size(slint::PhysicalSize::new(
+                    u32::from(width),
+                    u32::from(height),
+                ));
                 for (kind, destination) in [
                     ("same-drive", drives::Destination::SameDrive),
                     ("unknown", drives::Destination::Unknown),
@@ -1192,7 +1200,7 @@ fn destination_review_offers_a_safe_choice_and_never_accepts_the_source_drive() 
                         destination == drives::Destination::Unknown,
                         "{context}: only an undetermined drive can be accepted"
                     );
-                    assert_controls_clear(&ui, (width as f32, height as f32), &context);
+                    assert_controls_clear(&ui, (f32::from(width), f32::from(height)), &context);
                     // Dialog buttons never elide, so each must fit inside the card.
                     let card = i_slint_backend_testing::ElementHandle::find_by_element_id(
                         &ui,
@@ -1234,9 +1242,9 @@ fn destination_review_offers_a_safe_choice_and_never_accepts_the_source_drive() 
         });
     }
     // Escape cancels.
-    let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+    let cancelled = Rc::new(std::cell::Cell::new(false));
     ui.on_cancel_destination({
-        let cancelled = cancelled.clone();
+        let cancelled = Rc::clone(&cancelled);
         move || cancelled.set(true)
     });
     ui.set_destination_review(false);
@@ -1254,7 +1262,7 @@ fn destination_review_offers_a_safe_choice_and_never_accepts_the_source_drive() 
     // "Save here anyway" never writes onto the scanned drive, even if invoked
     // for a same-drive folder; the dialog just closes.
     let mut state = Reclaim::default();
-    state.destination_review = Some((folder.clone(), drives::Destination::SameDrive));
+    state.destination_review = Some((folder, drives::Destination::SameDrive));
     state.save_to_unconfirmed_destination();
     assert!(!state.exporting && state.destination_review.is_none());
 }
@@ -1329,7 +1337,8 @@ fn stop_buttons_are_filled_red_in_light_and_dark() {
     state.exporting = true;
     state.status = "Scanning for recoverable files…".into();
     for dark in [false, true] {
-        ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+        ui.global::<Palette<'_>>()
+            .set_theme(if dark { 2 } else { 1 });
         state.sync_ui(&ui);
         ui.window().take_snapshot().unwrap();
         // Let the button's background animation finish.
@@ -1405,7 +1414,7 @@ fn about_rows_are_keyboard_buttons_with_descriptions() {
     i18n::with_language(i18n::Language::English, || ui_text::apply(&ui));
     ui.set_page(2);
     let opened = Rc::new(RefCell::new(Vec::new()));
-    let sink = opened.clone();
+    let sink = Rc::clone(&opened);
     ui.on_open_link(move |link| sink.borrow_mut().push(link));
     for label in [
         "Source code",
@@ -1460,7 +1469,8 @@ fn about_card_previews() {
             ui.set_version("0.2.3".into());
             ui.set_page(2);
             for dark in [false, true] {
-                ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+                ui.global::<Palette<'_>>()
+                    .set_theme(if dark { 2 } else { 1 });
                 // Let colour transitions finish so the render shows the settled theme.
                 ui.window().take_snapshot().unwrap();
                 std::thread::sleep(Duration::from_millis(300));

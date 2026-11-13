@@ -4,6 +4,9 @@
     not(test),
     deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
 )]
+use anyhow::{Context, bail};
+#[cfg(target_os = "linux")]
+use anyhow::{anyhow, ensure};
 use reclaim::updater::{self, Release};
 use std::path::{Path, PathBuf};
 
@@ -40,7 +43,7 @@ fn windows_installer_arguments() -> Vec<String> {
 
 /// Private per-user folder for staged update packages. Each download gets its
 /// own `pending-*` folder, removed after installing or on the next launch.
-pub(super) fn cache_root() -> Result<PathBuf, String> {
+pub(super) fn cache_root() -> anyhow::Result<PathBuf> {
     #[cfg(windows)]
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -55,24 +58,23 @@ pub(super) fn cache_root() -> Result<PathBuf, String> {
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .map(|p| p.join("reclaim/updates"));
-    let path =
-        base.ok_or_else(|| reclaim::i18n::diagnostic("Could not locate the private update cache"))?;
-    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    let path = base
+        .with_context(|| reclaim::i18n::diagnostic("Could not locate the private update cache"))?;
+    std::fs::create_dir_all(&path)?;
     Ok(path)
 }
 
-fn new_stage() -> Result<tempfile::TempDir, String> {
-    tempfile::Builder::new()
+fn new_stage() -> anyhow::Result<tempfile::TempDir> {
+    Ok(tempfile::Builder::new()
         .prefix(STAGE_PREFIX)
-        .tempdir_in(cache_root()?)
-        .map_err(|e| e.to_string())
+        .tempdir_in(cache_root()?)?)
 }
 
 const STAGE_PREFIX: &str = "pending-";
 
 /// Download and verify an installer the user opens themselves (macOS packages).
 /// It stays staged until the next launch, then [`cleanup_staged_updates`] removes it.
-pub fn stage_installer(release: &Release, progress: impl Fn(u64, u64)) -> Result<PathBuf, String> {
+pub fn stage_installer(release: &Release, progress: impl Fn(u64, u64)) -> anyhow::Result<PathBuf> {
     let stage = new_stage()?;
     let package = stage.path().join(&release.asset);
     updater::download_installer(release, &package, progress)?;
@@ -84,10 +86,10 @@ pub fn update(
     release: &Release,
     progress: impl Fn(u64, u64),
     phase: impl Fn(&'static str),
-) -> Result<(), String> {
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+) -> anyhow::Result<()> {
+    let executable = std::env::current_exe()?;
     #[cfg(not(any(target_os = "linux", windows)))]
-    let _ = &executable;
+    let _: &PathBuf = &executable;
     if updater::installer_download(release).is_none() {
         #[cfg(target_os = "linux")]
         {
@@ -98,18 +100,18 @@ pub fn update(
             return Ok(());
         }
         #[cfg(not(target_os = "linux"))]
-        return Err("Automatic updates require an installed copy of Reclaim".into());
+        bail!("Automatic updates require an installed copy of Reclaim");
     }
     #[cfg(target_os = "linux")]
     if !Path::new(PKEXEC).is_file() {
-        return Err("Automatic package updates require pkexec (polkit)".into());
+        bail!("Automatic package updates require pkexec (polkit)");
     }
     #[cfg(windows)]
     if !executable
         .parent()
         .is_some_and(|p| p.join("installed-by-inno").is_file())
     {
-        return Err("Run the Windows setup once to enable automatic updates".into());
+        bail!("Run the Windows setup once to enable automatic updates");
     }
     // Dropping `stage` deletes the package on every path, including errors;
     // only the Windows hand-off keeps it, because the installer is still running.
@@ -135,7 +137,7 @@ pub fn update(
         Ok(())
     }
     #[cfg(not(any(target_os = "linux", windows)))]
-    Err("Automatic updates are unavailable on this platform".into())
+    bail!("Automatic updates are unavailable on this platform")
 }
 
 #[cfg(target_os = "linux")]
@@ -146,12 +148,11 @@ const PKEXEC: &str = "/usr/bin/pkexec";
 /// `/usr/bin/reclaim` checks the signature again over a private copy (see
 /// [`run_privileged_deb_update`]). Blocks until the package manager is done.
 #[cfg(target_os = "linux")]
-fn install_deb(release: &Release, package: &Path) -> Result<(), String> {
-    std::fs::write(updater::signature_path(package), &release.signature)
-        .map_err(|e| e.to_string())?;
+fn install_deb(release: &Release, package: &Path) -> anyhow::Result<()> {
+    std::fs::write(updater::signature_path(package), &release.signature)?;
     let package = package
         .to_str()
-        .ok_or_else(|| reclaim::i18n::diagnostic("Update cache path is not valid Unicode"))?;
+        .with_context(|| reclaim::i18n::diagnostic("Update cache path is not valid Unicode"))?;
     // Always elevate the system-installed binary, never a user-controlled one.
     let arguments = [
         "/usr/bin/reclaim".to_owned(),
@@ -160,7 +161,7 @@ fn install_deb(release: &Release, package: &Path) -> Result<(), String> {
         package.to_owned(),
     ];
     let code = crate::native_process::spawn(Path::new(PKEXEC), &arguments)
-        .map_err(|e| format!("Could not ask for administrator permission: {e}"))?
+        .map_err(|e| anyhow!("Could not ask for administrator permission: {e}"))?
         .wait();
     pkexec_result(code.ok())
 }
@@ -169,19 +170,19 @@ fn install_deb(release: &Release, package: &Path) -> Result<(), String> {
 /// Only the root-only copy that [`updater::protect_deb_update`] verified is
 /// passed to apt, with a fixed environment instead of the caller's.
 #[cfg(target_os = "linux")]
-pub fn run_privileged_deb_update(args: &[std::ffi::OsString]) -> Result<(), String> {
+pub fn run_privileged_deb_update(args: &[std::ffi::OsString]) -> anyhow::Result<()> {
     // SAFETY: geteuid has no preconditions and cannot fail.
     if unsafe { libc::geteuid() } != 0 {
-        return Err(reclaim::i18n::diagnostic(
+        bail!(reclaim::i18n::diagnostic(
             "This command is used only by Reclaim's updater",
         ));
     }
-    std::env::set_current_dir("/").map_err(|e| e.to_string())?;
+    std::env::set_current_dir("/")?;
     let package = updater::protect_deb_update(args)?;
     let path = package
         .path
         .to_str()
-        .ok_or_else(|| reclaim::i18n::diagnostic("Update path is not valid Unicode"))?;
+        .with_context(|| reclaim::i18n::diagnostic("Update path is not valid Unicode"))?;
     let arguments = ["install", "-y", "--", path].map(str::to_owned);
     let environment = [
         "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
@@ -194,30 +195,30 @@ pub fn run_privileged_deb_update(args: &[std::ffi::OsString]) -> Result<(), Stri
         &arguments,
         environment,
     )
-    .map_err(|e| format!("Could not start the package manager: {e}"))?
+    .map_err(|e| anyhow!("Could not start the package manager: {e}"))?
     .wait()?;
     // `package` (the protected copy) is removed when it goes out of scope.
-    if code == 0 {
-        Ok(())
-    } else {
-        Err(format!(
-            "The package manager did not install the update (status {code})"
-        ))
-    }
+    ensure!(
+        code == 0,
+        "The package manager did not install the update (status {code})"
+    );
+    Ok(())
 }
 
 /// pkexec exits with 126 when the password prompt is dismissed and 127 when
 /// permission is refused; the elevated step exits with 1 on failure. `None`
 /// means it did not exit normally.
 #[cfg(any(target_os = "linux", test))]
-fn pkexec_result(code: Option<u32>) -> Result<(), String> {
+fn pkexec_result(code: Option<u32>) -> anyhow::Result<()> {
     match code {
         Some(0) => Ok(()),
-        Some(126 | 127) => Err("The update was not installed: administrator permission was not given. Reclaim was left open.".into()),
-        other => Err(format!(
+        Some(126 | 127) => bail!(
+            "The update was not installed: administrator permission was not given. Reclaim was left open."
+        ),
+        other => bail!(
             "Package update did not complete (status {}). Reclaim was left open.",
             other.map_or_else(|| "interrupted".into(), |c| c.to_string())
-        )),
+        ),
     }
 }
 
@@ -290,7 +291,7 @@ mod tests {
 
     #[test]
     fn cancellation_and_install_errors_never_request_a_restart() {
-        assert!(super::pkexec_result(Some(0)).is_ok());
+        super::pkexec_result(Some(0)).unwrap();
         for code in [Some(1), Some(126), Some(127), None] {
             assert!(super::pkexec_result(code).is_err(), "{code:?}");
         }

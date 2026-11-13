@@ -246,14 +246,15 @@ pub fn message(key: &str, values: &[&str]) -> String {
     for part in parts(&template) {
         match part {
             Part::Text(text) => output.push_str(text),
-            Part::Field(token) => match token.parse::<usize>().ok().and_then(|i| values.get(i)) {
-                Some(value) => output.push_str(&isolate(value)),
-                None => {
+            Part::Field(token) => {
+                if let Some(value) = token.parse::<usize>().ok().and_then(|i| values.get(i)) {
+                    output.push_str(&isolate(value));
+                } else {
                     output.push('{');
                     output.push_str(token);
                     output.push('}');
                 }
-            },
+            }
         }
     }
     output
@@ -273,7 +274,9 @@ pub fn is_message(text: &str) -> bool {
 /// `detail` as the user should see it: unchanged when it is already a catalog
 /// message, otherwise placed into `summary` (an English key with one `{0}`
 /// field) so the lead sentence is translated and the technical part is not.
-pub fn explain(summary: &str, detail: String) -> String {
+/// `{:#}` keeps the whole cause chain of an `anyhow::Error`.
+pub fn explain(summary: &str, detail: impl std::fmt::Display) -> String {
+    let detail = format!("{detail:#}");
     if is_message(&detail) {
         detail
     } else {
@@ -401,11 +404,11 @@ mod tests {
                 "{language:?}"
             );
             for (key, translation) in translations {
-                assert!(!translation.trim().is_empty());
+                assert_ne!(translation.trim(), "");
                 let mut source = field_names(&parts(key));
                 let mut target = field_names(&parts(translation));
-                source.sort();
-                target.sort();
+                source.sort_unstable();
+                target.sort_unstable();
                 assert_eq!(
                     source, target,
                     "Placeholder mismatch in {language:?}: {key}"
@@ -437,7 +440,7 @@ mod tests {
             assert!(error.contains(&translate("Invalid source offset", language, 0)));
             assert!(translate("2 files", language, 0).contains('2'));
             with_language(language, || {
-                assert_eq!(is_rtl(), language == Language::Arabic)
+                assert_eq!(is_rtl(), language == Language::Arabic);
             });
         }
     }
@@ -491,14 +494,14 @@ mod tests {
             with_language(language, || {
                 // Workers keep catalog keys so switching the UI language also
                 // translates an error that was reported before the switch.
-                let error = explain("Could not read this volume: {0}", premature_end.into());
+                let error = explain("Could not read this volume: {0}", premature_end);
                 assert_eq!(t(&error), catalog(language)[premature_end]);
                 assert_eq!(t(cancelled), catalog(language)[cancelled]);
                 for summary in [
                     "Could not prepare read-only access to this volume: {0}",
                     "Could not restart as administrator: {0}",
                 ] {
-                    let error = explain(summary, technical.into());
+                    let error = explain(summary, technical);
                     let translated = t(&error);
                     assert!(translated.contains(technical));
                     if language != Language::English {

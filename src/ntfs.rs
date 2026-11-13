@@ -34,7 +34,7 @@ fn filetime(bytes: &[u8], at: usize) -> Option<i64> {
     (seconds <= 253_402_300_799).then_some(seconds)
 }
 
-pub fn read_record(
+pub(crate) fn read_record(
     input: &mut impl Read,
     offset: u64,
     cancel: &AtomicBool,
@@ -358,7 +358,7 @@ fn parse_record(
     let validation = match crate::validation::validate(kind, &data, cancel)? {
         Validation::ImageDecoded => Validation::ImageDecoded,
         Validation::StructureChecked => Validation::StructureChecked,
-        _ => Validation::MetadataChecked,
+        Validation::MetadataChecked | Validation::Unverified => Validation::MetadataChecked,
     };
     Some(Found {
         offset,

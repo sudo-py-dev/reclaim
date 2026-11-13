@@ -13,7 +13,7 @@ use syn::{
     ItemStatic, Macro, StaticMutability, visit::Visit,
 };
 
-pub struct Finding {
+pub(crate) struct Finding {
     pub rule: &'static str,
     pub cwe: Option<u32>,
     pub file: String,
@@ -22,7 +22,7 @@ pub struct Finding {
 }
 
 impl Finding {
-    pub fn new(
+    pub(crate) fn new(
         rule: &'static str,
         cwe: Option<u32>,
         file: &str,
@@ -41,7 +41,7 @@ impl Finding {
 
 impl fmt::Display for Finding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let cwe = self.cwe.map(|id| format!(" CWE-{id}")).unwrap_or_default();
+        let cwe = self.cwe.map_or_default(|id| format!(" CWE-{id}"));
         write!(
             f,
             "[{}{cwe}] {}:{}: {}",
@@ -51,7 +51,7 @@ impl fmt::Display for Finding {
 }
 
 /// Fails the calling test with every finding, one per line.
-pub fn report(findings: Vec<Finding>) {
+pub(crate) fn report(findings: &[Finding]) {
     if findings.is_empty() {
         return;
     }
@@ -65,7 +65,7 @@ pub fn report(findings: Vec<Finding>) {
 
 /// Where a string literal appears, which decides whether it can be interface text.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Context {
+pub(crate) enum Context {
     Code,
     /// Arguments of `log::*` macros: diagnostics for the log file, never shown.
     Log,
@@ -79,7 +79,7 @@ pub enum Context {
 }
 
 #[derive(Debug)]
-pub enum Event {
+pub(crate) enum Event {
     Unsafe {
         line: usize,
         kind: &'static str,
@@ -116,7 +116,7 @@ pub enum Event {
     },
 }
 
-pub struct RustFile {
+pub(crate) struct RustFile {
     pub path: String,
     pub text: String,
     /// Events outside `#[cfg(test)]` code; test files have none.
@@ -125,7 +125,7 @@ pub struct RustFile {
     pub tests: Vec<Event>,
 }
 
-pub struct TextFile {
+pub(crate) struct TextFile {
     pub path: String,
     pub text: String,
 }
@@ -136,7 +136,7 @@ struct Suppression {
     rule: String,
 }
 
-pub struct Workspace {
+pub(crate) struct Workspace {
     pub root: PathBuf,
     pub rust: Vec<RustFile>,
     /// Every text file the repository ships (code, configuration, docs, site source).
@@ -149,6 +149,8 @@ pub struct Workspace {
 const SKIP_DIRS: &[&str] = &[
     "target",
     ".git",
+    // Git-ignored tool state, including other sessions' worktrees of this repository.
+    ".claude",
     "node_modules",
     "dist",
     ".astro",
@@ -162,7 +164,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
 ];
 
 impl Workspace {
-    pub fn load() -> Self {
+    pub(crate) fn load() -> Self {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let mut text = Vec::new();
         collect_text(&root, &root, &mut text);
@@ -244,7 +246,7 @@ impl Workspace {
 
     /// Whether a finding is accepted by a suppression on its line or in the comment
     /// block directly above it.
-    pub fn suppressed(&self, rule: &str, file: &str, line: usize) -> bool {
+    pub(crate) fn suppressed(&self, rule: &str, file: &str, line: usize) -> bool {
         let Some(text) = self.text.iter().find(|t| t.path == file) else {
             return false;
         };
@@ -253,7 +255,7 @@ impl Workspace {
         let mut above = line;
         while above > 1 {
             above -= 1;
-            let trimmed = lines.get(above - 1).map(|l| l.trim_start()).unwrap_or("");
+            let trimmed = lines.get(above - 1).map_or("", |l| l.trim_start());
             if trimmed.starts_with("//") {
                 candidates.push(above);
             } else {
@@ -267,7 +269,7 @@ impl Workspace {
             {
                 self.used
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .insert(index);
                 return true;
             }
@@ -276,15 +278,18 @@ impl Workspace {
     }
 
     /// Keeps findings that no suppression accepts.
-    pub fn unsuppressed(&self, findings: Vec<Finding>) -> Vec<Finding> {
+    pub(crate) fn unsuppressed(&self, findings: Vec<Finding>) -> Vec<Finding> {
         findings
             .into_iter()
             .filter(|f| !self.suppressed(f.rule, &f.file, f.line))
             .collect()
     }
 
-    pub fn unused_suppressions(&self) -> Vec<Finding> {
-        let used = self.used.lock().unwrap_or_else(|e| e.into_inner());
+    pub(crate) fn unused_suppressions(&self) -> Vec<Finding> {
+        let used = self
+            .used
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut findings: Vec<Finding> = self
             .suppressions
             .iter()
@@ -311,15 +316,14 @@ impl Workspace {
         findings
     }
 
-    pub fn file(&self, path: &str) -> &str {
+    pub(crate) fn file(&self, path: &str) -> &str {
         self.text
             .iter()
             .find(|t| t.path == path)
-            .map(|t| t.text.as_str())
-            .unwrap_or_else(|| panic!("{path} is missing"))
+            .map_or_else(|| panic!("{path} is missing"), |t| t.text.as_str())
     }
 
-    pub fn read(&self, path: &str) -> String {
+    pub(crate) fn read(&self, path: &str) -> String {
         std::fs::read_to_string(self.root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
     }
 }
@@ -403,9 +407,9 @@ struct Walker {
 impl Walker {
     fn push(&mut self, event: Event) {
         if self.in_test {
-            self.tests.push(event)
+            self.tests.push(event);
         } else {
-            self.production.push(event)
+            self.production.push(event);
         }
     }
 
@@ -452,6 +456,8 @@ impl Walker {
 }
 
 const LOG_MACROS: &[&str] = &["trace", "debug", "info", "warn", "error", "log"];
+/// `anyhow` macros whose arguments are parsed as expressions.
+const ERROR_MACROS: &[&str] = &["anyhow", "bail", "ensure"];
 const ASSERT_MACROS: &[&str] = &[
     "assert",
     "assert_eq",
@@ -478,7 +484,7 @@ impl<'ast> Visit<'ast> for Walker {
 
     fn visit_item_mod(&mut self, node: &'ast ItemMod) {
         self.scoped(is_test_attr(&node.attrs), |w| {
-            syn::visit::visit_item_mod(w, node)
+            syn::visit::visit_item_mod(w, node);
         });
     }
 
@@ -490,7 +496,7 @@ impl<'ast> Visit<'ast> for Walker {
                     kind: "unsafe fn",
                 });
             }
-            syn::visit::visit_item_fn(w, node)
+            syn::visit::visit_item_fn(w, node);
         });
     }
 
@@ -502,7 +508,7 @@ impl<'ast> Visit<'ast> for Walker {
                     kind: "unsafe fn",
                 });
             }
-            syn::visit::visit_impl_item_fn(w, node)
+            syn::visit::visit_impl_item_fn(w, node);
         });
     }
 
@@ -514,7 +520,7 @@ impl<'ast> Visit<'ast> for Walker {
                     kind: "unsafe impl",
                 });
             }
-            syn::visit::visit_item_impl(w, node)
+            syn::visit::visit_item_impl(w, node);
         });
     }
 
@@ -548,8 +554,7 @@ impl<'ast> Visit<'ast> for Walker {
                 .path
                 .segments
                 .first()
-                .map(|s| line_of(s.ident.span()))
-                .unwrap_or(0);
+                .map_or(0, |s| line_of(s.ident.span()));
             let diagnostic = matches!(text.rsplit("::").next(), Some("diagnostic" | "invalid"))
                 || text.ends_with("Error::other")
                 || text.ends_with("Error::new");
@@ -561,7 +566,7 @@ impl<'ast> Visit<'ast> for Walker {
             if diagnostic {
                 self.visit_expr(&node.func);
                 self.with_context(Context::Diagnostic, |w| {
-                    node.args.iter().for_each(|arg| w.visit_expr(arg))
+                    node.args.iter().for_each(|arg| w.visit_expr(arg));
                 });
                 return;
             }
@@ -598,14 +603,12 @@ impl<'ast> Visit<'ast> for Walker {
             .path
             .segments
             .last()
-            .map(|s| s.ident.to_string())
-            .unwrap_or_default();
+            .map_or_default(|s| s.ident.to_string());
         let line = node
             .path
             .segments
             .last()
-            .map(|s| line_of(s.ident.span()))
-            .unwrap_or(0);
+            .map_or(0, |s| line_of(s.ident.span()));
         self.push(Event::Macro {
             line,
             name: name.clone(),
@@ -618,6 +621,16 @@ impl<'ast> Visit<'ast> for Walker {
         } else {
             self.context
         };
+        // Error macros take expressions, so `bail!(diagnostic("..."))` is read
+        // like `Err(diagnostic("..."))` instead of as loose tokens.
+        if ERROR_MACROS.contains(&name.as_str())
+            && let Ok(args) = node.parse_body_with(
+                syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated,
+            )
+        {
+            self.with_context(context, |w| args.iter().for_each(|arg| w.visit_expr(arg)));
+            return;
+        }
         self.with_context(context, |w| w.walk_tokens(node.tokens.clone()));
     }
 
