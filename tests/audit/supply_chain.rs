@@ -54,11 +54,10 @@ fn dependency_tables(manifest: &toml::Value) -> Vec<(String, &toml::Table)> {
 fn line_of(text: &str, needle: &str) -> usize {
     text.lines()
         .position(|l| l.contains(needle))
-        .map(|i| i + 1)
-        .unwrap_or(1)
+        .map_or(1, |i| i + 1)
 }
 
-pub fn manifest(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn manifest(ws: &Workspace) -> Vec<Finding> {
     let text = ws.file("Cargo.toml");
     let manifest = toml::Value::Table(text.parse().expect("Cargo.toml is valid TOML"));
     let mut findings = Vec::new();
@@ -174,14 +173,13 @@ fn parse_date(text: &str) -> Option<i64> {
 }
 
 /// cargo-deny records a reason but does not expire exceptions; this does.
-pub fn advisories(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn advisories(ws: &Workspace) -> Vec<Finding> {
     let text = ws.file("deny.toml");
     let config = toml::Value::Table(text.parse().expect("deny.toml is valid TOML"));
     let today = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         // Days since 1970 are far below i64::MAX.
-        .map(|d| (d.as_secs() / 86_400).cast_signed())
-        .unwrap_or(0);
+        .map_or(0, |d| (d.as_secs() / 86_400).cast_signed());
     let locked = packages(ws.file("Cargo.lock"));
     let mut findings = Vec::new();
     let ignores = config
@@ -254,7 +252,7 @@ pub fn advisories(ws: &Workspace) -> Vec<Finding> {
 
 /// The fuzz harnesses have their own lockfiles; they must not drift to versions
 /// the app does not ship, or the fuzzing proves nothing about the release.
-pub fn fuzz_lock(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn fuzz_lock(ws: &Workspace) -> Vec<Finding> {
     const HARNESS_ONLY: &[&str] = &[
         "reclaim-fuzz",
         "reclaim-container-fuzz",

@@ -55,7 +55,7 @@ fn everywhere(ws: &Workspace) -> impl Iterator<Item = (&str, &Event)> {
 
 /// CWE-676 (dangerous functions) and CWE-119 (memory safety): `unsafe` only in the
 /// platform layer, and every block explains why it is sound.
-pub fn unsafe_code(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn unsafe_code(ws: &Workspace) -> Vec<Finding> {
     let mut findings = Vec::new();
     for file in &ws.rust {
         let lines: Vec<&str> = file.text.lines().collect();
@@ -95,7 +95,7 @@ pub fn unsafe_code(ws: &Workspace) -> Vec<Finding> {
 
 /// CWE-362, CWE-843, CWE-401 and CWE-908: global mutable state, type punning,
 /// leaks and uninitialised memory.
-pub fn memory_hazards(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn memory_hazards(ws: &Workspace) -> Vec<Finding> {
     let mut findings = Vec::new();
     for (file, event) in everywhere(ws) {
         match event {
@@ -140,9 +140,14 @@ pub fn memory_hazards(ws: &Workspace) -> Vec<Finding> {
                     file,
                     *line,
                     "`assume_init` needs a reviewed reason",
-                ))
+                ));
             }
-            _ => {}
+            Event::Unsafe { .. }
+            | Event::Method { .. }
+            | Event::Macro { .. }
+            | Event::Index
+            | Event::Str { .. }
+            | Event::Ident { .. } => {}
         }
     }
     ws.unsuppressed(findings)
@@ -150,7 +155,7 @@ pub fn memory_hazards(ws: &Workspace) -> Vec<Finding> {
 
 /// CWE-78: OS command injection. No shell, no `Command`, and native process APIs
 /// only in the two reviewed launchers.
-pub fn process_launching(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn process_launching(ws: &Workspace) -> Vec<Finding> {
     let mut findings = Vec::new();
     for (file, event) in production(ws) {
         match event {
@@ -161,7 +166,7 @@ pub fn process_launching(ws: &Workspace) -> Vec<Finding> {
                     file,
                     *line,
                     "`std::process::Command` is not allowed in the app; use native_process",
-                ))
+                ));
             }
             Event::Ident { line, name } if PROCESS_IDENTS.contains(&name.as_str()) => {
                 let allowed = PROCESS_APIS
@@ -177,7 +182,14 @@ pub fn process_launching(ws: &Workspace) -> Vec<Finding> {
                     ));
                 }
             }
-            _ => {}
+            Event::Unsafe { .. }
+            | Event::StaticMut { .. }
+            | Event::Call { .. }
+            | Event::Method { .. }
+            | Event::Macro { .. }
+            | Event::Index
+            | Event::Str { .. }
+            | Event::Ident { .. } => {}
         }
     }
     ws.unsuppressed(dedupe(findings))
@@ -185,7 +197,7 @@ pub fn process_launching(ws: &Workspace) -> Vec<Finding> {
 
 /// CWE-319 (cleartext transport), CWE-295 (certificate validation) and CWE-327/328
 /// (broken cryptography).
-pub fn transport_and_crypto(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn transport_and_crypto(ws: &Workspace) -> Vec<Finding> {
     const TLS_BYPASS: &[&str] = &[
         "danger",
         "insecure",
@@ -230,14 +242,20 @@ pub fn transport_and_crypto(ws: &Workspace) -> Vec<Finding> {
                     ));
                 }
             }
-            _ => {}
+            Event::Unsafe { .. }
+            | Event::StaticMut { .. }
+            | Event::Call { .. }
+            | Event::Method { .. }
+            | Event::Macro { .. }
+            | Event::Index
+            | Event::Str { .. } => {}
         }
     }
     ws.unsuppressed(dedupe(findings))
 }
 
 /// CWE-798: credentials committed to the repository.
-pub fn secrets(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn secrets(ws: &Workspace) -> Vec<Finding> {
     let mut findings = Vec::new();
     for file in &ws.text {
         if file.path.starts_with("tests/audit/") {
@@ -294,7 +312,7 @@ fn secret_kind(line: &str) -> Option<&'static str> {
 }
 
 /// CWE-377 and CWE-379: predictable names in the shared temporary directory.
-pub fn temporary_files(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn temporary_files(ws: &Workspace) -> Vec<Finding> {
     let findings = everywhere(ws)
         .filter_map(|(file, event)| match event {
             Event::Call { line, path, .. } if path.ends_with("temp_dir") => Some(Finding::new(
@@ -304,7 +322,7 @@ pub fn temporary_files(ws: &Workspace) -> Vec<Finding> {
                 *line,
                 "`env::temp_dir()` paths are predictable; use `tempfile` for a private, unique directory",
             )),
-            _ => None,
+            Event::Unsafe { .. } | Event::StaticMut { .. } | Event::Call { .. } | Event::Method { .. } | Event::Macro { .. } | Event::Index | Event::Str { .. } | Event::Ident { .. } => None,
         })
         .collect();
     ws.unsuppressed(findings)
@@ -312,7 +330,7 @@ pub fn temporary_files(ws: &Workspace) -> Vec<Finding> {
 
 /// CWE-400, CWE-770 and CWE-789: reads and allocations sized by untrusted input
 /// must have an explicit upper bound.
-pub fn resource_limits(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn resource_limits(ws: &Workspace) -> Vec<Finding> {
     let mut findings = Vec::new();
     for (file, event) in production(ws) {
         match event {
@@ -342,7 +360,7 @@ pub fn resource_limits(ws: &Workspace) -> Vec<Finding> {
                     file,
                     *line,
                     "whole-file read has no size limit; open the file and use `.take(limit)`",
-                ))
+                ));
             }
             Event::Call { line, path, args } if path.ends_with("with_capacity") => {
                 if let Some(size) = args.first().filter(|size| !bounded(size)) {
@@ -369,7 +387,14 @@ pub fn resource_limits(ws: &Workspace) -> Vec<Finding> {
                     }
                 }
             }
-            _ => {}
+            Event::Unsafe { .. }
+            | Event::StaticMut { .. }
+            | Event::Call { .. }
+            | Event::Method { .. }
+            | Event::Macro { .. }
+            | Event::Index
+            | Event::Str { .. }
+            | Event::Ident { .. } => {}
         }
     }
     ws.unsuppressed(findings)
@@ -391,7 +416,7 @@ fn bounded(expression: &str) -> bool {
 
 /// CWE-125 and CWE-129: unchecked `a[i]` panics on malformed input, which in a
 /// scanner is a denial of service. The count per file may only go down.
-pub fn index_ratchet(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn index_ratchet(ws: &Workspace) -> Vec<Finding> {
     let baseline_text = ws.read("tests/audit/baseline.toml");
     let baseline: toml::Table = baseline_text
         .parse()
@@ -409,7 +434,10 @@ pub fn index_ratchet(ws: &Workspace) -> Vec<Finding> {
     }
     let mut findings = Vec::new();
     for (file, count) in &counts {
-        let limit = limits.get(*file).and_then(|v| v.as_integer()).unwrap_or(0);
+        let limit = limits
+            .get(*file)
+            .and_then(toml::Value::as_integer)
+            .unwrap_or(0);
         if *count > limit {
             findings.push(Finding::new(
                 "OOB-INDEX",
@@ -438,7 +466,7 @@ pub fn index_ratchet(ws: &Workspace) -> Vec<Finding> {
 
 /// CWE-489 (leftover debug code), CWE-561 (dead code) and CWE-1164 (irrelevant
 /// code): no debug macros, no silenced warnings, no stray files, no TODOs.
-pub fn leftovers(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn leftovers(ws: &Workspace) -> Vec<Finding> {
     const DEBUG_MACROS: &[&str] = &[
         "dbg",
         "todo",
@@ -568,8 +596,18 @@ fn orphans(ws: &Workspace) -> Vec<Finding> {
 
 /// The compiler-enforced half of the audit: these lints must stay at `deny`, and
 /// CI must keep running Clippy, the tests and the advisory scan.
-pub fn lint_policy(ws: &Workspace) -> Vec<Finding> {
-    const RUST: &[&str] = &["unsafe_op_in_unsafe_fn"];
+pub(crate) fn lint_policy(ws: &Workspace) -> Vec<Finding> {
+    const RUST: &[&str] = &[
+        "unsafe_op_in_unsafe_fn",
+        // Peak tier (references/peak-lints.md in the house skill).
+        "unused_must_use",
+        "unused_qualifications",
+        "trivial_casts",
+        "trivial_numeric_casts",
+        "let_underscore_drop",
+        "elided_lifetimes_in_paths",
+        "missing_debug_implementations",
+    ];
     const CLIPPY: &[&str] = &[
         "undocumented_unsafe_blocks",
         "unwrap_used",
@@ -586,6 +624,21 @@ pub fn lint_policy(ws: &Workspace) -> Vec<Finding> {
         "mem_forget",
         "large_stack_arrays",
         "unreachable",
+        // Peak tier: whole groups plus the bug-catching picks.
+        "correctness",
+        "suspicious",
+        "perf",
+        "complexity",
+        "style",
+        "pedantic",
+        "wildcard_enum_match_arm",
+        "map_err_ignore",
+        "significant_drop_in_scrutinee",
+        "iter_over_hash_type",
+        "clone_on_ref_ptr",
+        "collection_is_never_read",
+        "read_zero_byte_vec",
+        "multiple_unsafe_ops_per_block",
     ];
     let manifest: toml::Table = ws
         .file("Cargo.toml")
@@ -689,7 +742,7 @@ fn user_paths(bytes: &[u8]) -> Vec<String> {
 /// Test fixtures, disk images most of all, must not carry the local user
 /// name of whoever made them (CWE-538). Mounting an ext image, for example,
 /// records `/run/media/<user>/...` in its superblock and journal.
-pub fn fixture_privacy(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn fixture_privacy(ws: &Workspace) -> Vec<Finding> {
     use std::io::Read;
     let mut findings = Vec::new();
     let mut pending = vec![ws.root.join("tests/fixtures")];
@@ -770,5 +823,8 @@ pub fn fixture_privacy(ws: &Workspace) -> Vec<Finding> {
 fn user_paths_are_found_in_raw_bytes() {
     let image = b"\0\0/run/media/alex/1234-ABCD\0\0C:\\Users\\Sam\\Desktop\0word/media/x";
     assert_eq!(user_paths(image), vec!["/run/media/alex", "\\Users\\Sam"]);
-    assert!(user_paths(b"word/media/image1.png /home/ alone").is_empty());
+    assert_eq!(
+        user_paths(b"word/media/image1.png /home/ alone"),
+        Vec::<String>::new()
+    );
 }

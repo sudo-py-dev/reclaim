@@ -121,6 +121,7 @@ pub fn open_source(path: &Path) -> io::Result<File> {
 
 #[cfg(target_os = "linux")]
 fn object_path(device: &Path) -> io::Result<String> {
+    use std::fmt::Write as _;
     use std::os::unix::ffi::OsStrExt;
     let name = device
         .file_name()
@@ -130,7 +131,8 @@ fn object_path(device: &Path) -> io::Result<String> {
         if byte.is_ascii_alphanumeric() {
             path.push(char::from(*byte));
         } else {
-            path.push_str(&format!("_{byte:02x}"));
+            // Writing to a String cannot fail.
+            write!(path, "_{byte:02x}").ok();
         }
     }
     Ok(path)

@@ -75,14 +75,15 @@ fn find_maps(
     geometry: Geometry,
     cancel: &AtomicBool,
     progress: &mut impl FnMut(u64),
-) -> io::Result<HashMap<u64, Vec<(u64, u64)>>> {
+) -> io::Result<BTreeMap<u64, Vec<(u64, u64)>>> {
     let block_size = geometry.block_size;
     let chunk = CHUNK
         .checked_div(block_size)
         .unwrap_or(1)
         .max(1)
         .saturating_mul(block_size);
-    let mut maps = HashMap::new();
+    // Ordered, so which map claims a shared child does not depend on hashing.
+    let mut maps = BTreeMap::new();
     let mut runs = 0usize;
     let mut done = 0u64;
     let mut buffer = Vec::new();
@@ -202,9 +203,7 @@ pub(super) fn chains(
         if listed == per_map {
             let last = blocks_of(runs).last().unwrap_or(0);
             // The double-indirect map, if written in line, sits between the pieces.
-            let parent = (1..=3u64)
-                .filter_map(|gap| parents.get(&last.saturating_add(gap)))
-                .next();
+            let parent = (1..=3u64).find_map(|gap| parents.get(&last.saturating_add(gap)));
             if let Some(child_runs) = parent.and_then(|parent| maps.get(parent)) {
                 for child in blocks_of(child_runs) {
                     for block in maps
@@ -374,7 +373,7 @@ mod tests {
             |_| {},
         )
         .unwrap();
-        assert!(files.is_empty());
+        assert!(files.is_empty(), "{files:?}");
     }
 
     #[test]

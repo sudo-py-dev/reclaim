@@ -125,15 +125,12 @@ fn unescape(value: &str, octal: bool) -> String {
             _ => None,
         };
         // Both escape forms are four bytes: the backslash and three more.
-        match (decoded, tail) {
-            (Some(byte), [_, _, _, after @ ..]) => {
-                output.push(byte);
-                rest = after;
-            }
-            _ => {
-                output.push(first);
-                rest = tail;
-            }
+        if let (Some(byte), [_, _, _, after @ ..]) = (decoded, tail) {
+            output.push(byte);
+            rest = after;
+        } else {
+            output.push(first);
+            rest = tail;
         }
     }
     String::from_utf8_lossy(&output).into_owned()
@@ -169,7 +166,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
                 .entry((*device).into())
                 .and_modify(|old| {
                     if point == "/" {
-                        *old = point.clone();
+                        old.clone_from(&point);
                     }
                 })
                 .or_insert(point);
@@ -260,7 +257,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
                     .map(|(k, v)| (k.to_owned(), v.to_owned()))
             })
             .collect();
-        let get = |key: &str| properties.get(key).map(String::as_str).unwrap_or("");
+        let get = |key: &str| properties.get(key).map_or("", String::as_str);
         let label = labels
             .get(&fs::canonicalize(&path).unwrap_or_else(|_| path.clone()))
             .cloned()
@@ -269,7 +266,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
         let unlocked = dm_uuid.starts_with("CRYPT-");
         let encrypted = get("ID_FS_TYPE") == "crypto_LUKS";
         let usb = get("ID_BUS") == "usb"
-            || fs::canonicalize(&node.sys).ok().is_some_and(|p| {
+            || fs::canonicalize(&node.sys).is_ok_and(|p| {
                 p.components()
                     .any(|c| c.as_os_str().to_string_lossy().starts_with("usb"))
             });
@@ -497,7 +494,7 @@ mod tests {
         );
         assert!(!phones[1].name.contains('\u{1b}'));
         assert!(phones[1].name.chars().count() <= MAX_PHONE_NAME);
-        assert!(phones_at(&root.path().join("missing")).is_empty());
+        assert_eq!(phones_at(&root.path().join("missing")), Vec::<Drive>::new());
     }
 
     #[test]
@@ -607,7 +604,7 @@ mod tests {
         let rows = f.discover().unwrap();
         assert_eq!(rows.len(), 1);
         assert!(rows[0].path.ends_with("sdb1"));
-        assert_eq!(rows[0].size, 119000 * 512);
+        assert_eq!(rows[0].size, 119_000 * 512);
         assert_eq!(rows[0].name, "HBCD_PE_X64");
         assert!(rows[0].mounted);
     }
@@ -672,11 +669,11 @@ mod tests {
         fs::remove_dir_all(f.0.path().join("dev/disk")).unwrap();
         let rows = f.discover().unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].size, 1048576);
+        assert_eq!(rows[0].size, 1_048_576);
         assert_eq!(rows[0].sector_size, 512);
         assert!(!rows[0].mounted);
         fs::remove_file(f.0.path().join("mountinfo")).unwrap();
-        assert!(f.discover().is_err());
+        f.discover().unwrap_err();
     }
     #[test]
     #[ignore = "reads the host kernel inventory; requires Linux sysfs/procfs"]

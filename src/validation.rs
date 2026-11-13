@@ -1,11 +1,11 @@
 use crate::{CandidateEnd, LIMIT, Validation};
-use image::{ImageFormat, ImageReader};
+use image::{AnimationDecoder, ImageDecoder, ImageFormat, ImageReader};
 use std::{
     io::Cursor,
     sync::atomic::{AtomicBool, Ordering},
 };
 
-pub fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Validation> {
+pub(crate) fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Validation> {
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
@@ -55,7 +55,6 @@ pub fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Validat
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
-    use image::{AnimationDecoder, ImageDecoder};
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(32768);
     limits.max_image_height = Some(32768);
@@ -118,8 +117,8 @@ fn decode(bytes: &[u8], format: ImageFormat, dimension_limit: u32) -> bool {
     reader.decode().is_ok()
 }
 
-pub fn png_end(bytes: &[u8]) -> CandidateEnd {
-    use CandidateEnd::*;
+pub(crate) fn png_end(bytes: &[u8]) -> CandidateEnd {
+    use CandidateEnd::{Complete, Invalid, More};
     let mut p = 8usize;
     let mut data_seen = false;
     loop {
@@ -162,8 +161,8 @@ pub fn png_end(bytes: &[u8]) -> CandidateEnd {
     }
 }
 
-pub fn gif_end(bytes: &[u8]) -> CandidateEnd {
-    use CandidateEnd::*;
+pub(crate) fn gif_end(bytes: &[u8]) -> CandidateEnd {
+    use CandidateEnd::{Complete, Invalid, More};
     if bytes.len() < 13 {
         return More;
     }
@@ -231,8 +230,8 @@ pub fn gif_end(bytes: &[u8]) -> CandidateEnd {
     }
 }
 
-pub fn jpeg_end(bytes: &[u8]) -> CandidateEnd {
-    use CandidateEnd::*;
+pub(crate) fn jpeg_end(bytes: &[u8]) -> CandidateEnd {
+    use CandidateEnd::{Complete, Invalid, More};
     let mut p = 2;
     let mut entropy = false;
     let mut scan_seen = false;
@@ -297,8 +296,8 @@ pub fn jpeg_end(bytes: &[u8]) -> CandidateEnd {
     }
 }
 
-pub fn ico_end(bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {
-    use CandidateEnd::*;
+pub(crate) fn ico_end(bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {
+    use CandidateEnd::{Complete, Invalid, More};
     if bytes.len() >= 4 && &bytes[..4] != b"\0\0\x01\0" {
         return Invalid;
     }

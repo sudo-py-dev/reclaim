@@ -60,8 +60,8 @@ impl Heap {
         }
         Some(extents)
     }
-    pub(super) fn cluster_count(self, size: u64) -> Option<u64> {
-        Some(size.div_ceil(self.cluster_size).max(1))
+    pub(super) fn cluster_count(self, size: u64) -> u64 {
+        size.div_ceil(self.cluster_size).max(1)
     }
 }
 
@@ -84,15 +84,15 @@ pub(super) fn found(name: String, size: u64, extents: Vec<(u64, u64)>) -> Option
 
 /// A name from directory data is shown and used as a file name, so it must
 /// be printable and must not climb or split paths.
-pub(super) fn clean_name(name: String) -> Option<String> {
-    let name = name.trim_end_matches([' ', '.']).to_owned();
+pub(super) fn clean_name(name: &str) -> Option<String> {
+    let name = name.trim_end_matches([' ', '.']);
     (!name.is_empty()
         && name.chars().count() <= 255
         && !name
             .chars()
             .any(|c| c.is_control() || matches!(c, '/' | '\\' | '\0'))
-        && !matches!(name.as_str(), "." | ".."))
-    .then_some(name)
+        && !matches!(name, "." | ".."))
+    .then(|| name.to_owned())
 }
 
 /// Tracks the work budget of one directory walk.
@@ -245,7 +245,7 @@ pub(super) fn fat_entries(data: &[u8], fat32: bool) -> Vec<FatEntry> {
             (derived.is_some_and(matches) || matches(b'_')).then_some(long)
         });
         let name = long.or_else(|| short_name(entry, b'_'));
-        if let Some(name) = name.and_then(clean_name) {
+        if let Some(name) = name.as_deref().and_then(clean_name) {
             entries.push(FatEntry::Deleted(name, size, cluster));
         }
     }
@@ -269,7 +269,7 @@ pub(super) fn exfat_entries(data: &[u8]) -> Vec<ExfatEntry> {
         .as_chunks::<32>()
         .0
         .iter()
-        .map(|r| r.as_slice())
+        .map(<[u8; 32]>::as_slice)
         .collect();
     let mut index = 0usize;
     while let Some(record) = records.get(index) {
@@ -329,7 +329,11 @@ pub(super) fn exfat_entries(data: &[u8]) -> Vec<ExfatEntry> {
         if in_use || length == 0 || units.len() != name_length {
             continue;
         }
-        if let Some(name) = String::from_utf16(&units).ok().and_then(clean_name) {
+        if let Some(name) = String::from_utf16(&units)
+            .ok()
+            .as_deref()
+            .and_then(clean_name)
+        {
             entries.push(ExfatEntry::Deleted(name, length, cluster, contiguous));
         }
     }
@@ -457,11 +461,11 @@ mod tests {
                     .wrapping_add(u32::try_from(i).unwrap().wrapping_mul(40_503));
                 *byte = mixed.to_le_bytes()[1];
             }
-            let _ = fat_entries(&data, seed % 2 == 0);
-            let _ = exfat_entries(&data);
+            drop(fat_entries(&data, seed % 2 == 0));
+            drop(exfat_entries(&data));
         }
-        assert!(clean_name("../x".into()).is_none());
-        assert!(clean_name("a\u{0}b".into()).is_none());
-        assert_eq!(clean_name("name. ".into()).as_deref(), Some("name"));
+        assert!(clean_name("../x").is_none());
+        assert!(clean_name("a\u{0}b").is_none());
+        assert_eq!(clean_name("name. ").as_deref(), Some("name"));
     }
 }

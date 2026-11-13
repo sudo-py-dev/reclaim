@@ -4,10 +4,10 @@ use std::{
     collections::HashSet,
     sync::atomic::{AtomicBool, Ordering},
 };
-const FREE: u32 = 0xffffffff;
-const END: u32 = 0xfffffffe;
-const FAT: u32 = 0xfffffffd;
-const DIF: u32 = 0xfffffffc;
+const FREE: u32 = 0xffff_ffff;
+const END: u32 = 0xffff_fffe;
+const FAT: u32 = 0xffff_fffd;
+const DIF: u32 = 0xffff_fffc;
 fn sector(id: u32, size: usize) -> Result<usize, CandidateEnd> {
     span((u64::from(id) + 1) * size as u64, size as u64).map(|end| end - size)
 }
@@ -146,9 +146,9 @@ pub(super) fn kind(b: &[u8]) -> &'static str {
         return "ole";
     }
     match le32(guid, 0) {
-        0x000c1084 => "msi",
-        0x000c1086 => "msp",
-        0x000c1082 => "mst",
+        0x000c_1084 => "msi",
+        0x000c_1086 => "msp",
+        0x000c_1082 => "mst",
         _ => "ole",
     }
 }

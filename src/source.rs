@@ -14,6 +14,15 @@ pub struct SourceReader<R> {
     cached_at: Option<u64>,
     cached_len: usize,
 }
+impl<R> std::fmt::Debug for SourceReader<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceReader")
+            .field("position", &self.position)
+            .field("size", &self.size)
+            .field("alignment", &self.alignment)
+            .finish_non_exhaustive()
+    }
+}
 impl<R: Read + Seek> SourceReader<R> {
     pub fn new(inner: R, alignment: usize, size: Option<u64>) -> io::Result<Self> {
         if !alignment.is_power_of_two() || alignment > 65536 {
@@ -66,10 +75,9 @@ impl<R: Read + Seek> Read for SourceReader<R> {
             self.position < start || self.position >= start + self.cached_len as u64
         }) {
             self.inner.seek(SeekFrom::Start(aligned))?;
-            let mut required = self
-                .size
-                .map(|n| to_usize((n - aligned).min(self.window_size as u64)))
-                .unwrap_or(self.window_size);
+            let mut required = self.size.map_or(self.window_size, |n| {
+                to_usize((n - aligned).min(self.window_size as u64))
+            });
             // A failed refill must not expose new bytes under the old offset.
             self.cached_at = None;
             self.cached_len = 0;
@@ -86,7 +94,7 @@ impl<R: Read + Seek> Read for SourceReader<R> {
                     }
                     Ok(0) => break,
                     Ok(n) => self.cached_len += n,
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                     Err(e) if is_media_error(&e) && required > self.alignment => {
                         // A large read may include a bad sector beyond the requested bytes.
                         // Retry only the sector at the current position before failing.
@@ -265,6 +273,6 @@ mod tests {
         let out = out_temp.path().join("aligned.pdf");
         crate::recover_reader(&mut reader, &out, &found[0]).unwrap();
         assert_eq!(std::fs::read(&out).unwrap(), content);
-        assert!(reader.seek(SeekFrom::Current(-100000)).is_err());
+        reader.seek(SeekFrom::Current(-100_000)).unwrap_err();
     }
 }

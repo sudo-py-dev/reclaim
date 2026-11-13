@@ -1,6 +1,6 @@
 use reclaim::{Event, Found, Validation, recover_reader, scan_reader};
 use std::{
-    io::{self, Cursor, Read, Seek, SeekFrom},
+    io::{self, Cursor, Read, Seek, SeekFrom, Write},
     sync::atomic::{AtomicBool, Ordering},
 };
 const FIXTURES: &[(&str, &[u8])] = &[
@@ -38,7 +38,7 @@ fn collect(input: &mut (impl Read + Seek)) -> Vec<Found> {
     let mut found = Vec::new();
     scan_reader(input, &AtomicBool::new(false), |e| {
         if let Event::Found(f) = e {
-            found.push(f)
+            found.push(f);
         }
     })
     .unwrap();
@@ -148,7 +148,7 @@ fn short_device_reads_and_cancellation_are_supported() {
     scan_reader(&mut Cursor::new(FIXTURES[0].1), &cancel, |e| match e {
         Event::Checking { .. } => cancel.store(true, Ordering::Relaxed),
         Event::Found(_) => found += 1,
-        _ => {}
+        Event::Unreadable { .. } | Event::UnusedSpace { .. } | Event::Progress(_) => {}
     })
     .unwrap();
     assert_eq!(found, 0);
@@ -274,7 +274,7 @@ fn swf_extended_tags_are_bounded_and_version_eight_requires_file_attributes() {
 
 #[test]
 fn varied_header_mutations_never_panic_or_report_out_of_bounds_files() {
-    let mut state = 0x3141592653589793u64;
+    let mut state = 0x3141_5926_5358_9793_u64;
     for (_, fixture) in FIXTURES {
         for _ in 0..48 {
             let mut bytes = fixture.to_vec();
@@ -310,7 +310,6 @@ fn gzip_crc_and_xar_xml_are_checked_and_archive_members_do_not_consume_neighbour
     );
     let plain = b'X';
     let xml = b"<!DOCTYPE xar [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><xar><toc/></xar>";
-    use std::io::Write;
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(xml).unwrap();
     let toc = encoder.finish().unwrap();

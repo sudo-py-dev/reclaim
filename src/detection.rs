@@ -8,13 +8,23 @@ pub(crate) enum CandidateEnd {
     Invalid,
     Complete(usize),
 }
+impl CandidateEnd {
+    /// The verdict for any failure inside data a parser already holds in full.
+    ///
+    /// A carving verdict needs no error detail: a bad field, a failed decode or
+    /// invalid text all mean the bytes are not this format. Used as
+    /// `.map_err(CandidateEnd::malformed)` so the choice is visible at each site.
+    pub(crate) fn malformed<E>(_error: E) -> Self {
+        Self::Invalid
+    }
+}
 use std::{
     collections::BTreeMap,
     sync::atomic::{AtomicBool, Ordering},
 };
 
 pub(crate) fn sqlite_end(bytes: &[u8]) -> CandidateEnd {
-    use CandidateEnd::*;
+    use CandidateEnd::{Complete, Invalid, More};
     if bytes.len() < 100 {
         return More;
     }
@@ -145,7 +155,7 @@ impl Ogg {
     }
 
     pub(crate) fn push(&mut self, bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {
-        use CandidateEnd::*;
+        use CandidateEnd::{Complete, Invalid, More};
         loop {
             if cancel.load(Ordering::Relaxed) {
                 return Invalid;

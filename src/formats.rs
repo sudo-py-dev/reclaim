@@ -1,4 +1,4 @@
-//! Format-specific bounded probes. See docs/FILE_FORMAT_RESEARCH.md for sources
+//! Format-specific bounded probes. See `docs/FILE_FORMAT_RESEARCH.md` for sources
 //! and recovery limits. No recovered program or archive is ever executed.
 use crate::bytes::to_usize;
 use crate::{CandidateEnd, Validation, detection::LIMIT};
@@ -99,7 +99,7 @@ pub(crate) fn end(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Candi
             "dex" => dex(bytes),
             "gz" => match Gzip::default().push(bytes, cancel) {
                 CandidateEnd::Complete(n) => Ok(n),
-                state => Err(state),
+                state @ (CandidateEnd::More | CandidateEnd::Invalid) => Err(state),
             },
             "xar" | "pkg" => xar::inspect(bytes, cancel).map(|(size, _)| size),
             // Only the kinds listed above reach this function.
@@ -392,7 +392,7 @@ fn deb(b: &[u8], cancel: &AtomicBool) -> Probe {
             return Err(CandidateEnd::Invalid);
         }
         let name = std::str::from_utf8(&b[at..at + 16])
-            .map_err(|_| CandidateEnd::Invalid)?
+            .map_err(CandidateEnd::malformed)?
             .trim_end()
             .trim_end_matches('/');
         let size = decimal(&b[at + 48..at + 58]).ok_or(CandidateEnd::Invalid)?;
@@ -404,14 +404,14 @@ fn deb(b: &[u8], cancel: &AtomicBool) -> Probe {
                 && b[at + 60..stop].starts_with(b"2.")
                 && b[stop - 1] == b'\n' =>
             {
-                stage = 1
+                stage = 1;
             }
             1 if matches!(
                 name,
                 "control.tar" | "control.tar.gz" | "control.tar.xz" | "control.tar.zst"
             ) && size > 0 =>
             {
-                stage = 2
+                stage = 2;
             }
             2 if matches!(
                 name,
@@ -615,18 +615,18 @@ fn rar(b: &[u8], cancel: &AtomicBool) -> Probe {
         }
         // Parse within this header only; malformed fields must not consume data.
         let header = &b[..end];
-        let kind = vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
-        let flags = vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
+        let kind = vint(header, &mut p).map_err(CandidateEnd::malformed)?;
+        let flags = vint(header, &mut p).map_err(CandidateEnd::malformed)?;
         if flags & 0x18 != 0 || flags & !0x7f != 0 {
             return Err(CandidateEnd::Invalid);
         }
         let extra = if flags & 1 != 0 {
-            vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?
+            vint(header, &mut p).map_err(CandidateEnd::malformed)?
         } else {
             0
         };
         let data = if flags & 2 != 0 {
-            vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?
+            vint(header, &mut p).map_err(CandidateEnd::malformed)?
         } else {
             0
         };
@@ -635,16 +635,16 @@ fn rar(b: &[u8], cancel: &AtomicBool) -> Probe {
         }
         match kind {
             1 if !main && at == 8 => {
-                let archive_flags = vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
+                let archive_flags = vint(header, &mut p).map_err(CandidateEnd::malformed)?;
                 if archive_flags & 1 != 0 {
                     return Err(CandidateEnd::Invalid);
                 }
                 main = true;
             }
             2 | 3 if main => {
-                let f = vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
-                vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
-                vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
+                let f = vint(header, &mut p).map_err(CandidateEnd::malformed)?;
+                vint(header, &mut p).map_err(CandidateEnd::malformed)?;
+                vint(header, &mut p).map_err(CandidateEnd::malformed)?;
                 if f & 2 != 0 {
                     p += 4;
                 }
@@ -654,16 +654,16 @@ fn rar(b: &[u8], cancel: &AtomicBool) -> Probe {
                 if p > header.len() {
                     return Err(CandidateEnd::Invalid);
                 }
-                vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
-                vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
-                let name = vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)?;
+                vint(header, &mut p).map_err(CandidateEnd::malformed)?;
+                vint(header, &mut p).map_err(CandidateEnd::malformed)?;
+                let name = vint(header, &mut p).map_err(CandidateEnd::malformed)?;
                 if name == 0 || name > end.saturating_sub(p) as u64 {
                     return Err(CandidateEnd::Invalid);
                 }
                 p += to_usize(name);
             }
             5 if main && data == 0 => {
-                if vint(header, &mut p).map_err(|_| CandidateEnd::Invalid)? != 0
+                if vint(header, &mut p).map_err(CandidateEnd::malformed)? != 0
                     || p + to_usize(extra) != end
                 {
                     return Err(CandidateEnd::Invalid);
@@ -781,7 +781,7 @@ fn dex(b: &[u8]) -> Probe {
             b"035\0" | b"037\0" | b"038\0" | b"039\0" | b"040\0"
         )
         || le32(b, 36) != 112
-        || le32(b, 40) != 0x12345678
+        || le32(b, 40) != 0x1234_5678
     {
         return Err(CandidateEnd::Invalid);
     }

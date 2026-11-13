@@ -55,13 +55,12 @@ fn line_of_key(ws: &Workspace, path: &str, key: &str) -> usize {
     ws.file(path)
         .lines()
         .position(|l| l.trim_start().starts_with(&quoted))
-        .map(|i| i + 1)
-        .unwrap_or(1)
+        .map_or(1, |i| i + 1)
 }
 
 /// `{0}`, `{e}`, `{}` and `{code:08X}` are all one placeholder to the translator,
 /// which matches the text around them.
-pub fn normalize(text: &str) -> String {
+pub(crate) fn normalize(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
     while let Some(c) = chars.next() {
@@ -85,7 +84,7 @@ fn placeholders(text: &str) -> Vec<String> {
         let Some(end) = rest[start..].find('}') else {
             break;
         };
-        found.push(rest[start..start + end + 1].to_owned());
+        found.push(rest[start..=(start + end)].to_owned());
         rest = &rest[start + end + 1..];
     }
     found.sort();
@@ -94,7 +93,7 @@ fn placeholders(text: &str) -> Vec<String> {
 
 /// Catalog integrity: the same keys everywhere, no duplicates, nothing empty,
 /// placeholders preserved, English values equal to their keys.
-pub fn catalogs(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn catalogs(ws: &Workspace) -> Vec<Finding> {
     let catalogs = load(ws);
     let mut findings = Vec::new();
     let english: BTreeSet<&str> = catalogs[0].pairs.iter().map(|(k, _)| k.as_str()).collect();
@@ -291,14 +290,14 @@ fn has_unanchored_trailing_symbol(value: &str) -> bool {
 /// Whether a literal reads like a sentence meant for people rather than an
 /// identifier, format, path or file signature.
 fn looks_like_message(text: &str) -> bool {
-    let words: Vec<&str> = text
-        .split_whitespace()
-        .filter(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 2)
-        .collect();
     text.trim() == text
         && text.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-        && words.len() >= 2
-        && text.chars().any(|c| c.is_lowercase())
+        && text
+            .split_whitespace()
+            .filter(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 2)
+            .count()
+            >= 2
+        && text.chars().any(char::is_lowercase)
         && !text.chars().any(char::is_control)
         && !["://", "::", "\\", "=", "%", "/dev/", "$"]
             .iter()
@@ -306,16 +305,12 @@ fn looks_like_message(text: &str) -> bool {
 }
 
 fn english(ws: &Workspace) -> BTreeMap<String, String> {
-    load(ws)
-        .into_iter()
-        .next()
-        .map(|c| {
-            c.pairs
-                .into_iter()
-                .map(|(k, _)| (normalize(&k), k))
-                .collect()
-        })
-        .unwrap_or_default()
+    load(ws).into_iter().next().map_or_default(|c| {
+        c.pairs
+            .into_iter()
+            .map(|(k, _)| (normalize(&k), k))
+            .collect()
+    })
 }
 
 /// String literals in `ui/app.slint` outside the `Strings` global, which the app
@@ -349,7 +344,7 @@ fn slint_literals(ws: &Workspace) -> Vec<(usize, String)> {
 
 /// Interface text in the code that has no catalog entry is shown in English to
 /// everyone. Log lines, assertions and attribute text are not interface text.
-pub fn missing(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn missing(ws: &Workspace) -> Vec<Finding> {
     let keys = english(ws);
     let mut findings = Vec::new();
     for file in ws.rust.iter().filter(|f| f.path.starts_with("src/")) {
@@ -389,7 +384,7 @@ pub fn missing(ws: &Workspace) -> Vec<Finding> {
 
 /// Keys no production code refers to. The translator derives singular forms
 /// (`files` to `file`), so those count as used when their plural is.
-pub fn dead(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn dead(ws: &Workspace) -> Vec<Finding> {
     let mut used: BTreeSet<String> = BTreeSet::new();
     for file in ws.rust.iter().filter(|f| f.path.starts_with("src/")) {
         for event in &file.production {
@@ -440,7 +435,7 @@ pub fn dead(ws: &Workspace) -> Vec<Finding> {
 
 /// Every translatable property in the `Strings` global has a setter in
 /// `src/ui_text.rs`, and its built-in English default is the same text.
-pub fn slint_strings(ws: &Workspace) -> Vec<Finding> {
+pub(crate) fn slint_strings(ws: &Workspace) -> Vec<Finding> {
     let slint = ws.file("ui/app.slint");
     let ui_text = ws.file("src/ui_text.rs");
     let mut setters: BTreeMap<String, String> = BTreeMap::new();

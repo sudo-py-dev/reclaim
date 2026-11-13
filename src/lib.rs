@@ -123,7 +123,7 @@ fn portable_name(name: &str) -> String {
             }
         })
         .collect();
-    name = name.trim_end_matches([' ', '.']).to_owned();
+    name.truncate(name.trim_end_matches([' ', '.']).len());
     let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
     if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (stem.len() == 4
@@ -153,6 +153,7 @@ fn portable_name(name: &str) -> String {
     name
 }
 
+#[derive(Debug)]
 pub enum Event {
     /// Absolute source byte range that could not be read (offset, length).
     Unreadable {
@@ -705,6 +706,19 @@ fn candidate_kind(fmt: &Format, bytes: &[u8]) -> &'static str {
 // Only classify packages from a complete, single-disk classic ZIP directory.
 // Names appearing in compressed payloads must not change the recovered extension.
 fn zip_kind(bytes: &[u8]) -> &'static str {
+    const PACKAGE_NAMES: &[&[u8]] = &[
+        b"[Content_Types].xml",
+        b"word/document.xml",
+        b"word/vbaProject.bin",
+        b"xl/workbook.xml",
+        b"xl/vbaProject.bin",
+        b"ppt/presentation.xml",
+        b"ppt/vbaProject.bin",
+        b"META-INF/container.xml",
+        b"AndroidManifest.xml",
+        b"classes.dex",
+        b"META-INF/MANIFEST.MF",
+    ];
     // The classic EOCD is 22 bytes plus at most a u16-sized comment.
     let search_start = bytes.len().saturating_sub(22 + u16::MAX as usize);
     let Some((relative, _)) = bytes[search_start..]
@@ -720,19 +734,6 @@ fn zip_kind(bytes: &[u8]) -> &'static str {
     let u32_at = |p| bytes::u32_le(bytes, p) as usize;
     let count = u16_at(eocd + 10);
     let mut cursor = u32_at(eocd + 16);
-    const PACKAGE_NAMES: &[&[u8]] = &[
-        b"[Content_Types].xml",
-        b"word/document.xml",
-        b"word/vbaProject.bin",
-        b"xl/workbook.xml",
-        b"xl/vbaProject.bin",
-        b"ppt/presentation.xml",
-        b"ppt/vbaProject.bin",
-        b"META-INF/container.xml",
-        b"AndroidManifest.xml",
-        b"classes.dex",
-        b"META-INF/MANIFEST.MF",
-    ];
     let mut names = [false; PACKAGE_NAMES.len()];
     let mut mime = None;
     for _ in 0..count {
@@ -810,7 +811,7 @@ fn read_chunk(input: &mut impl Read, bytes: &mut [u8], cancel: &AtomicBool) -> i
             return Ok(0);
         }
         match input.read(bytes) {
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             result => return result,
         }
     }
@@ -1068,6 +1069,15 @@ pub struct FoundReader<'a, R> {
     used: u64,
     remaining: u64,
 }
+impl<R> std::fmt::Debug for FoundReader<'_, R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FoundReader")
+            .field("extents", &self.extents.len())
+            .field("current", &self.current)
+            .field("remaining", &self.remaining)
+            .finish_non_exhaustive()
+    }
+}
 impl<'a, R: Read + Seek> FoundReader<'a, R> {
     pub fn new(input: &'a mut R, found: &'a Found) -> io::Result<Self> {
         let extents = match &found.extents {
@@ -1150,8 +1160,7 @@ pub fn recover_unique(
         .to_string_lossy();
     let extension = path
         .extension()
-        .map(|ext| format!(".{}", ext.to_string_lossy()))
-        .unwrap_or_default();
+        .map_or_default(|ext| format!(".{}", ext.to_string_lossy()));
     for attempt in 0..10_000 {
         let name = if attempt == 0 {
             name.clone()
@@ -1161,7 +1170,7 @@ pub fn recover_unique(
         let destination = directory.join(name);
         match recover_reader(input, &destination, found) {
             Ok(()) => return Ok(destination),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e),
         }
     }
@@ -1180,7 +1189,7 @@ pub fn recover_reader(
     if (found.size == 0 && found.resident_data.is_none())
         || (found.size > LIMIT as u64
             && found.extents.is_none()
-            && !(found.kind == "zip" && found.size <= u32::MAX as u64 + 65557))
+            && !(found.kind == "zip" && found.size <= u64::from(u32::MAX) + 65557))
         || found
             .resident_data
             .as_ref()
@@ -1381,7 +1390,7 @@ mod tests {
         let mut results = vec![];
         scan(&source, &AtomicBool::new(false), |e| {
             if let Event::Found(f) = e {
-                results.push(f)
+                results.push(f);
             }
         })
         .unwrap();
@@ -1398,15 +1407,11 @@ mod tests {
             let mut bytes = pdf.to_vec();
             bytes.extend_from_slice(&[0; 64]);
             let mut results = vec![];
-            scan_reader(
-                &mut std::io::Cursor::new(&bytes),
-                &AtomicBool::new(false),
-                |e| {
-                    if let Event::Found(f) = e {
-                        results.push(f)
-                    }
-                },
-            )
+            scan_reader(&mut io::Cursor::new(&bytes), &AtomicBool::new(false), |e| {
+                if let Event::Found(f) = e {
+                    results.push(f);
+                }
+            })
             .unwrap();
             assert_eq!(results.len(), 1);
             let found = &results[0];
@@ -1455,7 +1460,7 @@ mod tests {
             let mut count = 0;
             scan(&p, &AtomicBool::new(cancelled), |e| {
                 if matches!(e, Event::Found(_)) {
-                    count += 1
+                    count += 1;
                 }
             })
             .unwrap();

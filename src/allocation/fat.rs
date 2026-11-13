@@ -1,5 +1,8 @@
 use super::directory;
-use super::*;
+use super::{
+    AtomicBool, BitOrder, MAX_MAP, Plan, Read, Seek, check, files_or_none, from_bitmap, invalid,
+    io, product, read_at, u16at, u32at, u64at,
+};
 use crate::bytes::to_usize;
 use std::collections::HashSet;
 struct Table {
@@ -59,7 +62,7 @@ impl Table {
                 }
             }
             16 => u16at(&self.bytes(input, cluster * 2, 2, total, cancel)?, 0),
-            32 => u32at(&self.bytes(input, cluster * 4, 4, total, cancel)?, 0) & 0x0fffffff,
+            32 => u32at(&self.bytes(input, cluster * 4, 4, total, cancel)?, 0) & 0x0fff_ffff,
             _ => u32at(&self.bytes(input, cluster * 4, 4, total, cancel)?, 0),
         })
     }
@@ -108,7 +111,7 @@ pub(super) fn classic(
         (32, "FAT32")
     };
     if clusters == 0
-        || clusters > 0x0ffffff5
+        || clusters > 0x0fff_fff5
         || (bits == 32 && (roots != 0 || u16at(b, 22) != 0 || u16at(b, 42) != 0))
         || (bits != 32 && (roots == 0 || u16at(b, 22) == 0))
     {
@@ -172,12 +175,12 @@ pub(super) fn classic(
     let Some(table) = tables.first_mut() else {
         return Ok(plan);
     };
-    plan.files = super::files_or_none(
+    plan.files = files_or_none(
         classic_files(
             input,
             table,
             bits,
-            root_directory,
+            &root_directory,
             heap,
             &plan,
             total,
@@ -261,7 +264,7 @@ fn read_clusters(
 /// The clusters a deleted file stored in one piece from `start` would use,
 /// if all of them are still unused.
 fn free_run(plan: &Plan, heap: directory::Heap, start: u64, size: u64) -> Option<Vec<u64>> {
-    let count = heap.cluster_count(size)?;
+    let count = heap.cluster_count(size);
     let end = start.checked_add(count)?;
     if end.checked_sub(1)? > heap.last {
         return None;
@@ -284,7 +287,7 @@ fn classic_files(
     input: &mut (impl Read + Seek),
     table: &mut Table,
     bits: u32,
-    root: Root,
+    root: &Root,
     heap: directory::Heap,
     plan: &Plan,
     total: u64,
@@ -295,7 +298,7 @@ fn classic_files(
     let mut pending: Vec<(Option<u64>, usize)> = vec![(None, 0)];
     while let Some((start, depth)) = pending.pop() {
         check(cancel)?;
-        let data = match (start.as_ref(), &root) {
+        let data = match (start.as_ref(), root) {
             (None, Root::Fixed(at, length)) => {
                 if !budget.take(*length) {
                     break;
@@ -366,7 +369,7 @@ pub(super) fn exfat(
     let root = u32at(b, 96);
     let flags = u16at(b, 106);
     if clusters == 0
-        || clusters > 0xfffffff5
+        || clusters > 0xffff_fff5
         || clusters.div_ceil(8) > MAX_MAP as u64
         || fat_start < 24
         || fat_length == 0
@@ -448,7 +451,7 @@ pub(super) fn exfat(
         }
         let next = table.entry(input, current, 64, total, cancel)?;
         // exFAT uses the full 32-bit value, unlike FAT32's 28-bit entries.
-        if next >= 0xfffffff8 {
+        if next >= 0xffff_fff8 {
             break;
         }
         current = next;
@@ -501,7 +504,7 @@ pub(super) fn exfat(
         cluster_size,
         last: clusters + 1,
     };
-    plan.files = super::files_or_none(
+    plan.files = files_or_none(
         exfat_files(input, &mut table, root, heap, &plan, total, cancel),
         "exFAT",
         cancel,
@@ -528,7 +531,7 @@ fn exfat_files(
     while let Some((start, length, contiguous, depth)) = pending.pop() {
         check(cancel)?;
         let clusters = if contiguous {
-            let Some(count) = length.and_then(|length| heap.cluster_count(length)) else {
+            let Some(count) = length.map(|length| heap.cluster_count(length)) else {
                 continue;
             };
             let Some(end) = start.checked_add(count) else {
@@ -555,16 +558,16 @@ fn exfat_files(
                     }
                 }
                 directory::ExfatEntry::Deleted(name, size, cluster, contiguous) => {
-                    let mut clusters = None;
-                    if !contiguous
+                    let clusters = if !contiguous
                         && let Some(found) = chain(input, table, cluster, 64, heap, total, cancel)?
-                        && heap.cluster_count(size) == Some(found.len() as u64)
+                        && heap.cluster_count(size) == found.len() as u64
                         && heap.extents(&found).is_some_and(|extents| {
                             extents.iter().all(|(at, len)| plan.is_unused(*at, *len))
-                        })
-                    {
-                        clusters = Some(found);
-                    }
+                        }) {
+                        Some(found)
+                    } else {
+                        None
+                    };
                     let Some(clusters) = clusters.or_else(|| free_run(plan, heap, cluster, size))
                     else {
                         continue;

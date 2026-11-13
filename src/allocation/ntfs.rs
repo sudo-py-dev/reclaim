@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    AtomicBool, BitOrder, MAX_MAP, Ordering, Plan, Read, Seek, check, files_or_none, from_bitmap,
+    invalid, io, product, read_at, u16at, u32at, u64at,
+};
 use crate::bytes::to_usize;
 #[derive(Clone)]
 struct Stream {
@@ -59,7 +62,7 @@ fn data(record: &[u8], clusters: u64, cluster_size: u64) -> io::Result<Data> {
     let mut terminated = false;
     while at + 4 <= used {
         let kind = u32at(record, at);
-        if kind == 0xffffffff {
+        if kind == 0xffff_ffff {
             terminated = true;
             break;
         }
@@ -320,7 +323,7 @@ pub(super) fn plan(
         cluster_size,
         clusters,
     };
-    plan.files = super::files_or_none(
+    plan.files = files_or_none(
         deleted_files(input, &mft, record_size, geometry, &bitmap, total, cancel),
         "MFT",
         cancel,
@@ -402,22 +405,18 @@ fn deleted_files(
             let Some(mut file) = crate::ntfs::deleted_file(raw.to_vec(), geometry, cancel) else {
                 continue;
             };
-            match &file.extents {
-                Some(extents) => {
-                    if !extents
-                        .iter()
-                        .all(|(at, length)| all_free(bitmap, *at, *length, geometry.cluster_size))
-                    {
-                        continue;
-                    }
+            if let Some(extents) = &file.extents {
+                if !extents
+                    .iter()
+                    .all(|(at, length)| all_free(bitmap, *at, *length, geometry.cluster_size))
+                {
+                    continue;
                 }
-                None => {
-                    let Some(at) = physical(mft, number * record_size, geometry.cluster_size)
-                    else {
-                        continue;
-                    };
-                    file.offset = at;
-                }
+            } else {
+                let Some(at) = physical(mft, number * record_size, geometry.cluster_size) else {
+                    continue;
+                };
+                file.offset = at;
             }
             files.push(file);
             if files.len() >= MAX_DELETED {

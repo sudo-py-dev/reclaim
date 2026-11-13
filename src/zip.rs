@@ -12,10 +12,10 @@ use std::{
 };
 const MAX_END: u64 = u32::MAX as u64 + 65557;
 fn short(bytes: &[u8], at: usize) -> u64 {
-    crate::bytes::u16_le(bytes, at) as u64
+    u64::from(crate::bytes::u16_le(bytes, at))
 }
 fn long(bytes: &[u8], at: usize) -> u64 {
-    crate::bytes::u32_le(bytes, at) as u64
+    u64::from(crate::bytes::u32_le(bytes, at))
 }
 fn read<const N: usize>(
     input: &mut (impl Read + Seek),
@@ -58,7 +58,7 @@ pub(crate) fn large_end(
 ) -> io::Result<Option<u64>> {
     Ok(match inspect(input, start, cancel)? {
         Inspection::Complete(size) if size > crate::LIMIT as u64 => Some(size),
-        _ => None,
+        Inspection::Complete(_) | Inspection::Invalid | Inspection::Unsupported => None,
     })
 }
 fn walk(input: &mut (impl Read + Seek), start: u64, cancel: &AtomicBool) -> io::Result<Inspection> {
@@ -81,7 +81,7 @@ fn walk(input: &mut (impl Read + Seek), start: u64, cancel: &AtomicBool) -> io::
         if short(&header, 26) == 0 || short(&header, 4) > 63 {
             return Ok(Inspection::Invalid);
         }
-        if short(&header, 6) & 8 != 0 || long(&header, 18) == u32::MAX as u64 {
+        if short(&header, 6) & 8 != 0 || long(&header, 18) == u64::from(u32::MAX) {
             return Ok(Inspection::Unsupported);
         }
         locals.insert(at);

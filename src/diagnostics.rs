@@ -124,7 +124,7 @@ pub fn install() {
         }
     }
     if let Err(error) = hardening {
-        write(&error);
+        write(&format!("{error:#}"));
     }
     if log::set_logger(&LOGGER).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
@@ -150,7 +150,7 @@ pub fn install() {
 /// file the user opened could run inside Reclaim (CWE-427). One-way and
 /// process-wide.
 #[cfg(windows)]
-fn restrict_dll_search() -> Result<(), String> {
+fn restrict_dll_search() -> anyhow::Result<()> {
     use windows_sys::Win32::System::LibraryLoader::{
         LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
     };
@@ -158,18 +158,21 @@ fn restrict_dll_search() -> Result<(), String> {
     let ok = unsafe {
         SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR)
     };
-    if ok == 0 {
-        return Err(format!(
-            // audit-allow(I18N-MISSING): a line in the diagnostic log, not interface text.
-            "Could not restrict the DLL search path: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
+    anyhow::ensure!(
+        ok != 0,
+        // audit-allow(I18N-MISSING): a line in the diagnostic log, not interface text.
+        "Could not restrict the DLL search path: {}",
+        std::io::Error::last_os_error()
+    );
     Ok(())
 }
 
 #[cfg(not(windows))]
-fn restrict_dll_search() -> Result<(), String> {
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "same signature as the Windows version, which can fail"
+)]
+fn restrict_dll_search() -> anyhow::Result<()> {
     Ok(())
 }
 
@@ -178,10 +181,10 @@ fn restrict_dll_search() -> Result<(), String> {
 pub fn report(summary: &str, details: &str) {
     use reclaim::i18n;
     write(&format!("ERROR: {summary}\n{details}"));
-    let location = LOG_PATH
-        .get()
-        .map(|path| i18n::message("Diagnostic log: {0}", &[&path.display().to_string()]))
-        .unwrap_or_else(|| i18n::t("The diagnostic log could not be written."));
+    let location = LOG_PATH.get().map_or_else(
+        || i18n::t("The diagnostic log could not be written."),
+        |path| i18n::message("Diagnostic log: {0}", &[&path.display().to_string()]),
+    );
     let display_details: String = details.chars().take(2000).collect();
     let hint = i18n::t(
         "If this is a virtual machine, install or update its graphics drivers or guest additions.",
@@ -202,7 +205,7 @@ pub fn report(summary: &str, details: &str) {
             .encode_utf16()
             .chain(Some(0))
             .collect();
-        let title: Vec<u16> = reclaim::i18n::t("Reclaim could not continue")
+        let title: Vec<u16> = i18n::t("Reclaim could not continue")
             .encode_utf16()
             .chain(Some(0))
             .collect();

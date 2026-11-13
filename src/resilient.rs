@@ -57,8 +57,9 @@ impl<R: Read + Seek> Read for Reader<'_, R> {
             .ranges
             .range(at..)
             .next()
-            .map(|(&start, _)| to_usize(start.saturating_sub(at).min(bytes.len() as u64)))
-            .unwrap_or(bytes.len());
+            .map_or(bytes.len(), |(&start, _)| {
+                to_usize(start.saturating_sub(at).min(bytes.len() as u64))
+            });
         let Some(bytes) = bytes.get_mut(..before_next) else {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         };
@@ -127,7 +128,7 @@ pub(crate) fn scan(
     let damage = Rc::new(RefCell::new(Damage::default()));
     let mut reader = Reader {
         input,
-        damage: damage.clone(),
+        damage: Rc::clone(&damage),
         cancel,
         area_end,
     };
@@ -210,7 +211,7 @@ mod tests {
                 |e| match e {
                     Event::Found(f) => found.push(f.offset),
                     Event::Unreadable { offset, bytes } => skipped.push((offset, bytes)),
-                    _ => {}
+                    Event::UnusedSpace { .. } | Event::Progress(_) | Event::Checking { .. } => {}
                 },
                 32768,
                 &|_| u64::MAX,
@@ -255,7 +256,7 @@ mod tests {
         drop(reader);
         assert_eq!(input.reads, 2);
         input.seek(SeekFrom::Start(8192)).unwrap();
-        assert!(input.read(&mut [0; 4096]).is_err());
+        input.read(&mut [0; 4096]).unwrap_err();
     }
 }
 

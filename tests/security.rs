@@ -91,14 +91,14 @@ fn source_reader_preserves_bytes_and_checks_seek_bounds() {
         let mut buffer = [0; 7];
         source.read_exact(&mut buffer).unwrap();
         assert_eq!(buffer, data[511..518]);
-        assert!(source.seek(SeekFrom::Current(-519)).is_err());
+        source.seek(SeekFrom::Current(-519)).unwrap_err();
         assert_eq!(source.stream_position().unwrap(), 518);
         source.seek(SeekFrom::End(-7)).unwrap();
         source.read_exact(&mut buffer).unwrap();
         assert_eq!(buffer, data[2041..]);
         assert_eq!(source.read(&mut buffer).unwrap(), 0);
         source.seek(SeekFrom::Start(u64::MAX)).unwrap();
-        assert!(source.seek(SeekFrom::Current(1)).is_err());
+        source.seek(SeekFrom::Current(1)).unwrap_err();
         assert_eq!(source.read(&mut buffer).unwrap(), 0);
     }
 }
@@ -154,9 +154,15 @@ fn simultaneous_exports_never_replace_each_other_or_existing_data() {
     std::fs::write(&existing, b"irreplaceable").unwrap();
     let barrier = Arc::new(Barrier::new(8));
     let outputs = std::thread::scope(|scope| {
+        // Collected first: every worker must be spawned before any is joined,
+        // or the barrier never fills.
+        #[expect(
+            clippy::needless_collect,
+            reason = "all threads must start before the first join"
+        )]
         let workers: Vec<_> = (0u8..8)
             .map(|value| {
-                let barrier = barrier.clone();
+                let barrier = Arc::clone(&barrier);
                 let directory = directory.path();
                 scope.spawn(move || {
                     barrier.wait();

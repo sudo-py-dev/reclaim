@@ -72,10 +72,10 @@ fn check(cancel: &AtomicBool) -> io::Result<()> {
     }
 }
 fn u16at(b: &[u8], p: usize) -> u64 {
-    crate::bytes::u16_le(b, p) as u64
+    u64::from(crate::bytes::u16_le(b, p))
 }
 fn u32at(b: &[u8], p: usize) -> u64 {
-    crate::bytes::u32_le(b, p) as u64
+    u64::from(crate::bytes::u32_le(b, p))
 }
 fn u64at(b: &[u8], p: usize) -> u64 {
     crate::bytes::u64_le(b, p)
@@ -305,7 +305,8 @@ impl<R: Read + Seek> Seek for FreeSpace<'_, R> {
             SeekFrom::Current(n) => i128::from(self.position) + i128::from(n),
             SeekFrom::End(n) => i128::from(self.length) + i128::from(n),
         };
-        self.position = u64::try_from(next).map_err(|_| invalid("Invalid candidate position"))?;
+        self.position = u64::try_from(next)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         Ok(self.position)
     }
 }
@@ -316,7 +317,7 @@ impl<R: Read + Seek> Seek for FreeSpace<'_, R> {
 /// first bytes match its type is trusted to own that space; the others stay in
 /// the list as unverified and their space is still carved, so a newer deleted
 /// file stored there is not hidden.
-fn exclude_known_files(input: &mut (impl Read + Seek), plan: &mut Plan) -> io::Result<()> {
+fn exclude_known_files(input: &mut (impl Read + Seek), plan: &mut Plan) {
     let mut owned: Vec<(u64, u64)> = Vec::new();
     for file in &mut plan.files {
         let Some(extents) = file.extents.clone() else {
@@ -347,12 +348,11 @@ fn exclude_known_files(input: &mut (impl Read + Seek), plan: &mut Plan) -> io::R
         }
     }
     if owned.is_empty() {
-        return Ok(());
+        return;
     }
     owned.sort_unstable();
     plan.ranges = subtract(&plan.ranges, &owned);
     plan.unused = plan.ranges.iter().map(|(_, length)| length).sum();
-    Ok(())
 }
 /// `ranges` with the sorted `owned` ranges cut out.
 fn subtract(ranges: &[(u64, u64)], owned: &[(u64, u64)]) -> Vec<(u64, u64)> {
@@ -401,7 +401,7 @@ pub(crate) fn scan(
         }
         result => result?,
     };
-    exclude_known_files(input, &mut plan)?;
+    exclude_known_files(input, &mut plan);
     event(crate::Event::UnusedSpace {
         bytes: plan.unused,
         filesystem: plan.filesystem,
@@ -470,7 +470,7 @@ pub(crate) fn scan(
                 event(crate::Event::Found(file));
             }
             crate::Event::Progress(bytes) => {
-                event(crate::Event::Progress(scale(bytes.min(length))))
+                event(crate::Event::Progress(scale(bytes.min(length))));
             }
             crate::Event::Checking {
                 offset,

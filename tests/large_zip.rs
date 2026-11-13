@@ -23,7 +23,7 @@ fn archive(file: &mut std::fs::File, prefix: u64) -> u64 {
     file.seek(SeekFrom::Start(prefix)).unwrap();
     file.write_all(&local).unwrap();
     file.write_all(b"a").unwrap();
-    let directory = 31 + size as u64;
+    let directory = 31 + u64::from(size);
     file.seek(SeekFrom::Start(prefix + directory)).unwrap();
     let mut central = [0; 46];
     central[..4].copy_from_slice(b"PK\x01\x02");

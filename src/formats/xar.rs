@@ -38,7 +38,7 @@ pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), Ca
         .by_ref()
         .take(unpacked.saturating_add(1))
         .read_to_end(&mut xml)
-        .map_err(|_| CandidateEnd::Invalid)?;
+        .map_err(CandidateEnd::malformed)?;
     if xml.len() as u64 != unpacked || decoder.total_in() != compressed {
         return Err(CandidateEnd::Invalid);
     }
@@ -53,7 +53,7 @@ pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), Ca
         if cancel.load(Ordering::Relaxed) {
             return Err(CandidateEnd::Invalid);
         }
-        match reader.read_event().map_err(|_| CandidateEnd::Invalid)? {
+        match reader.read_event().map_err(CandidateEnd::malformed)? {
             Event::Start(element) => {
                 if stack.len() >= 64 {
                     return Err(CandidateEnd::Invalid);
@@ -126,7 +126,7 @@ pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), Ca
                 need(b, end)?;
                 return Ok((end, package));
             }
-            _ => {}
+            Event::Empty(_) | Event::Comment(_) | Event::Decl(_) | Event::PI(_) => {}
         }
     }
     Err(CandidateEnd::Invalid)

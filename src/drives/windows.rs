@@ -12,8 +12,19 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE},
-    Storage::FileSystem::*,
-    System::{IO::DeviceIoControl, Ioctl::*},
+    Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDriveTypeW,
+        GetLogicalDrives, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
+        GetVolumePathNameW, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING, QueryDosDeviceW,
+    },
+    System::{
+        IO::DeviceIoControl,
+        Ioctl::{
+            DISK_EXTENT, DISK_GEOMETRY, DISK_GEOMETRY_EX, FSCTL_ALLOW_EXTENDED_DASD_IO,
+            IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_QUERY_PROPERTY,
+            STORAGE_DEVICE_DESCRIPTOR, VOLUME_DISK_EXTENTS,
+        },
+    },
 };
 
 fn wide(text: &str) -> Vec<u16> {
@@ -28,7 +39,7 @@ fn is_volume_device(path: &Path) -> bool {
 
 /// Read-only access through the end of a Windows volume. Without extended DASD
 /// reads, filesystem boundary checks can return EOF before the partition ends,
-/// including during SourceReader's bounded read-ahead near the final clusters.
+/// including during `SourceReader`'s bounded read-ahead near the final clusters.
 pub fn open_source(path: &Path) -> std::io::Result<File> {
     let file = File::open(path)?;
     if is_volume_device(path) {
@@ -44,7 +55,7 @@ pub fn open_source(path: &Path) -> std::io::Result<File> {
                 0,
                 ptr::null_mut(),
                 0,
-                &mut returned,
+                &raw mut returned,
                 ptr::null_mut(),
             )
         };
@@ -101,7 +112,7 @@ fn query(file: &File, code: u32, input: &[u8]) -> Option<Vec<u8>> {
             win32_len(input.len()),
             output.as_mut_ptr().cast(),
             win32_len(output.len()),
-            &mut returned,
+            &raw mut returned,
             ptr::null_mut(),
         )
     };
@@ -155,8 +166,9 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         .collect();
     disks.sort_by_key(|(number, _)| *number);
     let mut rows = Vec::new();
-    let mut disk_rows = std::collections::HashMap::new();
-    let mut represented_disks = std::collections::HashSet::new();
+    // Ordered by disk number, so every pass over it is deterministic.
+    let mut disk_rows = std::collections::BTreeMap::new();
+    let mut represented_disks = HashSet::new();
     for (number, name) in disks {
         let path = format!(r"\\.\{name}");
         let Some(file) = open(&path) else {
@@ -222,8 +234,8 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         // All backing disks receive mounted warnings, even when a spanned
         // volume is deliberately omitted from recovery sources.
         let count = u32_at(&extents, 0).unwrap_or(0) as usize;
-        for i in 0..count.min(extents.len() / std::mem::size_of::<DISK_EXTENT>()) {
-            let offset = extent_offset + i * std::mem::size_of::<DISK_EXTENT>();
+        for i in 0..count.min(extents.len() / size_of::<DISK_EXTENT>()) {
+            let offset = extent_offset + i * size_of::<DISK_EXTENT>();
             if let Some(row) = u32_at(&extents, offset).and_then(|n| disk_rows.get(&n)) {
                 rows[*row].mounted = true;
                 rows[*row].location = "Contains mounted volumes".into();
@@ -257,8 +269,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         let encrypted = ok == 0;
         let sector_size = u32_at(&extents, extent_offset)
             .and_then(|number| disk_rows.get(&number))
-            .map(|&index| rows[index].sector_size)
-            .unwrap_or(4096);
+            .map_or(4096, |&index| rows[index].sector_size);
         if !encrypted && let Some(number) = u32_at(&extents, extent_offset) {
             represented_disks.insert(number);
         }
@@ -287,7 +298,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             rows[index].location = "Contains mounted volumes".into();
         }
     }
-    let hidden: std::collections::HashSet<_> = represented_disks
+    let hidden: HashSet<_> = represented_disks
         .iter()
         .filter_map(|number| disk_rows.get(number).map(|&index| rows[index].path.clone()))
         .collect();
@@ -300,7 +311,7 @@ fn volume_disks(path: &str) -> Option<HashSet<u32>> {
     let first = std::mem::offset_of!(VOLUME_DISK_EXTENTS, Extents);
     let count = u32_at(&extents, 0)? as usize;
     let disks: HashSet<_> = (0..count)
-        .filter_map(|i| u32_at(&extents, first + i * std::mem::size_of::<DISK_EXTENT>()))
+        .filter_map(|i| u32_at(&extents, first + i * size_of::<DISK_EXTENT>()))
         .collect();
     (!disks.is_empty()).then_some(disks)
 }
@@ -310,15 +321,19 @@ fn folder_disks(folder: &Path) -> Option<HashSet<u32>> {
     let name: Vec<u16> = folder.as_os_str().encode_wide().chain([0]).collect();
     let mut mount = vec![0u16; 32768];
     let mut volume = vec![0u16; 64];
-    // SAFETY: name is NUL-terminated; output buffers match the given lengths.
+    // SAFETY: name is NUL-terminated; the mount buffer matches the given length.
     let ok = unsafe {
         GetVolumePathNameW(name.as_ptr(), mount.as_mut_ptr(), win32_len(mount.len())) != 0
-            && GetVolumeNameForVolumeMountPointW(
+    }
+        // SAFETY: mount was NUL-terminated by the call above; the volume buffer
+        // matches the given length.
+        && unsafe {
+            GetVolumeNameForVolumeMountPointW(
                 mount.as_ptr(),
                 volume.as_mut_ptr(),
                 win32_len(volume.len()),
             ) != 0
-    };
+        };
     if !ok {
         return None;
     }
@@ -375,13 +390,10 @@ mod tests {
 
     #[test]
     fn disk_image_sources_are_readable_without_device_controls() {
-        use std::io::Read;
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("source.img");
         std::fs::write(&path, b"read-only source").unwrap();
-        let mut file = open_source(&path).unwrap();
-        let mut content = String::new();
-        file.read_to_string(&mut content).unwrap();
+        let content = std::io::read_to_string(open_source(&path).unwrap()).unwrap();
         assert_eq!(content, "read-only source");
     }
 }

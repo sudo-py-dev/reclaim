@@ -199,7 +199,7 @@ fn generated_names_are_readable_and_keep_the_correct_extension() {
         };
         assert_eq!(found.recovery_name(3), expected);
         assert_eq!(
-            found.recovery_name(100000),
+            found.recovery_name(100_000),
             expected.replace("0003", "100000")
         );
     }
