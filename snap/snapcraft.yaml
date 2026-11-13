@@ -72,8 +72,8 @@ parts:
       craftctl default
       craftctl set version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
     override-build: |
-      /usr/bin/rustup toolchain install 1.99.0 --profile minimal --no-self-update
-      /usr/bin/rustup run 1.99.0 cargo build --locked --release --bin reclaim
+      /usr/bin/rustup toolchain install 1.100.0 --profile minimal --no-self-update
+      /usr/bin/rustup run 1.100.0 cargo build --locked --release --bin reclaim
       install -Dm755 target/release/reclaim "$CRAFT_PART_INSTALL/bin/reclaim"
       install -Dm644 snap/gui/reclaim.desktop "$CRAFT_PART_INSTALL/usr/share/applications/reclaim.desktop"
       install -Dm644 LICENSE "$CRAFT_PART_INSTALL/usr/share/licenses/reclaim/LICENSE"

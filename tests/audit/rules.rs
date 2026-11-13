@@ -11,7 +11,7 @@ const UNSAFE_FILES: &[&str] = &[
     "src/drives/windows.rs", // volume and device IOCTLs
     "src/installer.rs",      // ShellExecuteW
     "src/native_process.rs", // posix_spawn / CreateProcessW
-    "src/preview.rs",        // reopening a validated Windows handle
+    "src/preview.rs",        // reopening a Windows handle, extended volume reads
     "src/update_runtime.rs", // geteuid for the elevated update helper
 ];
 
@@ -641,4 +641,134 @@ fn dedupe(mut findings: Vec<Finding>) -> Vec<Finding> {
     findings.sort_by(|a, b| (&a.file, a.line, a.rule).cmp(&(&b.file, b.line, b.rule)));
     findings.dedup_by(|a, b| a.file == b.file && a.line == b.line && a.rule == b.rule);
     findings
+}
+
+/// Largest fixture file read, and most bytes inflated from a gzip fixture.
+const MAX_FIXTURE_BYTES: u64 = 64 << 20;
+const MAX_INFLATED_BYTES: u64 = 256 << 20;
+
+/// Path prefixes that put a local user name into a file: a home directory, a
+/// desktop's removable-media mount point (which disk images record as their
+/// last mount), and the Windows and macOS profile folders.
+const USER_PATH_PREFIXES: &[&[u8]] = &[b"/home/", b"/run/media/", b"/Users/", b"\\Users\\"];
+
+/// The user name that follows `prefix` at `at`, if it looks like one.
+fn user_after(bytes: &[u8], at: usize, prefix: &[u8]) -> Option<String> {
+    let rest = bytes.get(at + prefix.len()..)?;
+    let length = rest
+        .iter()
+        .take(64)
+        .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        .count();
+    let separator = rest.get(length)?;
+    (length > 0 && matches!(separator, b'/' | b'\\' | 0))
+        .then(|| String::from_utf8_lossy(&rest[..length]).into_owned())
+}
+
+/// Every local user path in `bytes`.
+fn user_paths(bytes: &[u8]) -> Vec<String> {
+    let mut found = Vec::new();
+    for prefix in USER_PATH_PREFIXES {
+        for at in bytes
+            .windows(prefix.len())
+            .enumerate()
+            .filter(|(_, window)| window == prefix)
+            .map(|(at, _)| at)
+        {
+            if let Some(user) = user_after(bytes, at, prefix) {
+                let path = format!("{}{user}", String::from_utf8_lossy(prefix));
+                if !found.contains(&path) {
+                    found.push(path);
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Test fixtures, disk images most of all, must not carry the local user
+/// name of whoever made them (CWE-538). Mounting an ext image, for example,
+/// records `/run/media/<user>/...` in its superblock and journal.
+pub fn fixture_privacy(ws: &Workspace) -> Vec<Finding> {
+    use std::io::Read;
+    let mut findings = Vec::new();
+    let mut pending = vec![ws.root.join("tests/fixtures")];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let relative = path
+                .strip_prefix(&ws.root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let Ok(file) = std::fs::File::open(&path) else {
+                continue;
+            };
+            let mut bytes = Vec::new();
+            if file
+                .take(MAX_FIXTURE_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .is_err()
+                || bytes.len() as u64 > MAX_FIXTURE_BYTES
+            {
+                findings.push(Finding::new(
+                    "PRIV-FIXTURE",
+                    Some(538),
+                    &relative,
+                    1,
+                    "fixture is unreadable or larger than the audit reads; keep fixtures small",
+                ));
+                continue;
+            }
+            let mut contents = user_paths(&bytes);
+            if bytes.starts_with(&[0x1f, 0x8b]) {
+                let mut inflated = Vec::new();
+                if let Err(e) = flate2::read::MultiGzDecoder::new(bytes.as_slice())
+                    .take(MAX_INFLATED_BYTES)
+                    .read_to_end(&mut inflated)
+                {
+                    // What did inflate is still searched below.
+                    findings.push(Finding::new(
+                        "PRIV-FIXTURE",
+                        Some(538),
+                        &relative,
+                        1,
+                        format!("gzip fixture could not be fully checked: {e}"),
+                    ));
+                }
+                for path in user_paths(&inflated) {
+                    if !contents.contains(&path) {
+                        contents.push(path);
+                    }
+                }
+            }
+            for path in contents {
+                findings.push(Finding::new(
+                    "PRIV-FIXTURE",
+                    Some(538),
+                    &relative,
+                    1,
+                    format!("contains the local user path {path:?}; scrub it before committing"),
+                ));
+            }
+        }
+    }
+    findings
+}
+
+#[test]
+fn user_paths_are_found_in_raw_bytes() {
+    let image = b"\0\0/run/media/alex/1234-ABCD\0\0C:\\Users\\Sam\\Desktop\0word/media/x";
+    assert_eq!(user_paths(image), vec!["/run/media/alex", "\\Users\\Sam"]);
+    assert!(user_paths(b"word/media/image1.png /home/ alone").is_empty());
 }

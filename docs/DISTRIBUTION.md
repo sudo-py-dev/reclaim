@@ -104,7 +104,7 @@ mkdir -p dist
 mv -f reclaim_*_amd64.snap dist/
 ```
 
-The recipe installs Ubuntu's Rustup package and invokes Rust 1.99.0 explicitly.
+The recipe installs Ubuntu's Rustup package and invokes Rust 1.100.0 explicitly, the same version CI pins.
 Toolchain files are installed only in the build environment; they are not shipped
 in the application snap.
 

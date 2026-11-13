@@ -320,6 +320,18 @@ fn tag_size(incompat: u32) -> usize {
     }
 }
 
+/// Where the journal's `index`-th logged block really is. The log is a ring
+/// from `first_log` to `end`: past `end` it continues at `first_log`. `None`
+/// when even the wrapped position falls outside the log.
+fn ring_index(index: usize, first_log: usize, end: usize) -> Option<usize> {
+    if index < end {
+        return Some(index);
+    }
+    first_log
+        .checked_add(index.checked_sub(end)?)
+        .filter(|at| *at < end)
+}
+
 /// Deleted regular files whose inode survives in the journal.
 pub(super) fn deleted_files(
     input: &mut (impl Read + Seek),
@@ -378,14 +390,9 @@ pub(super) fn deleted_files(
         return Ok(Vec::new());
     }
     let log_block = |index: usize| -> Option<u64> {
-        let wrapped = if index < end {
-            index
-        } else {
-            first_log
-                .checked_add(index.checked_sub(end)?)
-                .filter(|at| *at < end)?
-        };
-        journal_blocks.get(wrapped).copied()
+        journal_blocks
+            .get(ring_index(index, first_log, end)?)
+            .copied()
     };
     let max_copies = bytes::to_usize(MAX_COPY_BYTES.checked_div(volume.inode_size).unwrap_or(0));
     // Latest journal copy of each inode that still had a block list, and names.
@@ -538,4 +545,21 @@ pub(super) fn deleted_files(
         }
     }
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ring_index;
+
+    #[test]
+    fn logged_blocks_past_the_end_continue_at_the_start_of_the_log() {
+        // Block 0 is the journal superblock; the log runs from 1 to 99.
+        assert_eq!(ring_index(98, 1, 100), Some(98));
+        assert_eq!(ring_index(99, 1, 100), Some(99));
+        assert_eq!(ring_index(100, 1, 100), Some(1));
+        assert_eq!(ring_index(102, 1, 100), Some(3));
+        // A wrap that would run past the log again is refused, not looped.
+        assert_eq!(ring_index(199, 1, 100), None);
+        assert_eq!(ring_index(usize::MAX, 1, 100), None);
+    }
 }
