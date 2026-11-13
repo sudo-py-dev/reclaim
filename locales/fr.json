@@ -111,7 +111,6 @@
   "General": "Général",
   "About": "À propos",
   "Version": "Version",
-  "Project website": "Site du projet",
   "Checking a {0} file…": "Vérification d’un fichier {0}…",
   "{0} of {1}": "{0} sur {1}",
   "Reading unused-space map…": "Lecture de la carte de l’espace libre…",
@@ -227,5 +226,12 @@
   "Updates are managed by the Snap Store.": "Les mises à jour sont gérées par le Snap Store.",
   "Choose another folder": "Choisir un autre dossier",
   "Save here anyway": "Enregistrer ici quand même",
-  "Cancel": "Annuler"
+  "Cancel": "Annuler",
+  "Source code": "Code source",
+  "Report a problem": "Signaler un problème",
+  "Open an issue on GitHub": "Ouvrir un ticket sur GitHub",
+  "Release history": "Historique des versions",
+  "Every version with its release notes": "Toutes les versions et leurs notes de version",
+  "License": "Licence",
+  "Read the MIT License": "Lire la licence MIT"
 }

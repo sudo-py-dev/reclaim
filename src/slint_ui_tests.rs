@@ -1363,3 +1363,121 @@ fn stop_buttons_are_filled_red_in_light_and_dark() {
         }
     }
 }
+
+#[test]
+fn about_links_open_only_fixed_project_pages() {
+    let links = [
+        AboutLink::Source,
+        AboutLink::Issues,
+        AboutLink::Releases,
+        AboutLink::License,
+    ];
+    let urls: Vec<&str> = links.into_iter().map(about_link_url).collect();
+    for url in &urls {
+        assert!(
+            url.starts_with("https://github.com/sudo-py-dev/reclaim"),
+            "{url}"
+        );
+    }
+    let mut unique = urls.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        urls.len(),
+        "each About row opens its own page"
+    );
+}
+
+#[test]
+fn about_rows_are_keyboard_buttons_with_descriptions() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    ui.show().unwrap();
+    // Tall enough that the whole Settings page is in view, About card included.
+    ui.window().set_size(slint::PhysicalSize::new(1160, 2000));
+    i18n::with_language(i18n::Language::English, || ui_text::apply(&ui));
+    ui.set_page(2);
+    let opened = Rc::new(RefCell::new(Vec::new()));
+    let sink = opened.clone();
+    ui.on_open_link(move |link| sink.borrow_mut().push(link));
+    for label in [
+        "Source code",
+        "Report a problem",
+        "Release history",
+        "License",
+    ] {
+        let row = i_slint_backend_testing::ElementHandle::find_by_accessible_label(&ui, label)
+            .next()
+            .unwrap_or_else(|| panic!("{label} row"));
+        assert!(
+            row.accessible_description().is_some_and(|d| !d.is_empty()),
+            "{label}"
+        );
+        row.invoke_accessible_default_action();
+    }
+    assert_eq!(
+        *opened.borrow(),
+        [
+            AboutLink::Source,
+            AboutLink::Issues,
+            AboutLink::Releases,
+            AboutLink::License
+        ]
+    );
+}
+
+/// Renders the whole Settings page, About card included, when previews are
+/// requested. Run with `RECLAIM_PREVIEW_DIR=dir cargo test about_card_previews`.
+#[test]
+fn about_card_previews() {
+    let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") else {
+        return;
+    };
+    std::fs::create_dir_all(&directory).unwrap();
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    for (code, language) in [
+        ("en", i18n::Language::English),
+        ("he", i18n::Language::Hebrew),
+    ] {
+        i18n::with_language(language, || {
+            let ui = AppWindow::new().unwrap();
+            ui.show().unwrap();
+            ui.window().set_size(slint::PhysicalSize::new(1160, 1180));
+            ui_text::apply(&ui);
+            ui.set_version("0.2.3".into());
+            ui.set_page(2);
+            for dark in [false, true] {
+                ui.global::<Palette>().set_theme(if dark { 2 } else { 1 });
+                // Let colour transitions finish so the render shows the settled theme.
+                ui.window().take_snapshot().unwrap();
+                std::thread::sleep(Duration::from_millis(300));
+                slint::platform::update_timers_and_animations();
+                let snapshot = ui.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    format!(
+                        "{directory}/about-{code}-{}.png",
+                        if dark { "dark" } else { "light" }
+                    ),
+                    snapshot.as_bytes(),
+                    snapshot.width(),
+                    snapshot.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+        });
+    }
+}

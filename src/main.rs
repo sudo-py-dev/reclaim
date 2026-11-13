@@ -903,6 +903,16 @@ fn device_tag(path: &std::path::Path) -> String {
     text.rsplit(['/', '\\']).next().unwrap_or(text).to_owned()
 }
 /// `kind` holds the fixed English labels set by the platform drive discovery.
+/// Fixed addresses for the About card. The UI sends only which link, never a URL.
+fn about_link_url(link: AboutLink) -> &'static str {
+    match link {
+        AboutLink::Source => "https://github.com/sudo-py-dev/reclaim",
+        AboutLink::Issues => "https://github.com/sudo-py-dev/reclaim/issues",
+        AboutLink::Releases => "https://github.com/sudo-py-dev/reclaim/releases",
+        AboutLink::License => "https://github.com/sudo-py-dev/reclaim/blob/main/LICENSE",
+    }
+}
+
 fn drive_icon(drive: &drives::Drive) -> DriveIcon {
     if drive.phone {
         DriveIcon::Phone
@@ -1045,9 +1055,10 @@ fn run() -> Result<(), slint::PlatformError> {
             }
         });
     }
-    ui.on_open_project(|| {
-        std::thread::spawn(|| {
-            if let Err(e) = installer::open_url("https://github.com/sudo-py-dev/reclaim") {
+    ui.on_open_link(|link| {
+        let url = about_link_url(link);
+        std::thread::spawn(move || {
+            if let Err(e) = installer::open_url(url) {
                 diagnostics::write(&e);
             }
         });

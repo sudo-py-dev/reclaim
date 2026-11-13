@@ -454,7 +454,7 @@ mod tests {
                 Language::Hebrew,
                 0
             ),
-            "לא ניתן לקרוא את אמצעי האחסון הזה: מיקום הנתונים במקור אינו תקין"
+            "לא ניתן לקרוא את המחיצה: המיקום במקור אינו תקין"
         );
         assert_eq!(
             translate("/media/user/Photos", Language::Hebrew, 0),

@@ -65,7 +65,13 @@ export global Strings {
     in-out property <string> hide-details: "Hide details";
     in-out property <string> update-when-ready: "You can keep working and update later.";
     in-out property <string> no-release-notes: "No release notes.";
-    in-out property <string> project-website: "Project website";
+    in-out property <string> source-code: "Source code";
+    in-out property <string> report-a-problem: "Report a problem";
+    in-out property <string> open-an-issue-on-github: "Open an issue on GitHub";
+    in-out property <string> release-history: "Release history";
+    in-out property <string> every-version-with-its-notes: "Every version with its release notes";
+    in-out property <string> license: "License";
+    in-out property <string> read-the-mit-license: "Read the MIT License";
     in-out property <string> built-with-rust-and-slint: "Built with Rust and Slint · MIT licensed application";
     in-out property <string> stop: "Stop";
     in-out property <string> stop-recovery: "Stop recovery";
@@ -79,6 +85,8 @@ export global Strings {
 }
 import { CheckBox, LineEdit, ScrollView, ListView as NativeListView, Palette as NativePalette } from "std-widgets.slint";
 export enum DriveIcon { disk, usb, volume, locked, phone }
+// Pages the About card can open. The addresses live in Rust, so the UI never hands over a URL.
+export enum AboutLink { source, issues, releases, license }
 export struct DriveItem { name: string, device: string, icon: DriveIcon, detail: string, size: string, available: bool }
 export struct FileItem { name: string, kind: string, size: string, selected: bool, index: int }
 export struct ReleaseNoteBlock { text: string, kind: int }
@@ -92,21 +100,25 @@ export global Palette {
     // The widget style resolves the system scheme; its background tells us which one it picked.
     property <color> native-background: NativePalette.background;
     out property <bool> dark: theme == 2 || (theme == 0 && native-background.to-hsv().value < 0.5);
-    out property <color> bg: dark ? #1c2028 : #f4f6f9;
-    out property <color> surface: dark ? #252a33 : #ffffff;
-    out property <color> subtle: dark ? #303641 : #eef1f6;
-    out property <color> hover: dark ? #2c313c : #f3f5f9;
-    out property <color> selected: dark ? #31415f : #e6eeff;
-    out property <color> line: dark ? #3b424f : #dfe4ec;
-    out property <color> ink: dark ? #e6e9ef : #151c2b;
-    out property <color> muted: dark ? #aab3c2 : #5b6880;
+    // Cool neutrals with one blue accent. Text tokens keep at least 4.5:1 on
+    // every background token in both themes, and white keeps 4.5:1 on each primary state.
+    out property <color> bg: dark ? #14171c : #f5f7fa;
+    out property <color> surface: dark ? #1c2027 : #ffffff;
+    out property <color> subtle: dark ? #262b33 : #eef1f5;
+    out property <color> hover: dark ? #22272f : #f4f6f9;
+    out property <color> selected: dark ? #1f3150 : #e8effd;
+    // Soft accent behind row icons, so groups read as one family without competing with buttons.
+    out property <color> tint: dark ? #1e2a40 : #eaf0fd;
+    out property <color> line: dark ? #2e343e : #e2e6ed;
+    out property <color> ink: dark ? #e9edf3 : #111827;
+    out property <color> muted: dark ? #a0a9b8 : #556074;
     // Supporting text that must stay readable, between ink and muted.
-    out property <color> secondary: dark ? #c9d0db : #3f4b60;
-    out property <color> accent: dark ? #a3bdff : #2c5cc5;
-    out property <color> primary: dark ? #4c7be0 : #2c5cc5;
-    out property <color> primary-hover: dark ? #5c89ea : #3567d3;
-    out property <color> primary-pressed: dark ? #416cc9 : #244ea8;
-    out property <color> danger: dark ? #ffaaa4 : #b42318;
+    out property <color> secondary: dark ? #c5ccd7 : #364152;
+    out property <color> accent: dark ? #93b4ff : #2457d6;
+    out property <color> primary: dark ? #3a6ad8 : #2457d6;
+    out property <color> primary-hover: dark ? #3363d0 : #1e4cc2;
+    out property <color> primary-pressed: dark ? #2d59bd : #1a42aa;
+    out property <color> danger: dark ? #ff9e97 : #b42318;
     // Filled Stop buttons. White text keeps at least 4.5:1 on each state, and
     // the dark fill keeps 3:1 against the card it sits on.
     out property <color> stop: dark ? #d13c30 : #c42b1c;
@@ -406,7 +418,7 @@ component IconTile inherits Rectangle {
     in property <image> icon;
     // Full-colour artwork (the app icon) is shown as is, larger and untinted.
     in property <bool> full-colour: false;
-    width: 32px; height: 32px; border-radius: Metrics.radius; background: root.full-colour ? transparent : Palette.subtle;
+    width: 32px; height: 32px; border-radius: Metrics.radius; background: root.full-colour ? transparent : Palette.tint;
     Image { source: root.icon; width: root.full-colour ? 30px : 18px; height: self.width; colorize: root.full-colour ? transparent : Palette.accent; }
 }
 component SettingRow inherits Row {
@@ -421,6 +433,31 @@ component SettingRow inherits Row {
         if root.detail != "" : Label { text: root.detail; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
     }
     @children
+}
+// A settings row that opens a page in the browser. The whole row is the target.
+component LinkRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> detail;
+    callback clicked();
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-description: root.detail;
+    accessible-action-default => { root.clicked(); }
+    background: touch.pressed ? Palette.subtle : touch.has-hover ? Palette.hover : transparent;
+    animate background { duration: 120ms; }
+    border-width: focus.has-focus ? 2px : 0px; border-color: Palette.accent;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    SettingRow { icon: root.icon; title: root.title; detail: root.detail;
+        Image { source: @image-url("icons/external.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
 }
 // Divider that starts at the label column, so rows read as one group.
 component RowDivider inherits Rectangle { height: 1px; vertical-stretch: 0;
@@ -494,8 +531,8 @@ component CaptionButton inherits Rectangle {
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.clicked(); }
-    background: touch.pressed ? (root.danger ? #a52a1f : Palette.line)
-        : touch.has-hover ? (root.danger ? #c42b1c : Palette.subtle) : transparent;
+    background: touch.pressed ? (root.danger ? Palette.stop-pressed : Palette.line)
+        : touch.has-hover ? (root.danger ? Palette.stop : Palette.subtle) : transparent;
     animate background { duration: 100ms; }
     Image { source: root.icon; width: 16px; height: 16px; colorize: root.danger && touch.has-hover ? #ffffff : Palette.ink; }
     touch := TouchArea { clicked => { root.clicked(); } }
@@ -586,7 +623,7 @@ export component AppWindow inherits Window {
     in property <float> update-progress;
     in-out property <int> language;
     callback change-language(int);
-    callback open-project();
+    callback open-link(AboutLink);
     callback apply-update();
     callback dismiss-update();
     callback open-image(); callback refresh(); callback select-drive(int); callback scan(); callback stop();
@@ -674,7 +711,7 @@ export component AppWindow inherits Window {
                                 }
                                 VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 1px; alignment: center;
                                     Row { spacing: 6px;
-                                        Label { text: drive.name; color: Palette.ink; font-size: 14px; font-weight: 600; overflow: elide; min-width: 0px; horizontal-stretch: 0; }
+                                        Label { text: drive.name; color: Palette.ink; font-size: 14px; font-weight: 500; overflow: elide; min-width: 0px; horizontal-stretch: 0; }
                                         if drive.device != "" : DeviceTag { text: drive.device; }
                                         Rectangle { horizontal-stretch: 1; }
                                     }
@@ -854,9 +891,15 @@ export component AppWindow inherits Window {
                 Rectangle { height: 8px; }
                 GroupTitle { text: Strings.about; }
                 Card { VerticalLayout {
-                    SettingRow { icon: @image-url("../assets/icons/reclaim-64.png"); full-colour-icon: true; title: Strings.reclaim; detail: Strings.built-with-rust-and-slint;
-                        Action { text: Strings.project-website; icon: @image-url("icons/external.svg"); clicked => { root.open-project(); } }
-                    }
+                    SettingRow { icon: @image-url("../assets/icons/reclaim-64.png"); full-colour-icon: true; title: Strings.reclaim; detail: Strings.built-with-rust-and-slint; }
+                    RowDivider { }
+                    LinkRow { icon: @image-url("icons/github.svg"); title: Strings.source-code; detail: "github.com/sudo-py-dev/reclaim"; clicked => { root.open-link(AboutLink.source); } }
+                    RowDivider { }
+                    LinkRow { icon: @image-url("icons/bug.svg"); title: Strings.report-a-problem; detail: Strings.open-an-issue-on-github; clicked => { root.open-link(AboutLink.issues); } }
+                    RowDivider { }
+                    LinkRow { icon: @image-url("icons/tag.svg"); title: Strings.release-history; detail: Strings.every-version-with-its-notes; clicked => { root.open-link(AboutLink.releases); } }
+                    RowDivider { }
+                    LinkRow { icon: @image-url("icons/license.svg"); title: Strings.license; detail: Strings.read-the-mit-license; clicked => { root.open-link(AboutLink.license); } }
                 } }
             } } }
             // Status strip for Recovered files. Sources shows status inside its action bar;
