@@ -111,7 +111,7 @@ const de: Dict = {
       { name: 'Dokumente und E-Books', list: 'PDF, Word, Excel, PowerPoint, OpenDocument, EPUB' },
       { name: 'Archive', list: 'ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK' },
       { name: 'Programme und Installer', list: 'EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG' },
-      { name: 'Audio und Video', list: 'WAV, AIFF, AU, AVI, Ogg Vorbis, Opus, Theora' },
+      { name: 'Audio und Video', list: 'WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
       { name: 'Datenbanken', list: 'SQLite' },
     ],
     more: 'Vollständige Formatliste',
