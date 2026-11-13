@@ -89,7 +89,7 @@ pub fn update(
 ) -> anyhow::Result<()> {
     let executable = std::env::current_exe()?;
     #[cfg(not(any(target_os = "linux", windows)))]
-    let _ = &executable;
+    let _: &PathBuf = &executable;
     if updater::installer_download(release).is_none() {
         #[cfg(target_os = "linux")]
         {

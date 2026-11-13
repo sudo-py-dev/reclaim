@@ -661,6 +661,7 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
                 &version
             )
             .unwrap()
+            .to_ascii_lowercase()
             .ends_with(".pkg")
         );
     }

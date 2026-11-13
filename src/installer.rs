@@ -84,12 +84,10 @@ fn launch(url: core_foundation_sys::url::CFURLRef) -> Option<Result<(), i32>> {
     if url.is_null() {
         return None;
     }
-    // SAFETY: `url` is a live, owned CFURL; it is released exactly once here.
-    let status = unsafe {
-        let status = LSOpenCFURLRef(url, std::ptr::null_mut());
-        CFRelease(url.cast());
-        status
-    };
+    // SAFETY: `url` is a live, owned CFURL; a null out-pointer is allowed.
+    let status = unsafe { LSOpenCFURLRef(url, std::ptr::null_mut()) };
+    // SAFETY: `url` is owned here and released exactly once, after its last use.
+    unsafe { CFRelease(url.cast()) };
     Some(if status == 0 { Ok(()) } else { Err(status) })
 }
 
