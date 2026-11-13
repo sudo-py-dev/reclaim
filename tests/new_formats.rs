@@ -1,7 +1,3 @@
-#![expect(
-    clippy::unwrap_used,
-    reason = "fixture helpers fail the test by panicking"
-)]
 use reclaim::{Event, Found, Validation, recover_reader, scan_reader};
 use std::{
     io::{self, Cursor, Read, Seek, SeekFrom},
@@ -37,6 +33,7 @@ const FIXTURES: &[(&str, &[u8])] = &[
     ("rar", include_bytes!("fixtures/formats/sample.rar")),
     ("tar", include_bytes!("fixtures/formats/sample.tar")),
 ];
+#[cfg(test)]
 fn collect(input: &mut (impl Read + Seek)) -> Vec<Found> {
     let mut found = Vec::new();
     scan_reader(input, &AtomicBool::new(false), |e| {

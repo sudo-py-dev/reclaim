@@ -1,7 +1,3 @@
-#![expect(
-    clippy::unwrap_used,
-    reason = "fixture helpers fail the test by panicking"
-)]
 //! Deleted files on ext3/ext4 come back from the inode copies in the journal,
 //! whole and with their names, even when they were stored in pieces.
 use reclaim::{Event, Found, FoundReader, scan_unused_reader};
@@ -20,6 +16,7 @@ fn document() -> Vec<u8> {
     bytes
 }
 
+#[cfg(test)]
 fn fixture(name: &str) -> Vec<u8> {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
     let mut bytes = Vec::new();
@@ -29,6 +26,7 @@ fn fixture(name: &str) -> Vec<u8> {
     bytes
 }
 
+#[cfg(test)]
 fn scan(image: &[u8]) -> Vec<Found> {
     let mut found = Vec::new();
     scan_unused_reader(

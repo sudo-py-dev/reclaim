@@ -1,11 +1,8 @@
-#![expect(
-    clippy::unwrap_used,
-    reason = "fixture helpers fail the test by panicking"
-)]
 use reclaim::{Event, Found, Validation, recover_reader, scan_reader};
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::sync::atomic::AtomicBool;
 
+#[cfg(test)]
 fn collect(input: &mut (impl Read + Seek)) -> Vec<Found> {
     let mut found = Vec::new();
     scan_reader(input, &AtomicBool::new(false), |e| {
@@ -129,6 +126,7 @@ fn fix_crc(page: &mut [u8]) {
     }
     page[22..26].copy_from_slice(&crc.to_le_bytes());
 }
+#[cfg(test)]
 fn page(serial: u32, sequence: u32, flags: u8, lacing: &[u8], body: &[u8]) -> Vec<u8> {
     assert_eq!(
         lacing.iter().map(|&n| usize::from(n)).sum::<usize>(),

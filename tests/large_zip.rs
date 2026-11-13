@@ -1,7 +1,3 @@
-#![expect(
-    clippy::unwrap_used,
-    reason = "fixture helpers fail the test by panicking"
-)]
 use reclaim::{Event, Validation, recover_reader, scan_reader};
 use std::{
     io::{Read, Seek, SeekFrom, Write},
@@ -9,6 +5,7 @@ use std::{
 };
 
 // A real, stored ZIP entry containing 65 MiB of zeros, written sparsely.
+#[cfg(test)]
 fn archive(file: &mut std::fs::File, prefix: u64) -> u64 {
     let size = 65 * 1024 * 1024u32;
     let mut crc = crc32fast::Hasher::new();

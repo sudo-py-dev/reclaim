@@ -1,7 +1,3 @@
-#![expect(
-    clippy::unwrap_used,
-    reason = "fixture helpers fail the test by panicking"
-)]
 //! Deleted files on ext2 come back whole from the block maps the kernel
 //! leaves behind, even when they were stored in many pieces.
 use reclaim::{Event, Found, FoundReader, scan_unused_reader};
@@ -12,6 +8,7 @@ use std::{
 
 /// The document the fixture stored across freed gaps, then deleted. It is
 /// longer than one block map covers, so the second map level is needed too.
+#[cfg(test)]
 fn document() -> Vec<u8> {
     let mut bytes = b"%PDF-1.4\n".to_vec();
     for line in 0..7000 {
@@ -21,6 +18,7 @@ fn document() -> Vec<u8> {
     bytes
 }
 
+#[cfg(test)]
 fn fixture() -> Vec<u8> {
     let path = format!(
         "{}/tests/fixtures/deleted-blockmap-ext2.img.gz",
@@ -33,6 +31,7 @@ fn fixture() -> Vec<u8> {
     bytes
 }
 
+#[cfg(test)]
 fn scan(image: &[u8]) -> Vec<Found> {
     let mut found = Vec::new();
     scan_unused_reader(
