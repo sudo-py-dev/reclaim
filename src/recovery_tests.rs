@@ -1,6 +1,19 @@
 use super::*;
 use std::io::Write;
 
+/// A 4100-byte source ending in "data", opened by path as the app opens a
+/// source. An anonymous temporary file is opened delete-on-close on Windows,
+/// and the independent reader recovery uses cannot reopen such a handle.
+/// The returned path deletes the file when dropped.
+fn source_file() -> (tempfile::TempPath, std::fs::File) {
+    let mut named = tempfile::NamedTempFile::new().unwrap();
+    named.write_all(&[0; 4096]).unwrap();
+    named.write_all(b"data").unwrap();
+    let path = named.into_temp_path();
+    let file = std::fs::File::open(&path).unwrap();
+    (path, file)
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires RECLAIM_TEST_DEVICE and RECLAIM_TEST_DESTINATION on that USB volume"]
@@ -254,9 +267,7 @@ fn scan_total_stays_unknown_until_unused_space_is_mapped() {
 
 #[test]
 fn recovery_reads_offsets_beyond_the_unused_byte_total() {
-    let mut source = tempfile::tempfile().unwrap();
-    source.write_all(&[0; 4096]).unwrap();
-    source.write_all(b"data").unwrap();
+    let (_path, source) = source_file();
     let directory = tempfile::tempdir().unwrap();
     let mut app = Reclaim::default();
     app.scanned_source = Some("test-volume".into());
@@ -281,6 +292,11 @@ fn recovery_reads_offsets_beyond_the_unused_byte_total() {
         std::thread::yield_now();
     }
     assert!(!app.exporting, "export did not finish");
+    assert!(
+        app.recovery_status.starts_with("Saved"),
+        "{}",
+        app.recovery_status
+    );
     assert_eq!(
         std::fs::read(directory.path().join("recovered.txt")).unwrap(),
         b"data"
@@ -364,10 +380,8 @@ fn source_access_failure_offers_elevation_only_when_requested_by_the_worker() {
 }
 
 /// A source with a file at 4096, held open the way a running scan holds it.
-fn scanned_source(app: &mut Reclaim) -> Arc<std::fs::File> {
-    let mut source = tempfile::tempfile().unwrap();
-    source.write_all(&[0; 4096]).unwrap();
-    source.write_all(b"data").unwrap();
+fn scanned_source(app: &mut Reclaim) -> (tempfile::TempPath, Arc<std::fs::File>) {
+    let (path, source) = source_file();
     let handle = Arc::new(source);
     app.scanned_source = Some("test-volume".into());
     app.source_handle = Some(handle.clone());
@@ -383,7 +397,7 @@ fn scanned_source(app: &mut Reclaim) -> Arc<std::fs::File> {
         ntfs: None,
         extents: None,
     }];
-    handle
+    (path, handle)
 }
 
 fn finish_recovery(app: &mut Reclaim) {
@@ -393,13 +407,18 @@ fn finish_recovery(app: &mut Reclaim) {
         std::thread::yield_now();
     }
     assert!(!app.exporting, "recovery did not finish");
+    assert!(
+        app.recovery_status.starts_with("Saved"),
+        "{}",
+        app.recovery_status
+    );
 }
 
 #[test]
 fn recovery_while_scanning_keeps_the_scan_running_and_its_cursor_in_place() {
     use std::io::{Seek, SeekFrom};
     let mut app = Reclaim::default();
-    let handle = scanned_source(&mut app);
+    let (_path, handle) = scanned_source(&mut app);
     // The scan is mid-way: it owns the receiver, the stop flag and a cursor.
     app.busy = true;
     let (scan, rx) = mpsc::sync_channel(4);
@@ -447,7 +466,7 @@ fn stopping_recovery_and_stopping_the_scan_are_independent() {
 #[test]
 fn a_second_recovery_cannot_start_while_one_runs() {
     let mut app = Reclaim::default();
-    scanned_source(&mut app);
+    let _source = scanned_source(&mut app);
     app.exporting = true;
     let directory = tempfile::tempdir().unwrap();
     app.export(directory.path().to_owned());
