@@ -239,6 +239,15 @@ pub(super) fn chains(
     Ok(without_overlaps(files))
 }
 
+/// Whether two of a file's own ranges share any byte.
+fn overlaps_itself(file: &[(u64, u64)]) -> bool {
+    let mut ranges = file.to_vec();
+    ranges.sort_unstable();
+    ranges
+        .windows(2)
+        .any(|pair| matches!(pair, [(at, size), (next, _)] if at.saturating_add(*size) > *next))
+}
+
 /// Keeps files that share no space. Where maps disagree, the one listing
 /// more blocks wins: the kernel can leave an older, shorter copy of a map
 /// that lists only the start of the same file.
@@ -249,6 +258,11 @@ fn without_overlaps(mut files: Vec<Vec<(u64, u64)>>) -> Vec<Vec<(u64, u64)>> {
     let mut claimed: BTreeMap<u64, u64> = BTreeMap::new();
     let mut kept = Vec::new();
     for file in files {
+        // A damaged or hostile map can list the same block twice; that file
+        // would read it twice, so it is not a file.
+        if overlaps_itself(&file) {
+            continue;
+        }
         let clear = file.iter().all(|&(at, size)| {
             let end = at.saturating_add(size);
             claimed
@@ -370,6 +384,15 @@ mod tests {
         let apart = vec![(100, 5)];
         let kept = without_overlaps(vec![short, long.clone(), apart.clone()]);
         assert_eq!(kept, vec![long, apart]);
+    }
+
+    #[test]
+    fn a_map_listing_the_same_blocks_twice_is_not_a_file() {
+        // [20, 8] with a signature at block 8: (8, 13) then (8, 1).
+        let twice = vec![(8, 13), (8, 1)];
+        let fine = vec![(100, 5), (90, 5)];
+        let kept = without_overlaps(vec![twice, fine.clone()]);
+        assert_eq!(kept, vec![fine]);
     }
 
     #[test]

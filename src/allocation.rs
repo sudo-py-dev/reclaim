@@ -46,6 +46,24 @@ enum BitOrder {
     /// HFS+: bit 7 of byte 0 is the first block.
     MostSignificantFirst,
 }
+/// Named files found in filesystem metadata, or none when that metadata could
+/// not be read. Names are extra on top of the free-space map: a bad sector in a
+/// directory, the MFT or the journal must not throw the map away and stop the
+/// whole unused-space scan. A stop request still ends the scan.
+fn files_or_none(
+    result: io::Result<Vec<crate::Found>>,
+    source: &str,
+    cancel: &AtomicBool,
+) -> io::Result<Vec<crate::Found>> {
+    match result {
+        Err(e) if cancel.load(Ordering::Relaxed) => Err(e),
+        Err(e) => {
+            log::warn!("{source} metadata could not be read, named files skipped: {e}");
+            Ok(Vec::new())
+        }
+        files => files,
+    }
+}
 fn check(cancel: &AtomicBool) -> io::Result<()> {
     if cancel.load(Ordering::Relaxed) {
         Err(io::Error::new(io::ErrorKind::Interrupted, "Scan stopped"))
@@ -305,9 +323,14 @@ fn exclude_known_files(input: &mut (impl Read + Seek), plan: &mut Plan) -> io::R
             continue;
         };
         let mut head = Vec::with_capacity(64);
-        crate::FoundReader::new(input, file)?
-            .take(64)
-            .read_to_end(&mut head)?;
+        let read = crate::FoundReader::new(input, file)
+            .and_then(|reader| reader.take(64).read_to_end(&mut head));
+        if read.is_err() {
+            // Unreadable start (a bad sector): keep the record, but it cannot
+            // prove it owns its space, so that space is still carved.
+            file.validation = crate::Validation::Unverified;
+            continue;
+        }
         if file.original_name.is_none() {
             // A nameless record: the bytes are the only clue to the type.
             match crate::sniff_kind(&head) {
@@ -388,7 +411,11 @@ pub(crate) fn scan(
     // Files rebuilt from records come first; carving must not list them again.
     let mut known = std::collections::HashSet::new();
     for file in std::mem::take(&mut plan.files) {
-        known.insert(file.offset);
+        // An unverified record's space is still carved; a newer file found
+        // there by carving is real and must not be hidden behind the record.
+        if file.validation != crate::Validation::Unverified {
+            known.insert(file.offset);
+        }
         found_count += 1;
         resident_bytes += file.resident_data.as_ref().map_or(0, |data| data.len());
         event(crate::Event::Found(file));

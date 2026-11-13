@@ -99,6 +99,25 @@ struct Reclaim {
 const LONG_CHECK_AFTER: Duration = Duration::from_millis(1500);
 /// Once named, a check stays on screen at least this long, so it can be read.
 const LONG_CHECK_SHOWN: Duration = Duration::from_millis(1500);
+/// A source reader that fails once `stop` is set, so a copy in progress ends
+/// within one read. `io::copy` retries `Interrupted`, so this uses `Other`.
+struct StoppableReader<R> {
+    inner: R,
+    stop: Arc<AtomicBool>,
+}
+impl<R: std::io::Read> std::io::Read for StoppableReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.stop.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("Recovery stopped"));
+        }
+        self.inner.read(buffer)
+    }
+}
+impl<R: std::io::Seek> std::io::Seek for StoppableReader<R> {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
 /// What the file list model currently holds, so a sync appends new results and
 /// patches changed selections instead of rebuilding every row. A scan tick then
 /// costs the same with 30 results or 30,000.
@@ -434,19 +453,30 @@ impl Reclaim {
                 // Never a cloned handle: it would share the running scan's cursor.
                 let input = preview::Input::new(handle)
                     .map_err(|e| format!("Could not read the scanned source: {e}"))?;
-                let mut input = reclaim::SourceReader::new(input, alignment, source_size)
+                let input = reclaim::SourceReader::new(input, alignment, source_size)
                     .map_err(|e| e.to_string())?;
+                // Stop recovery interrupts a large file mid-copy; its private
+                // temporary file is discarded, never published.
+                let mut input = StoppableReader {
+                    inner: input,
+                    stop: cancel.clone(),
+                };
                 let mut count = 0usize;
+                let stopped = |count: usize| {
+                    if count == 1 {
+                        format!("Recovery stopped. {count} file saved.")
+                    } else {
+                        format!("Recovery stopped. {count} files saved.")
+                    }
+                };
                 for (f, number) in files {
                     if cancel.load(Ordering::Relaxed) {
-                        return Err(if count == 1 {
-                            format!("Recovery stopped. {count} file saved.")
-                        } else {
-                            format!("Recovery stopped. {count} files saved.")
-                        });
+                        return Err(stopped(count));
                     }
                     reclaim::recover_unique(&mut input, &directory, &f, number).map_err(|e| {
-                        if count == 1 {
+                        if cancel.load(Ordering::Relaxed) {
+                            stopped(count)
+                        } else if count == 1 {
                             format!("Recovered {count} file before error: {e}")
                         } else {
                             format!("Recovered {count} files before error: {e}")

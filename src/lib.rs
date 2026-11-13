@@ -444,9 +444,10 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
         }
         let end = from + index + fmt.tail.len();
         if fmt.ext == "pdf" {
-            match pdf_revision_end(bytes, end) {
-                Some(end) => return CandidateEnd::Complete(end),
-                None => continue,
+            match pdf_after_eof(bytes, end, false) {
+                PdfAfterEof::Ends(end) => return CandidateEnd::Complete(end),
+                PdfAfterEof::Continues => continue,
+                PdfAfterEof::Undecided => return CandidateEnd::More,
             }
         }
         if fmt.ext != "zip" {
@@ -468,13 +469,34 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
     CandidateEnd::More
 }
 
-/// Where a PDF ends after the `%%EOF` that finishes at `eof`, or `None` when
-/// another revision follows and the search must go on to a later `%%EOF`.
+/// What follows a PDF `%%EOF`.
+#[derive(Debug, PartialEq, Eq)]
+enum PdfAfterEof {
+    /// The file ends at this byte: nothing of the PDF follows.
+    Ends(usize),
+    /// Another revision follows; the search goes on to a later `%%EOF`.
+    Continues,
+    /// The bytes read so far stop before this can be decided.
+    Undecided,
+}
+
+/// Most whitespace looked past after `%%EOF` for another revision.
+const MAX_PDF_GAP: usize = 1024;
+
+/// PDF whitespace (ISO 32000-1, 7.2.2): NUL, tab, line feed, form feed,
+/// carriage return and space.
+fn pdf_space(byte: u8) -> bool {
+    matches!(byte, 0 | b'\t' | b'\n' | 0x0c | b'\r' | b' ')
+}
+
+/// What follows the `%%EOF` that finishes at `eof`.
 ///
 /// The line break after `%%EOF` belongs to the file. Linearized ("fast web
 /// view") PDFs and files saved with incremental updates hold several `%%EOF`
 /// markers; stopping at the first one would cut off most of the document.
-fn pdf_revision_end(bytes: &[u8], eof: usize) -> Option<usize> {
+/// When `bytes` ends before the next token is whole, the answer waits for
+/// more data, unless `at_end` says the source has no more.
+fn pdf_after_eof(bytes: &[u8], eof: usize, at_end: bool) -> PdfAfterEof {
     let mut end = eof;
     for expected in *b"\r\n" {
         if bytes.get(end) == Some(&expected) {
@@ -482,30 +504,82 @@ fn pdf_revision_end(bytes: &[u8], eof: usize) -> Option<usize> {
         }
     }
     let next = bytes.get(end..).unwrap_or_default();
-    let next = next.trim_ascii_start();
-    let continues = next.starts_with(b"xref")
-        || next.starts_with(b"trailer")
-        || next.starts_with(b"startxref")
-        || pdf_object_header(next);
-    (!continues).then_some(end)
+    // Line whitespace only: free space after a file is often zero-filled, and
+    // NUL there is padding, not a gap before another revision.
+    let gap = next
+        .iter()
+        .take_while(|b| **b != 0 && pdf_space(**b))
+        .count();
+    if gap > MAX_PDF_GAP {
+        return PdfAfterEof::Ends(end);
+    }
+    let next = next.get(gap..).unwrap_or_default();
+    let keyword = |word: &[u8]| {
+        if next.starts_with(word) {
+            Some(true)
+        } else if word.starts_with(next) {
+            None
+        } else {
+            Some(false)
+        }
+    };
+    let answers = [
+        keyword(b"xref"),
+        keyword(b"trailer"),
+        keyword(b"startxref"),
+        pdf_object_header(next),
+    ];
+    if answers.contains(&Some(true)) {
+        PdfAfterEof::Continues
+    } else if answers.contains(&None) && !at_end {
+        PdfAfterEof::Undecided
+    } else {
+        PdfAfterEof::Ends(end)
+    }
 }
 
-/// Whether `bytes` starts with an indirect object header such as `12 0 obj`.
-fn pdf_object_header(bytes: &[u8]) -> bool {
+/// Whether `bytes` starts with an indirect object header such as `12 0 obj`,
+/// or `None` when `bytes` ends before that is known.
+fn pdf_object_header(bytes: &[u8]) -> Option<bool> {
     let mut rest = bytes;
     for _ in 0..2 {
         let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == rest.len() && digits <= 10 {
+            return None;
+        }
         if digits == 0 || digits > 10 {
-            return false;
+            return Some(false);
         }
         rest = rest.get(digits..).unwrap_or_default();
-        let spaces = rest.iter().take_while(|b| **b == b' ').count();
+        let spaces = rest.iter().take_while(|b| pdf_space(**b)).count();
+        if spaces == rest.len() {
+            return None;
+        }
         if spaces == 0 {
-            return false;
+            return Some(false);
         }
         rest = rest.get(spaces..).unwrap_or_default();
     }
-    rest.starts_with(b"obj")
+    if rest.starts_with(b"obj") {
+        Some(true)
+    } else if b"obj".starts_with(rest) {
+        None
+    } else {
+        Some(false)
+    }
+}
+
+/// Where a PDF read to the end of the source ends: after its last `%%EOF`.
+fn pdf_end_at_source_end(bytes: &[u8]) -> CandidateEnd {
+    let mut last = None;
+    for (index, window) in bytes.windows(5).enumerate() {
+        if window == b"%%EOF"
+            && let PdfAfterEof::Ends(end) = pdf_after_eof(bytes, index + 5, true)
+        {
+            last = Some(end);
+        }
+    }
+    last.map_or(CandidateEnd::Invalid, CandidateEnd::Complete)
 }
 
 fn valid_zip(bytes: &[u8], eocd: usize) -> bool {
@@ -894,12 +968,17 @@ pub(crate) fn scan_reader_with_filter(
                     }
                     let remaining = (candidate_limit - candidate.len()).min(chunk.len());
                     let count = read_chunk(file, &mut chunk[..remaining], cancel)?;
-                    if count == 0 {
+                    // A PDF whose end was waiting on more data ends at the
+                    // source's end after its last `%%EOF`.
+                    let at_source_end = count == 0;
+                    if at_source_end && fmt.ext != "pdf" {
                         break;
                     }
                     let from = candidate.len().saturating_sub(fmt.tail.len());
                     candidate.extend_from_slice(&chunk[..count]);
-                    let boundary = if fmt.ext == "ogg" {
+                    let boundary = if at_source_end {
+                        pdf_end_at_source_end(&candidate)
+                    } else if fmt.ext == "ogg" {
                         ogg.push(&candidate, cancel)
                     } else if fmt.ext == "gz" {
                         gzip.push(&candidate, cancel)
@@ -1128,9 +1207,16 @@ pub fn recover_reader(
             "Source changed or candidate is truncated",
         ));
     }
-    if found.extents.is_some() {
+    if found.extents.is_some()
+        && !matches!(
+            found.validation,
+            Validation::ImageDecoded | Validation::StructureChecked
+        )
+    {
         // The filesystem record gave the exact pieces and length; the bytes
         // are copied as stored, without second-guessing them by content.
+        // Carved files that cross free-space pieces also carry extents, but
+        // were checked by content when found, so they are checked again below.
     } else if found.kind == "zip" && found.size > LIMIT as u64 {
         if zip::large_end(output.as_file_mut(), 0, &AtomicBool::new(false))? != Some(found.size) {
             return Err(io::Error::new(
@@ -1172,6 +1258,83 @@ pub fn recover_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn carved_files_across_pieces_are_checked_again_on_recovery() {
+        let png = include_bytes!("../tests/fixtures/real.png");
+        let split = png.len() / 2;
+        // The image in two pieces with a used gap between them.
+        let mut source = png[..split].to_vec();
+        source.extend_from_slice(&[0xAA; 512]);
+        source.extend_from_slice(&png[split..]);
+        let gap_end = (split + 512) as u64;
+        let found = Found {
+            offset: 0,
+            size: png.len() as u64,
+            kind: "png",
+            selected: true,
+            validation: Validation::ImageDecoded,
+            original_name: None,
+            resident_data: None,
+            ntfs: None,
+            extents: Some(vec![(0, split as u64), (gap_end, (png.len() - split) as u64)].into()),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        recover_reader(
+            &mut io::Cursor::new(source.clone()),
+            &dir.path().join("ok.png"),
+            &found,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(dir.path().join("ok.png")).unwrap(), png);
+        // The second piece was overwritten after the scan.
+        source[split + 512 + 8..].fill(0);
+        let changed = dir.path().join("changed.png");
+        assert!(recover_reader(&mut io::Cursor::new(source), &changed, &found).is_err());
+        assert!(!changed.exists());
+    }
+
+    #[test]
+    fn pdf_end_waits_for_the_next_token_and_accepts_pdf_whitespace() {
+        let eof = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".len();
+        let pdf = |after: &[u8]| {
+            let mut bytes = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".to_vec();
+            bytes.extend_from_slice(after);
+            bytes
+        };
+        // A revision with tab-separated header tokens follows.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\n2\t0\tobj"), eof, false),
+            PdfAfterEof::Continues
+        );
+        // The read stops right after %%EOF or inside the next token: wait.
+        for cut in [&b"\n"[..], b"\n2 0 o", b"\nxr", b"\nstartx", b"\n12"] {
+            assert_eq!(
+                pdf_after_eof(&pdf(cut), eof, false),
+                PdfAfterEof::Undecided,
+                "{cut:?}"
+            );
+        }
+        // At the source's end, the same bytes end the file.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\n2 0 o"), eof, true),
+            PdfAfterEof::Ends(eof + 1)
+        );
+        // Anything else after %%EOF ends the file.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\nGIF89a"), eof, false),
+            PdfAfterEof::Ends(eof + 1)
+        );
+        // Zero padding after the file, as in free space, ends it at once.
+        assert_eq!(
+            pdf_after_eof(&pdf(b"\n\0\0\0"), eof, false),
+            PdfAfterEof::Ends(eof + 1)
+        );
+        assert!(matches!(
+            pdf_end_at_source_end(&pdf(b"\n")),
+            CandidateEnd::Complete(end) if end == eof + 1
+        ));
+    }
+
     #[test]
     fn zip_classification_handles_maximum_comment_and_false_footer() {
         let mut bytes = include_bytes!("../tests/fixtures/package.docx").to_vec();

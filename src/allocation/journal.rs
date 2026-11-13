@@ -43,6 +43,10 @@ const MAX_JOURNAL_BLOCKS: u64 = 1 << 18;
 const MAX_DEPTH: u32 = 5;
 /// Most block ranges accepted for one file.
 const MAX_EXTENTS: usize = 4096;
+/// Most inode bytes kept from journal copies while collecting (64 MiB).
+const MAX_COPY_BYTES: u64 = 64 << 20;
+/// Most file names kept from journal directory copies.
+const MAX_NAMES: usize = 100_000;
 
 /// What the journal reader needs from the ext superblock and group table.
 pub(super) struct Volume<'a> {
@@ -293,6 +297,7 @@ fn directory_names(block: &[u8], names: &mut HashMap<u64, String>) {
         // file_type 1 is a regular file.
         if inode != 0
             && kind == 1
+            && (names.len() < MAX_NAMES || names.contains_key(&inode))
             && let Some(name) = entry
                 .get(8..length.saturating_add(8))
                 .and_then(|raw| std::str::from_utf8(raw).ok())
@@ -363,11 +368,33 @@ pub(super) fn deleted_files(
     };
     let tag_size = tag_size(incompat);
     let checksummed = incompat & (FEATURE_CSUM_V2 | FEATURE_CSUM_V3) != 0;
+    // The log is a ring from s_first to s_maxlen: a descriptor near its end
+    // logs its data blocks from s_first again. Block 0 is this superblock.
+    let end = journal_blocks
+        .len()
+        .min(bytes::to_usize(u64::from(bytes::u32_be(&header, 0x10))));
+    let first_log = bytes::to_usize(u64::from(bytes::u32_be(&header, 0x14)));
+    if first_log == 0 || first_log >= end {
+        return Ok(Vec::new());
+    }
+    let log_block = |index: usize| -> Option<u64> {
+        let wrapped = if index < end {
+            index
+        } else {
+            first_log
+                .checked_add(index.checked_sub(end)?)
+                .filter(|at| *at < end)?
+        };
+        journal_blocks.get(wrapped).copied()
+    };
+    let max_copies = bytes::to_usize(MAX_COPY_BYTES.checked_div(volume.inode_size).unwrap_or(0));
     // Latest journal copy of each inode that still had a block list, and names.
     let mut copies: HashMap<u64, (u32, Vec<u8>)> = HashMap::new();
     let mut names: HashMap<u64, String> = HashMap::new();
     let mut index = 1usize;
-    while let Some(&physical) = journal_blocks.get(index) {
+    while index < end
+        && let Some(&physical) = journal_blocks.get(index)
+    {
         if index.is_multiple_of(1024) {
             check(cancel)?;
         }
@@ -406,7 +433,7 @@ pub(super) fn deleted_files(
                 at = at.saturating_add(16);
             }
             // The logged copy is the next journal block.
-            let Some(&copy_at) = journal_blocks.get(index) else {
+            let Some(copy_at) = log_block(index) else {
                 break;
             };
             index = index.saturating_add(1);
@@ -430,7 +457,9 @@ pub(super) fn deleted_files(
                             let newer = copies
                                 .get(&number)
                                 .is_none_or(|(seen, _)| sequence.wrapping_sub(*seen) < 1 << 31);
-                            if newer {
+                            // Bounded: new inodes stop being kept at the budget.
+                            if newer && (copies.len() < max_copies || copies.contains_key(&number))
+                            {
                                 copies.insert(number, (sequence, inode.to_vec()));
                             }
                         }

@@ -172,14 +172,18 @@ pub(super) fn classic(
     let Some(table) = tables.first_mut() else {
         return Ok(plan);
     };
-    plan.files = classic_files(
-        input,
-        table,
-        bits,
-        root_directory,
-        heap,
-        &plan,
-        total,
+    plan.files = super::files_or_none(
+        classic_files(
+            input,
+            table,
+            bits,
+            root_directory,
+            heap,
+            &plan,
+            total,
+            cancel,
+        ),
+        "FAT",
         cancel,
     )?;
     Ok(plan)
@@ -497,7 +501,11 @@ pub(super) fn exfat(
         cluster_size,
         last: clusters + 1,
     };
-    plan.files = exfat_files(input, &mut table, root, heap, &plan, total, cancel)?;
+    plan.files = super::files_or_none(
+        exfat_files(input, &mut table, root, heap, &plan, total, cancel),
+        "exFAT",
+        cancel,
+    )?;
     Ok(plan)
 }
 

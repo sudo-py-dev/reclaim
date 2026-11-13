@@ -51,7 +51,28 @@ impl Input {
                 return Err(std::io::Error::last_os_error());
             }
             // SAFETY: ReOpenFile returned a new owned handle; transfer it once.
-            Arc::new(unsafe { std::fs::File::from_raw_handle(handle) })
+            let file = unsafe { std::fs::File::from_raw_handle(handle) };
+            // Extended volume reads are a per-handle setting: the scan enabled
+            // it on its own handle, and without it reads near the end of a
+            // volume can stop early. A plain file (a disk image) refuses this
+            // control, which changes nothing, so the result is not needed.
+            let mut returned = 0u32;
+            // SAFETY: file is a live read-only handle. The control has no input
+            // or output buffers, never writes to or dismounts the volume, and
+            // returned is a valid writable u32.
+            unsafe {
+                windows_sys::Win32::System::IO::DeviceIoControl(
+                    file.as_raw_handle(),
+                    windows_sys::Win32::System::Ioctl::FSCTL_ALLOW_EXTENDED_DASD_IO,
+                    std::ptr::null(),
+                    0,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut returned,
+                    std::ptr::null_mut(),
+                );
+            }
+            Arc::new(file)
         };
         Ok(Self { file, position: 0 })
     }

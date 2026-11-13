@@ -96,6 +96,14 @@ umask 077
 snapcraft remote-build --build-for=amd64 --launchpad-accept-public-upload
 ```
 
+A remote build downloads the snap into the current directory. Move it where the
+upload steps below expect it, replacing any older local build:
+
+```sh
+mkdir -p dist
+mv -f reclaim_*_amd64.snap dist/
+```
+
 The recipe installs Ubuntu's Rustup package and invokes Rust 1.99.0 explicitly.
 Toolchain files are installed only in the build environment; they are not shipped
 in the application snap.

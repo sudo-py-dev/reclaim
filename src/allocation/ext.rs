@@ -317,7 +317,11 @@ pub(super) fn plan(
                 descriptor_size,
                 is_64bit: geometry.is_64bit,
             };
-            plan.files = super::journal::deleted_files(input, &volume, &plan, total, cancel)?;
+            plan.files = super::files_or_none(
+                super::journal::deleted_files(input, &volume, &plan, total, cancel),
+                "journal",
+                cancel,
+            )?;
         }
     }
     Ok(plan)

@@ -320,7 +320,11 @@ pub(super) fn plan(
         cluster_size,
         clusters,
     };
-    plan.files = deleted_files(input, &mft, record_size, geometry, &bitmap, total, cancel)?;
+    plan.files = super::files_or_none(
+        deleted_files(input, &mft, record_size, geometry, &bitmap, total, cancel),
+        "MFT",
+        cancel,
+    )?;
     Ok(plan)
 }
 
@@ -373,7 +377,7 @@ fn deleted_files(
     while index < records && files.len() < MAX_DELETED {
         check(cancel)?;
         let count = batch.min(records - index);
-        let bytes = stream_read(
+        let bytes = match stream_read(
             input,
             mft,
             index * record_size,
@@ -381,7 +385,15 @@ fn deleted_files(
             geometry.cluster_size,
             total,
             cancel,
-        )?;
+        ) {
+            Ok(bytes) => bytes,
+            Err(e) if cancel.load(Ordering::Relaxed) => return Err(e),
+            // A bad sector in the MFT loses only the records in this batch.
+            Err(_) => {
+                index += count;
+                continue;
+            }
+        };
         for (number, raw) in (index..).zip(bytes.chunks_exact(to_usize(record_size))) {
             // Only deleted (flags 0) file records are candidates.
             if raw.get(..4) != Some(b"FILE".as_slice()) || u16at(raw, 22) != 0 {
