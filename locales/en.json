@@ -196,7 +196,6 @@
   "Reclaim encountered an unexpected error and must close.": "Reclaim encountered an unexpected error and must close.",
   "Reclaim stopped because of a Windows exception.": "Reclaim stopped because of a Windows exception.",
   "Run the Windows setup once to enable automatic updates": "Run the Windows setup once to enable automatic updates",
-  "Starting installer…": "Starting installer…",
   "The desktop did not open the link or file. Try opening it manually.": "The desktop did not open the link or file. Try opening it manually.",
   "The desktop returned an unexpected open request. Try opening the link or file manually.": "The desktop returned an unexpected open request. Try opening the link or file manually.",
   "The diagnostic log could not be written.": "The diagnostic log could not be written.",

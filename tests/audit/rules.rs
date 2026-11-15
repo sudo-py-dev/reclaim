@@ -10,6 +10,7 @@ const UNSAFE_FILES: &[&str] = &[
     "src/drives/macos.rs",   // DiskArbitration and IOKit
     "src/drives/windows.rs", // volume and device IOCTLs
     "src/installer.rs",      // ShellExecuteW
+    "src/legacy_install.rs", // reading the old uninstall entry
     "src/native_process.rs", // posix_spawn / CreateProcessW
     "src/preview.rs",        // reopening a Windows handle, extended volume reads
     "src/update_runtime.rs", // geteuid for the elevated update helper

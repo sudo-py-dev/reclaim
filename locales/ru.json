@@ -196,7 +196,6 @@
   "Reclaim encountered an unexpected error and must close.": "В Reclaim произошла непредвиденная ошибка, приложение будет закрыто.",
   "Reclaim stopped because of a Windows exception.": "Reclaim остановлен из-за исключения Windows.",
   "Run the Windows setup once to enable automatic updates": "Один раз запустите установщик Windows, чтобы включить автоматические обновления",
-  "Starting installer…": "Запуск установщика…",
   "The desktop did not open the link or file. Try opening it manually.": "Рабочий стол не открыл ссылку или файл. Попробуйте открыть вручную.",
   "The desktop returned an unexpected open request. Try opening the link or file manually.": "Рабочий стол вернул неожиданный запрос на открытие. Попробуйте открыть ссылку или файл вручную.",
   "The diagnostic log could not be written.": "Не удалось записать журнал диагностики.",

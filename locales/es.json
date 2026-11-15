@@ -196,7 +196,6 @@
   "Reclaim encountered an unexpected error and must close.": "Reclaim encontró un error inesperado y debe cerrarse.",
   "Reclaim stopped because of a Windows exception.": "Reclaim se detuvo por una excepción de Windows.",
   "Run the Windows setup once to enable automatic updates": "Ejecuta una vez el instalador de Windows para activar las actualizaciones automáticas",
-  "Starting installer…": "Iniciando el instalador…",
   "The desktop did not open the link or file. Try opening it manually.": "El escritorio no abrió el enlace ni el archivo. Prueba a abrirlo manualmente.",
   "The desktop returned an unexpected open request. Try opening the link or file manually.": "El escritorio devolvió una solicitud de apertura inesperada. Prueba a abrir el enlace o el archivo manualmente.",
   "The diagnostic log could not be written.": "No se pudo escribir el registro de diagnóstico.",

@@ -37,8 +37,14 @@ jobs:
           & $winget --version
           if ($LASTEXITCODE -ne 0) { throw 'WinGet could not start' }
           $failed = $false
-          $versions = Get-ChildItem packaging/winget -Recurse -Filter '*.installer.yaml'
-          if (-not $versions) { throw 'No WinGet manifests found' }
+          $versions = @()
+          if (Test-Path packaging/winget) {
+            $versions = Get-ChildItem packaging/winget -Recurse -Filter '*.installer.yaml'
+          }
+          if (-not $versions) {
+            'No WinGet manifests to validate.' >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
           foreach ($installer in $versions) {
             $directory = $installer.Directory.FullName
             $log = Join-Path $env:RUNNER_TEMP ($installer.BaseName + '.validation.txt')

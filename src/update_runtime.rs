@@ -27,18 +27,65 @@ pub fn supported() -> bool {
     cfg!(any(target_os = "linux", windows))
 }
 
+/// Velopack installs to `<root>\\current\\reclaim.exe` with its updater at
+/// `<root>\\Update.exe` and the package manifest at `current\\sq.version`.
+/// Returns the updater for that layout; `None` for a portable copy.
 #[cfg(any(windows, test))]
-fn windows_installer_arguments() -> Vec<String> {
-    [
-        "/SILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        "/CLOSEAPPLICATIONS",
-        "/NORESTARTAPPLICATIONS",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect()
+fn velopack_updater(executable: &Path) -> Option<PathBuf> {
+    let current = executable.parent()?;
+    if current.file_name()? != "current" || !current.join("sq.version").is_file() {
+        return None;
+    }
+    let updater = current.parent()?.join("Update.exe");
+    updater.is_file().then_some(updater)
+}
+
+/// `Update.exe apply` waits for this process to exit, installs the verified
+/// full package, then starts the new version.
+#[cfg(any(windows, test))]
+fn velopack_apply_arguments(package: &Path, process: u32) -> anyhow::Result<Vec<String>> {
+    let package = package
+        .to_str()
+        .with_context(|| reclaim::i18n::diagnostic("Update cache path is not valid Unicode"))?;
+    Ok(vec![
+        "apply".to_owned(),
+        "--silent".to_owned(),
+        "--waitPid".to_owned(),
+        process.to_string(),
+        "--package".to_owned(),
+        package.to_owned(),
+    ])
+}
+
+/// The commands Velopack's setup and updater run the app with. Each must
+/// exit quickly and show no window, or Velopack kills the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VelopackHook {
+    Install,
+    Updated,
+    Obsolete,
+    Uninstall,
+}
+
+impl VelopackHook {
+    pub fn parse(argument: &std::ffi::OsStr) -> Option<Self> {
+        match argument.to_str()? {
+            "--veloapp-install" => Some(Self::Install),
+            "--veloapp-updated" => Some(Self::Updated),
+            "--veloapp-obsolete" => Some(Self::Obsolete),
+            "--veloapp-uninstall" => Some(Self::Uninstall),
+            _ => None,
+        }
+    }
+}
+
+/// Runs a Velopack hook. Install and update both retry the cleanup of an
+/// old installation, so a copy that was still busy is removed next time.
+pub fn run_velopack_hook(hook: VelopackHook) {
+    match hook {
+        VelopackHook::Install | VelopackHook::Updated => crate::legacy_install::remove(),
+        VelopackHook::Obsolete | VelopackHook::Uninstall => {}
+    }
 }
 
 /// Private per-user folder for staged update packages. Each download gets its
@@ -107,14 +154,11 @@ pub fn update(
         bail!("Automatic package updates require pkexec (polkit)");
     }
     #[cfg(windows)]
-    if !executable
-        .parent()
-        .is_some_and(|p| p.join("installed-by-inno").is_file())
-    {
+    let Some(velopack) = velopack_updater(&executable) else {
         bail!("Run the Windows setup once to enable automatic updates");
-    }
+    };
     // Dropping `stage` deletes the package on every path, including errors;
-    // only the Windows hand-off keeps it, because the installer is still running.
+    // only the Windows hand-off keeps it, because the updater still needs it.
     let stage = new_stage()?;
     let package = stage.path().join(&release.asset);
     phase("Downloading and verifying update…");
@@ -130,10 +174,10 @@ pub fn update(
     }
     #[cfg(windows)]
     {
-        phase("Starting installer…");
-        let directory = stage.keep();
-        let package = directory.join(&release.asset);
-        crate::native_process::spawn(&package, &windows_installer_arguments())?;
+        phase("Restarting Reclaim…");
+        let package = stage.keep().join(&release.asset);
+        let arguments = velopack_apply_arguments(&package, std::process::id())?;
+        crate::native_process::spawn(&velopack, &arguments)?;
         Ok(())
     }
     #[cfg(not(any(target_os = "linux", windows)))]
@@ -251,21 +295,60 @@ fn remove_stages(root: &Path) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn windows_update_uses_direct_installer_handoff() {
+    fn windows_update_hands_the_verified_package_to_velopack() {
+        let package = std::path::Path::new("C:/cache/pending-1/reclaim-windows-x86_64-full.nupkg");
         assert_eq!(
-            super::windows_installer_arguments(),
+            super::velopack_apply_arguments(package, 42).unwrap(),
             [
-                "/SILENT",
-                "/SUPPRESSMSGBOXES",
-                "/NORESTART",
-                "/CLOSEAPPLICATIONS",
-                "/NORESTARTAPPLICATIONS"
+                "apply",
+                "--silent",
+                "--waitPid",
+                "42",
+                "--package",
+                "C:/cache/pending-1/reclaim-windows-x86_64-full.nupkg"
             ]
         );
-        let installer = include_str!("../packaging/windows/reclaim.iss");
-        assert!(installer.contains("RestartApplications=yes"));
-        assert!(installer.contains("Check: WizardSilent"));
-        assert!(!installer.contains("reclaim-update.exe"));
+    }
+
+    #[test]
+    fn recognises_only_velopack_hook_commands() {
+        use super::VelopackHook;
+        for (argument, hook) in [
+            ("--veloapp-install", Some(VelopackHook::Install)),
+            ("--veloapp-updated", Some(VelopackHook::Updated)),
+            ("--veloapp-obsolete", Some(VelopackHook::Obsolete)),
+            ("--veloapp-uninstall", Some(VelopackHook::Uninstall)),
+            ("--veloapp-install=1", None),
+            ("--install-deb-update", None),
+            ("disk.img", None),
+        ] {
+            assert_eq!(
+                VelopackHook::parse(std::ffi::OsStr::new(argument)),
+                hook,
+                "{argument}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_velopack_layout_enables_windows_updates() {
+        let root = tempfile::tempdir().unwrap();
+        let current = root.path().join("current");
+        std::fs::create_dir(&current).unwrap();
+        let executable = current.join("reclaim.exe");
+        std::fs::write(&executable, b"app").unwrap();
+        assert_eq!(super::velopack_updater(&executable), None);
+        std::fs::write(current.join("sq.version"), b"manifest").unwrap();
+        assert_eq!(super::velopack_updater(&executable), None);
+        std::fs::write(root.path().join("Update.exe"), b"updater").unwrap();
+        assert_eq!(
+            super::velopack_updater(&executable),
+            Some(root.path().join("Update.exe"))
+        );
+        // A portable copy next to a stray Update.exe is not an installation.
+        let portable = root.path().join("reclaim.exe");
+        std::fs::write(&portable, b"app").unwrap();
+        assert_eq!(super::velopack_updater(&portable), None);
     }
 
     #[test]
