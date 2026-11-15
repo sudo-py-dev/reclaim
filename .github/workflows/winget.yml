@@ -42,6 +42,11 @@ jobs:
             $versions = Get-ChildItem packaging/winget -Recurse -Filter '*.installer.yaml'
           }
           if (-not $versions) {
+            # A version or locale manifest without its installer manifest is an
+            # incomplete submission, not an empty folder.
+            if ((Test-Path packaging/winget) -and (Get-ChildItem packaging/winget -Recurse -Filter '*.yaml')) {
+              throw 'WinGet manifests are present without an installer manifest'
+            }
             'No WinGet manifests to validate.' >> $env:GITHUB_STEP_SUMMARY
             exit 0
           }

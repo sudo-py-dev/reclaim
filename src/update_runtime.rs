@@ -271,11 +271,27 @@ fn pkexec_result(code: Option<u32>) -> anyhow::Result<()> {
 /// symbolic links are never followed. Locked files are retried next launch.
 pub fn cleanup_staged_updates() {
     if let Ok(root) = cache_root() {
-        remove_stages(&root);
+        remove_stages(&root, std::time::SystemTime::now());
     }
 }
 
-fn remove_stages(root: &Path) {
+/// Stages younger than this may still be in use: a download in another
+/// Reclaim window, or a package Velopack's `Update.exe` is waiting to apply
+/// (it waits at most a minute for Reclaim to exit).
+const STAGE_GRACE: std::time::Duration = std::time::Duration::from_hours(1);
+
+/// A stage is old once its folder has not changed for [`STAGE_GRACE`]. A
+/// timestamp that cannot be read or lies in the future counts as recent.
+fn stage_is_old(entry: &std::fs::DirEntry, now: std::time::SystemTime) -> bool {
+    entry
+        .metadata()
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| now.duration_since(modified).ok())
+        .is_some_and(|age| age >= STAGE_GRACE)
+}
+
+fn remove_stages(root: &Path, now: std::time::SystemTime) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
@@ -285,7 +301,8 @@ fn remove_stages(root: &Path) {
             .file_name()
             .to_string_lossy()
             .starts_with(STAGE_PREFIX)
-            && entry.file_type().is_ok_and(|kind| kind.is_dir());
+            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+            && stage_is_old(&entry, now);
         if is_stage && let Err(error) = std::fs::remove_dir_all(entry.path()) {
             log::warn!("Could not remove a staged update yet: {error}");
         }
@@ -364,8 +381,12 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), root.path().join("pending-link")).unwrap();
 
-        super::remove_stages(root.path());
+        let now = std::time::SystemTime::now();
+        // A fresh stage may belong to a running download or update hand-off.
+        super::remove_stages(root.path(), now);
+        assert!(stage.exists());
 
+        super::remove_stages(root.path(), now + super::STAGE_GRACE);
         assert!(!stage.exists());
         assert!(root.path().join("pending-file").exists());
         assert!(root.path().join("keep").exists());
