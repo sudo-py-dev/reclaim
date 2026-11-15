@@ -5,6 +5,7 @@
 mod diagnostics;
 mod drives;
 mod installer;
+mod legacy_install;
 #[cfg(any(target_os = "linux", windows))]
 mod native_process;
 mod preview;
@@ -1355,6 +1356,16 @@ fn run() -> Result<(), slint::PlatformError> {
     result
 }
 fn main() {
+    // Velopack runs the app with a hook command during install, update and
+    // uninstall; it must exit at once without opening a window.
+    if let Some(hook) = std::env::args_os()
+        .nth(1)
+        .as_deref()
+        .and_then(update_runtime::VelopackHook::parse)
+    {
+        update_runtime::run_velopack_hook(hook);
+        return;
+    }
     // The privileged update step runs as root through pkexec, with no desktop
     // session, so it is handled before any GUI, D-Bus or settings setup.
     #[cfg(target_os = "linux")]

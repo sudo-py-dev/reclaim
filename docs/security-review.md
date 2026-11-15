@@ -212,8 +212,15 @@ this policy does not require the operating system to run in one process.
 
 The updater uses HTTPS through Rust libraries and SHA-256 verification. Unix
 executable replacement uses Rust filesystem operations. On Windows, Rust code
-starts the verified Inno Setup package directly through the Win32 process API;
-the app never launches cmd.exe, PowerShell, or a cleanup executable. Native OS
+downloads the Velopack full package (`.nupkg`), checks its Minisign signature
+and SHA-256, then starts the installed Velopack `Update.exe apply` directly
+through the Win32 process API with the verified file. Velopack's own release
+feed is not used, so the release key stays the only trust root. The app never
+launches cmd.exe or PowerShell. Velopack hook commands (`--veloapp-*`) exit
+before any window opens. The install and update hooks remove a copy left
+by the old installer (0.2.4 and earlier): `src/legacy_install.rs` reads its
+folder from the per-user uninstall entry, falls back to the default folder,
+and starts `unins000.exe` silently only when the old marker file is next to it. Native OS
 APIs open browser links and installer files without command helpers.
 
 On Linux a native D-Bus session address is required. Process-backed transports,

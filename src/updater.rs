@@ -372,6 +372,10 @@ fn parse_release_after(
     Ok(Some(release))
 }
 
+/// The Velopack full package that `Update.exe apply` installs. The setup
+/// executable is only for first installs and is never run by the updater.
+const WINDOWS_PACKAGE: &str = "reclaim-windows-x86_64-full.nupkg";
+
 /// Installed packages must be updated as packages to preserve receipts and uninstall metadata.
 pub fn installer_download(release: &Release) -> Option<String> {
     is_installer(&release.asset).then(|| release.url.clone())
@@ -382,7 +386,7 @@ pub fn installer_download(release: &Release) -> Option<String> {
     reason = "release asset names are exact; another case is not one of our assets"
 )]
 fn is_installer(name: &str) -> bool {
-    name.ends_with("-setup.exe") || name.ends_with(".deb") || name.ends_with(".pkg")
+    name.ends_with("-full.nupkg") || name.ends_with(".deb") || name.ends_with(".pkg")
 }
 
 /// Download the actual package asset, verify it, then atomically publish the
@@ -459,7 +463,7 @@ fn installer_name(executable: &std::path::Path, version: &semver::Version) -> Op
     {
         Some(format!("reclaim-macos-{}.pkg", std::env::consts::ARCH))
     } else if cfg!(windows) {
-        Some("reclaim-windows-x86_64-setup.exe".into())
+        Some(WINDOWS_PACKAGE.into())
     } else {
         None
     }
@@ -717,7 +721,7 @@ MbpIWMky15o9MmvgFruTTeC1TX8xqIARe0bHCg69++aqfnx8HJDHPdy6DG0miEizEhAabxrfS0lYPwBT
         .unwrap();
         let version = json["tag_name"].as_str().unwrap().trim_start_matches('v');
         let name = if cfg!(windows) {
-            "reclaim-windows-x86_64-setup.exe".into()
+            WINDOWS_PACKAGE.into()
         } else if cfg!(target_os = "macos") {
             format!("reclaim-macos-{}.pkg", std::env::consts::ARCH)
         } else {

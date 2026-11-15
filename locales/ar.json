@@ -196,7 +196,6 @@
   "Reclaim encountered an unexpected error and must close.": "واجه Reclaim خطأً غير متوقع ويجب إغلاقه.",
   "Reclaim stopped because of a Windows exception.": "توقف Reclaim بسبب استثناء في Windows.",
   "Run the Windows setup once to enable automatic updates": "شغّل برنامج إعداد Windows مرة واحدة لتفعيل التحديثات التلقائية",
-  "Starting installer…": "جارٍ تشغيل برنامج التثبيت…",
   "The desktop did not open the link or file. Try opening it manually.": "لم يفتح سطح المكتب الرابط أو الملف. جرّب فتحه يدويًا.",
   "The desktop returned an unexpected open request. Try opening the link or file manually.": "أعاد سطح المكتب طلب فتح غير متوقع. جرّب فتح الرابط أو الملف يدويًا.",
   "The diagnostic log could not be written.": "تعذرت كتابة سجل التشخيص.",

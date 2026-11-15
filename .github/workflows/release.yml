@@ -82,10 +82,12 @@ jobs:
           if [[ "$RUNNER_OS" == Windows ]]; then binary="$binary.exe"; fi
           if [[ "$RUNNER_OS" == macOS ]]; then codesign --force --sign - "$binary"; fi
           cargo xtask bundle "$binary" dist "$ASSET"
-      - name: Ensure Inno Setup is available
+      - name: Install the Velopack packaging tool
         if: runner.os == 'Windows'
         shell: bash
-        run: choco install innosetup --yes --no-progress
+        run: |
+          dotnet tool install --global vpk --version 1.2.161
+          echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
       - name: Build native installer
         shell: bash
         env:

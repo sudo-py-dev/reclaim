@@ -160,7 +160,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 const TEXT_EXTENSIONS: &[&str] = &[
     "rs", "slint", "toml", "json", "md", "yml", "yaml", "ts", "astro", "mjs", "css", "html", "txt",
-    "iss", "plist", "desktop", "pub", "svg",
+    "plist", "desktop", "pub", "svg",
 ];
 
 impl Workspace {

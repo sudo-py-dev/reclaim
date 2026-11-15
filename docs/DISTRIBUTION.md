@@ -2,25 +2,27 @@
 
 ## WinGet
 
-The initial package is `sudo-py-dev.Reclaim` version `0.2.3`, submitted for review at
-https://github.com/microsoft/winget-pkgs/pull/478554. Publication depends on Microsoft's review and checks; opening the PR does not make the package available immediately.
-
-The submission files are in `packaging/winget/manifests/s/sudo-py-dev/Reclaim/0.2.3/`.
-The installer is the existing upstream per-user x64 Inno Setup release. Its SHA-256
-was independently downloaded and verified, and the manifests pass Microsoft's
-1.28.0 JSON schemas. Windows installation testing must be completed by WinGet CI
-or on a Windows machine. The account owner must personally handle any required
-Contributor License Agreement acceptance.
-
-Once accepted:
+The package id is `sudo-py-dev.Reclaim`. Version 0.2.3 was submitted for review at
+https://github.com/microsoft/winget-pkgs/pull/478554; its manifests were removed
+from this repository with the move to Velopack, and the copy in that PR is the
+record. Publication depends on Microsoft's review and checks.
 
 ```powershell
 winget install --id sudo-py-dev.Reclaim --exact
 ```
 
-For subsequent releases, create a new version directory, update every version and
-the version-specific download URL, hash the actual installer, and submit an update
-PR to `microsoft/winget-pkgs`. Do not point installer URLs at `latest`.
+For each new release, add `packaging/winget/manifests/s/sudo-py-dev/Reclaim/<version>/`
+with the three manifest files, point the installer URL at that version's
+`reclaim-windows-x86_64-setup.exe` (never at `latest`), hash the actual file, and
+submit an update PR to `microsoft/winget-pkgs`. The WinGet workflow validates any
+manifests in that folder. The account owner must personally handle any required
+Contributor License Agreement acceptance.
+
+The Velopack setup needs `InstallerType: exe`, `Scope: user`, `InstallerSwitches`
+with `Silent: --silent` and `SilentWithProgress: --silent`, and
+`ProductCode: sudo-py-dev.Reclaim` (the Velopack package id, which is also its
+uninstall entry). It installs to `%LocalAppData%\sudo-py-dev.Reclaim`. Check the
+uninstall entry name on a real install before the first submission.
 
 ## Standalone Flatpak
 

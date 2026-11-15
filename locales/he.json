@@ -196,7 +196,6 @@
   "Reclaim encountered an unexpected error and must close.": "אירעה ב־Reclaim שגיאה לא צפויה, והיא תיסגר.",
   "Reclaim stopped because of a Windows exception.": "Reclaim נעצרה בגלל חריגה של Windows.",
   "Run the Windows setup once to enable automatic updates": "הריצו פעם אחת את תוכנית ההתקנה של Windows כדי לאפשר עדכונים אוטומטיים",
-  "Starting installer…": "מפעילה את תוכנית ההתקנה…",
   "The desktop did not open the link or file. Try opening it manually.": "שולחן העבודה לא פתח את הקישור או הקובץ. נסו לפתוח אותו ידנית.",
   "The desktop returned an unexpected open request. Try opening the link or file manually.": "שולחן העבודה החזיר בקשת פתיחה לא צפויה. נסו לפתוח את הקישור או הקובץ ידנית.",
   "The diagnostic log could not be written.": "לא ניתן לכתוב את יומן האבחון.",

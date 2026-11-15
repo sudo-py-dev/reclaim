@@ -122,32 +122,88 @@ fn mac(binary: &Path, output: &Path, work: &Path, arch: &str) -> Result {
         ])
         .arg(output.join(format!("reclaim-macos-{arch}.pkg"))))
 }
-fn windows(binary: &Path, output: &Path) -> Result {
-    let base = std::env::var_os("ProgramFiles(x86)")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files (x86)"));
-    let mut candidates: Vec<_> = fs::read_dir(base)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("Inno Setup ")
-        })
-        .map(|entry| entry.path().join("ISCC.exe"))
-        .filter(|path| path.is_file())
-        .collect();
-    candidates.sort();
-    let compiler = candidates
-        .pop()
-        .unwrap_or_else(|| PathBuf::from("ISCC.exe"));
-    run(Command::new(compiler)
-        .arg(format!("/DAppVersion={}", version()?))
-        .arg(format!("/DBinaryPath={}", binary.display()))
-        .arg(format!("/DOutputPath={}", output.display()))
-        .arg(root().join("packaging/windows/reclaim.iss")))
+/// Velopack package id: names the install folder (`%LocalAppData%\\<id>`) and
+/// the uninstall entry. Matches the WinGet identifier.
+const VELOPACK_ID: &str = "sudo-py-dev.Reclaim";
+/// Release asset names. The updater (`src/updater.rs`) downloads the package;
+/// the setup is only for first installs and WinGet.
+const WINDOWS_SETUP: &str = "reclaim-windows-x86_64-setup.exe";
+const WINDOWS_PACKAGE: &str = "reclaim-windows-x86_64-full.nupkg";
+
+/// The files Velopack installs into `current\\`: the app and its licenses.
+fn velopack_tree(binary: &Path, tree: &Path) -> Result {
+    copy(binary, tree.join("reclaim.exe"))?;
+    licenses(&tree.join("licenses"))
+}
+
+/// Move vpk's version-stamped outputs to the fixed release asset names.
+fn velopack_outputs(packed: &Path, output: &Path) -> Result {
+    for (suffix, name) in [
+        ("-Setup.exe", WINDOWS_SETUP),
+        ("-full.nupkg", WINDOWS_PACKAGE),
+    ] {
+        let mut found = fs::read_dir(packed)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|n| n.to_string_lossy().ends_with(suffix))
+            });
+        let source = found
+            .next()
+            .ok_or_else(|| format!("vpk produced no *{suffix}"))?;
+        if found.next().is_some() {
+            return Err(format!("vpk produced more than one *{suffix}").into());
+        }
+        let target = output.join(name);
+        if target.exists() {
+            fs::remove_file(&target)?;
+        }
+        copy(&source, &target)?;
+    }
+    Ok(())
+}
+
+fn windows(binary: &Path, output: &Path, work: &Path) -> Result {
+    let tree = work.join("app");
+    let packed = work.join("velopack");
+    velopack_tree(binary, &tree)?;
+    run(Command::new("vpk")
+        .args([
+            "pack",
+            "--packId",
+            VELOPACK_ID,
+            "--packVersion",
+            &version()?,
+        ])
+        .args([
+            "--packTitle",
+            "Reclaim",
+            "--packAuthors",
+            "Reclaim contributors",
+        ])
+        .args([
+            "--mainExe",
+            "reclaim.exe",
+            "--runtime",
+            "win-x64",
+            "--channel",
+            "win",
+        ])
+        .args([
+            "--shortcuts",
+            "StartMenuRoot",
+            "--delta",
+            "None",
+            "--noPortable",
+        ])
+        .arg("--icon")
+        .arg(root().join("assets/icons/reclaim.ico"))
+        .arg("--packDir")
+        .arg(&tree)
+        .arg("--outputDir")
+        .arg(&packed))?;
+    velopack_outputs(&packed, output)
 }
 pub fn main(args: &[String]) -> Result {
     let platform = args
@@ -191,7 +247,7 @@ pub fn main(args: &[String]) -> Result {
     match platform.as_str() {
         "linux" => deb(&binary, &output, work.path()),
         "macos" => mac(&binary, &output, work.path(), arch),
-        "windows" => windows(&binary, &output),
+        "windows" => windows(&binary, &output, work.path()),
         _ => unreachable!(),
     }
 }
@@ -236,6 +292,35 @@ mod tests {
                 0o644
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn velopack_tree_and_outputs_use_fixed_release_names() -> Result {
+        let work = tempfile::tempdir()?;
+        let binary = work.path().join("binary");
+        fs::write(&binary, b"installer input")?;
+        let tree = work.path().join("tree");
+        velopack_tree(&binary, &tree)?;
+        assert_eq!(fs::read(tree.join("reclaim.exe"))?, b"installer input");
+        assert!(tree.join("licenses/LICENSE").is_file());
+        assert!(tree.join("licenses/DejaVu-LICENSE.txt").is_file());
+
+        let packed = work.path().join("packed");
+        fs::create_dir(&packed)?;
+        let output = work.path().join("dist");
+        fs::create_dir(&output)?;
+        fs::write(packed.join("sudo-py-dev.Reclaim-win-Setup.exe"), b"setup")?;
+        assert!(velopack_outputs(&packed, &output).is_err());
+        fs::write(
+            packed.join("sudo-py-dev.Reclaim-1.0.0-full.nupkg"),
+            b"package",
+        )?;
+        fs::write(packed.join("releases.win.json"), b"{}")?;
+        velopack_outputs(&packed, &output)?;
+        assert_eq!(fs::read(output.join(WINDOWS_SETUP))?, b"setup");
+        assert_eq!(fs::read(output.join(WINDOWS_PACKAGE))?, b"package");
+        assert_eq!(fs::read_dir(&output)?.count(), 2);
         Ok(())
     }
 }
