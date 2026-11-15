@@ -111,18 +111,49 @@ pub(super) fn cache_root() -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
-fn new_stage() -> anyhow::Result<tempfile::TempDir> {
-    Ok(tempfile::Builder::new()
-        .prefix(STAGE_PREFIX)
-        .tempdir_in(cache_root()?)?)
+/// A private `pending-*` folder for one update. While it is alive it holds an
+/// exclusive lock on [`STAGE_LOCK`], so cleanup started by another Reclaim
+/// window leaves it alone, however long the download takes.
+struct Stage {
+    folder: tempfile::TempDir,
+    _lock: std::fs::File,
+}
+
+impl Stage {
+    fn new() -> anyhow::Result<Self> {
+        Self::new_in(&cache_root()?)
+    }
+
+    fn new_in(root: &Path) -> anyhow::Result<Self> {
+        let folder = tempfile::Builder::new()
+            .prefix(STAGE_PREFIX)
+            .tempdir_in(root)?;
+        let lock = std::fs::File::create_new(folder.path().join(STAGE_LOCK))?;
+        lock.try_lock()?;
+        Ok(Self {
+            folder,
+            _lock: lock,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        self.folder.path()
+    }
+
+    /// Keeps the folder after this process lets go of it (the Windows hand-off
+    /// and macOS packages). [`STAGE_GRACE`] then protects it from cleanup.
+    fn keep(self) -> PathBuf {
+        self.folder.keep()
+    }
 }
 
 const STAGE_PREFIX: &str = "pending-";
+const STAGE_LOCK: &str = "owner.lock";
 
 /// Download and verify an installer the user opens themselves (macOS packages).
 /// It stays staged until the next launch, then [`cleanup_staged_updates`] removes it.
 pub fn stage_installer(release: &Release, progress: impl Fn(u64, u64)) -> anyhow::Result<PathBuf> {
-    let stage = new_stage()?;
+    let stage = Stage::new()?;
     let package = stage.path().join(&release.asset);
     updater::download_installer(release, &package, progress)?;
     updater::verify_installer_file(release, &package)?;
@@ -159,7 +190,7 @@ pub fn update(
     };
     // Dropping `stage` deletes the package on every path, including errors;
     // only the Windows hand-off keeps it, because the updater still needs it.
-    let stage = new_stage()?;
+    let stage = Stage::new()?;
     let package = stage.path().join(&release.asset);
     phase("Downloading and verifying update…");
     updater::download_installer(release, &package, progress)?;
@@ -280,6 +311,19 @@ pub fn cleanup_staged_updates() {
 /// (it waits at most a minute for Reclaim to exit).
 const STAGE_GRACE: std::time::Duration = std::time::Duration::from_hours(1);
 
+/// Whether a live [`Stage`] in another process still holds this folder's lock.
+/// A lock that cannot be checked counts as held.
+fn stage_in_use(folder: &Path) -> bool {
+    let lock = match std::fs::File::open(folder.join(STAGE_LOCK)) {
+        Ok(lock) => lock,
+        Err(error) => return error.kind() != std::io::ErrorKind::NotFound,
+    };
+    match lock.try_lock_shared() {
+        Ok(()) => false,
+        Err(std::fs::TryLockError::WouldBlock | std::fs::TryLockError::Error(_)) => true,
+    }
+}
+
 /// A stage is old once its folder has not changed for [`STAGE_GRACE`]. A
 /// timestamp that cannot be read or lies in the future counts as recent.
 fn stage_is_old(entry: &std::fs::DirEntry, now: std::time::SystemTime) -> bool {
@@ -302,7 +346,8 @@ fn remove_stages(root: &Path, now: std::time::SystemTime) {
             .to_string_lossy()
             .starts_with(STAGE_PREFIX)
             && entry.file_type().is_ok_and(|kind| kind.is_dir())
-            && stage_is_old(&entry, now);
+            && stage_is_old(&entry, now)
+            && !stage_in_use(&entry.path());
         if is_stage && let Err(error) = std::fs::remove_dir_all(entry.path()) {
             log::warn!("Could not remove a staged update yet: {error}");
         }
@@ -391,6 +436,25 @@ mod tests {
         assert!(root.path().join("pending-file").exists());
         assert!(root.path().join("keep").exists());
         assert!(outside.path().join("user.txt").exists());
+    }
+
+    #[test]
+    fn cleanup_never_removes_a_stage_that_is_still_in_use() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = super::Stage::new_in(root.path()).unwrap();
+        let folder = stage.path().to_owned();
+        std::fs::write(folder.join("reclaim_9.9.9_amd64.deb"), b"downloading").unwrap();
+        let later = std::time::SystemTime::now() + super::STAGE_GRACE * 2;
+
+        // Older than the grace period, but its owner is still downloading.
+        super::remove_stages(root.path(), later);
+        assert!(folder.exists());
+
+        drop(stage);
+        assert!(!folder.exists(), "a dropped stage removes itself");
+        let kept = super::Stage::new_in(root.path()).unwrap().keep();
+        super::remove_stages(root.path(), later);
+        assert!(!kept.exists(), "a released, old stage is cleaned up");
     }
 
     #[test]

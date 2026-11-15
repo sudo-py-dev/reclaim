@@ -37,18 +37,25 @@ jobs:
           & $winget --version
           if ($LASTEXITCODE -ne 0) { throw 'WinGet could not start' }
           $failed = $false
-          $versions = @()
+          $manifests = @()
           if (Test-Path packaging/winget) {
-            $versions = Get-ChildItem packaging/winget -Recurse -Filter '*.installer.yaml'
+            $manifests = @(Get-ChildItem packaging/winget -Recurse -Filter '*.yaml')
           }
-          if (-not $versions) {
-            # A version or locale manifest without its installer manifest is an
-            # incomplete submission, not an empty folder.
-            if ((Test-Path packaging/winget) -and (Get-ChildItem packaging/winget -Recurse -Filter '*.yaml')) {
-              throw 'WinGet manifests are present without an installer manifest'
-            }
+          if (-not $manifests) {
             'No WinGet manifests to validate.' >> $env:GITHUB_STEP_SUMMARY
             exit 0
+          }
+          # Each version folder is one submission and needs its installer
+          # manifest; a folder without one would otherwise go unvalidated.
+          $versions = @()
+          foreach ($folder in ($manifests | Group-Object DirectoryName)) {
+            $installer = @($folder.Group | Where-Object Name -like '*.installer.yaml')
+            if ($installer.Count -ne 1) {
+              Write-Host "::error::$($folder.Name) needs exactly one installer manifest"
+              $failed = $true
+              continue
+            }
+            $versions += $installer[0]
           }
           foreach ($installer in $versions) {
             $directory = $installer.Directory.FullName
