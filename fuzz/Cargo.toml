@@ -37,3 +37,6 @@ members = ["."]
 
 [profile.release]
 debug = 0
+
+[patch.crates-io]
+i-slint-core = { path = "../vendor/slint-core" }

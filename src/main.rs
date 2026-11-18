@@ -1013,19 +1013,22 @@ fn file_details(file: &Found, number: usize) -> String {
             i18n::t("Sequence"),
             i18n::isolate(&metadata.sequence_number.to_string())
         ));
+        let unix_epoch = jiff::civil::date(1970, 1, 1).at(0, 0, 0, 0);
         for (label, value) in [
             ("Created", metadata.created),
             ("Last modified", metadata.modified),
             ("Record changed", metadata.record_changed),
             ("Last accessed", metadata.accessed),
         ] {
-            if let Some(date) =
-                value.and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
-            {
+            if let Some(date) = value.and_then(|timestamp| {
+                unix_epoch
+                    .checked_add(jiff::SignedDuration::from_secs(timestamp))
+                    .ok()
+            }) {
                 lines.push(format!(
                     "{}: {}",
                     i18n::t(label),
-                    i18n::isolate(&format!("{} UTC", date.format("%Y-%m-%d %H:%M:%S")))
+                    i18n::isolate(&format!("{} UTC", date.strftime("%Y-%m-%d %H:%M:%S")))
                 ));
             }
         }

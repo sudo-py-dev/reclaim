@@ -25,11 +25,7 @@ fn append(path: &Path, message: &str) -> std::io::Result<()> {
         options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
     }
     let mut file = options.open(path)?;
-    writeln!(
-        file,
-        "{} {message}",
-        chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now()).to_rfc3339()
-    )?;
+    writeln!(file, "{} {message}", jiff::Timestamp::now())?;
     file.sync_data()
 }
 
