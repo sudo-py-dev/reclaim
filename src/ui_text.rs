@@ -61,6 +61,8 @@ ui_strings! {
     set_separator => " · ",
     set_searching_candidates_will_appear_here => "Searching… candidates will appear here.",
     set_no_matching_files_yet_start => "No matching files yet. Start a scan from Sources.",
+    set_no_files_match_filters => "No files match your search and category filters.",
+    set_clear_filters => "Clear filters",
     set_file_inspector => "FILE INSPECTOR",
     set_candidates_may_be_incomplete_verify => "Candidates may be incomplete. Verify recovered files before relying on them.",
     set_recover_selected => "Recover selected",

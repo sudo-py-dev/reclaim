@@ -252,6 +252,57 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
 }
 
 #[test]
+fn clearing_empty_result_filters_restores_the_file_list() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    let mut state = Reclaim::default();
+    state.filter = "missing".into();
+    state.category = 2;
+    state.results.push(Found {
+        offset: 4096,
+        size: 2048,
+        kind: "png",
+        selected: true,
+        original_name: Some("Summer.png".into()),
+        resident_data: None,
+        ntfs: None,
+        extents: None,
+        validation: reclaim::Validation::StructureChecked,
+    });
+    ui.set_page(1);
+    ui.set_query("missing".into());
+    ui.set_category(2);
+    state.sync_ui(&ui);
+    assert_eq!(ui.get_files().row_count(), 0);
+    let state = RefCell::new(state);
+    let weak = ui.as_weak();
+    ui.on_filter(move || {
+        let ui = weak.unwrap();
+        let mut state = state.borrow_mut();
+        state.filter = ui.get_query().into();
+        state.category = usize::try_from(ui.get_category()).unwrap();
+        state.sync_ui(&ui);
+    });
+    ui.show().unwrap();
+    let clear =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&ui, "Clear filters")
+            .next()
+            .expect("clear filters action");
+    clear.invoke_accessible_default_action();
+    assert_eq!(ui.get_page(), 1);
+    assert!(ui.get_query().is_empty());
+    assert_eq!(ui.get_category(), 0);
+    assert_eq!(ui.get_files().row_count(), 1);
+    assert!(ui.get_files().row_data(0).unwrap().selected);
+}
+
+#[test]
 fn all_slint_labels_have_catalog_entries() {
     for key in ui_text::UI_MESSAGES {
         assert!(i18n::has_message(key), "missing UI message: {key}");
