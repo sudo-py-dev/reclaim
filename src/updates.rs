@@ -201,10 +201,12 @@ impl Updates {
                             self.notice_visible = release
                                 .as_ref()
                                 .is_some_and(|r| self.dismissed.as_ref() != Some(&r.version));
-                            self.status = release.as_ref().map_or_else(
-                                || "You’re up to date.".into(),
-                                |r| format!("Version {} is available.", r.version),
-                            );
+                            // The available version is presented separately from operation feedback.
+                            self.status = if release.is_some() {
+                                String::new()
+                            } else {
+                                "You’re up to date.".into()
+                            };
                             self.notes =
                                 release.as_ref().map_or_default(|r| format_notes(&r.notes));
                             self.release = release;

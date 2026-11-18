@@ -14,7 +14,7 @@ struct Record {
     offset: Option<u64>,
     length: Option<u64>,
 }
-pub(super) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), CandidateEnd> {
+pub(crate) fn inspect(b: &[u8], cancel: &AtomicBool) -> Result<(usize, bool), CandidateEnd> {
     need(b, 28)?;
     let header = crate::bytes::u16_be(b, 4) as usize;
     let compressed = crate::bytes::u64_be(b, 8);

@@ -168,7 +168,7 @@ pub(super) fn chains(
         .collect();
     numbers.sort_unstable();
     let mut files: Vec<Vec<(u64, u64)>> = Vec::new();
-    let mut signature = vec![0u8; 64.min(bytes::to_usize(block_size))];
+    let mut signature = vec![0u8; crate::formats::TAR_HEADER_SIZE.min(bytes::to_usize(block_size))];
     for number in numbers {
         check(cancel)?;
         let Some(runs) = maps.get(&number) else {

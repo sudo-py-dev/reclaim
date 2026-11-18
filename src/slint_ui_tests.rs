@@ -582,6 +582,51 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
                 settings_details.invoke_accessible_default_action();
                 assert!(ui.get_update_details_open());
                 ui.window().take_snapshot().unwrap();
+
+                // Installation feedback stays visible while the version and
+                // retry action remain available.
+                ui.set_update_status(
+                    i18n::t("Update verified. Open the installer to finish.").into(),
+                );
+                ui.window().take_snapshot().unwrap();
+                let feedback = i_slint_backend_testing::ElementHandle::find_by_element_id(
+                    &ui,
+                    "AppWindow::update-feedback",
+                )
+                .next()
+                .expect("feedback after an update attempt");
+                assert!(feedback.size().width > 0.0 && feedback.size().height > 0.0);
+
+                let progress_label = i18n::t("Preparing update…");
+                ui.set_update_status(progress_label.clone().into());
+                ui.set_update_busy(true);
+                ui.set_update_installing(true);
+                ui.set_update_progress(0.42);
+                ui.window().take_snapshot().unwrap();
+                let progress = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                    &ui,
+                    &progress_label,
+                )
+                .find(|item| item.accessible_value_maximum() == Some(1.0))
+                .expect("update progress exposes its current phase and range");
+                let fraction: f32 = progress.accessible_value().unwrap().parse().unwrap();
+                assert!((fraction - 0.42).abs() < 0.001);
+                if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+                    std::thread::sleep(Duration::from_millis(150));
+                    slint::platform::update_timers_and_animations();
+                    let snapshot = ui.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        format!("{directory}/update-progress-{code}-{dark}.png"),
+                        snapshot.as_bytes(),
+                        snapshot.width(),
+                        snapshot.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+                ui.set_update_installing(false);
+                ui.set_update_busy(false);
+                ui.set_update_status("".into());
             }
         });
     }

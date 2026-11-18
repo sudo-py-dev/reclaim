@@ -631,7 +631,35 @@ fn file_types_are_recognised_from_their_first_bytes() {
     );
     assert_eq!(crate::sniff_kind(b"RIFF\0\0\0\0WAVEfmt "), Some("wav"));
     assert_eq!(crate::sniff_kind(b"plain text"), None);
-    assert!(crate::starts_like("docx", b"PK\x03\x04\x14\0"));
-    assert!(crate::starts_like("mov", b"\0\0\0\x18ftypisom"));
-    assert!(!crate::starts_like("png", b"\xff\xd8\xff\xe0"));
+    assert!(crate::same_format_family("docx", "zip"));
+    assert!(crate::same_format_family("mov", "mp4"));
+    assert!(!crate::same_format_family("png", "jpg"));
+}
+
+#[test]
+fn stale_tar_record_does_not_claim_extents() {
+    let archive = include_bytes!("../../tests/fixtures/formats/sample.tar");
+    let block = crate::formats::TAR_HEADER_SIZE as u64;
+    for original_name in [Some("stale.tar".into()), None] {
+        let mut plan = Plan {
+            ranges: vec![(0, block)],
+            unused: block,
+            filesystem: "test",
+            files: vec![crate::Found {
+                offset: 0,
+                size: block,
+                kind: "tar",
+                selected: true,
+                validation: crate::Validation::StructureChecked,
+                original_name,
+                resident_data: None,
+                ntfs: None,
+                extents: Some(vec![(0, block)].into()),
+            }],
+            indirect: None,
+        };
+        exclude_known_files(&mut Cursor::new(archive), &mut plan);
+        assert_eq!(plan.ranges, [(0, block)]);
+        assert_eq!(plan.files[0].validation, crate::Validation::Unverified);
+    }
 }
