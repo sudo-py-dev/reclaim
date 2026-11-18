@@ -444,13 +444,6 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
             continue;
         }
         let end = from + index + fmt.tail.len();
-        if fmt.ext == "pdf" {
-            match pdf_after_eof(bytes, end, false) {
-                PdfAfterEof::Ends(end) => return CandidateEnd::Complete(end),
-                PdfAfterEof::Continues => continue,
-                PdfAfterEof::Undecided => return CandidateEnd::More,
-            }
-        }
         if fmt.ext != "zip" {
             return CandidateEnd::Complete(end);
         }
@@ -570,17 +563,32 @@ fn pdf_object_header(bytes: &[u8]) -> Option<bool> {
     }
 }
 
-/// Where a PDF read to the end of the source ends: after its last `%%EOF`.
-fn pdf_end_at_source_end(bytes: &[u8]) -> CandidateEnd {
-    let mut last = None;
-    for (index, window) in bytes.windows(5).enumerate() {
-        if window == b"%%EOF"
-            && let PdfAfterEof::Ends(end) = pdf_after_eof(bytes, index + 5, true)
-        {
-            last = Some(end);
+/// Resume at the unresolved marker or at the last possible partial marker.
+fn pdf_end(bytes: &[u8], from: &mut usize, at_end: bool) -> CandidateEnd {
+    const MARKER: &[u8] = b"%%EOF";
+    let Some(unsearched) = bytes.get(*from..) else {
+        return CandidateEnd::Invalid;
+    };
+    for (index, window) in unsearched.windows(MARKER.len()).enumerate() {
+        if window != MARKER {
+            continue;
+        }
+        let marker = *from + index;
+        match pdf_after_eof(bytes, marker + MARKER.len(), at_end) {
+            PdfAfterEof::Ends(end) => return CandidateEnd::Complete(end),
+            PdfAfterEof::Continues => {}
+            PdfAfterEof::Undecided => {
+                *from = marker;
+                return CandidateEnd::More;
+            }
         }
     }
-    last.map_or(CandidateEnd::Invalid, CandidateEnd::Complete)
+    *from = bytes.len().saturating_sub(MARKER.len() - 1);
+    if at_end {
+        CandidateEnd::Invalid
+    } else {
+        CandidateEnd::More
+    }
 }
 
 fn valid_zip(bytes: &[u8], eocd: usize) -> bool {
@@ -642,6 +650,10 @@ fn valid_zip(bytes: &[u8], eocd: usize) -> bool {
 /// plus the ISO media (MP4, MOV, HEIC) and Matroska headers. `None` when the
 /// bytes carry no known signature.
 pub(crate) fn sniff_kind(head: &[u8]) -> Option<&'static str> {
+    if formats::is_tar_header(head) {
+        return Some("tar");
+    }
+    let head = head.get(..64).unwrap_or(head);
     if head.get(4..8) == Some(b"ftyp".as_slice()) {
         return Some(match head.get(8..12)? {
             b"qt  " => "mov",
@@ -931,6 +943,7 @@ pub(crate) fn scan_reader_with_filter(
                 let mut candidate = Vec::new();
                 let mut ogg = detection::Ogg::default();
                 let mut gzip = formats::Gzip::default();
+                let mut pdf_from = 0;
                 let mut end = None;
                 let mut kind = fmt.ext;
                 let mut checked = Validation::Unverified;
@@ -969,16 +982,24 @@ pub(crate) fn scan_reader_with_filter(
                     }
                     let remaining = (candidate_limit - candidate.len()).min(chunk.len());
                     let count = read_chunk(file, &mut chunk[..remaining], cancel)?;
-                    // A PDF whose end was waiting on more data ends at the
-                    // source's end after its last `%%EOF`.
+                    // At source EOF a pending PDF marker needs no further lookahead.
                     let at_source_end = count == 0;
                     if at_source_end && fmt.ext != "pdf" {
                         break;
                     }
                     let from = candidate.len().saturating_sub(fmt.tail.len());
                     candidate.extend_from_slice(&chunk[..count]);
-                    let boundary = if at_source_end {
-                        pdf_end_at_source_end(&candidate)
+                    let mut xar_kind = None;
+                    let boundary = if fmt.ext == "pdf" {
+                        pdf_end(&candidate, &mut pdf_from, at_source_end)
+                    } else if fmt.ext == "xar" {
+                        match formats::inspect_xar(&candidate, cancel) {
+                            Ok((size, package)) => {
+                                xar_kind = Some(if package { "pkg" } else { "xar" });
+                                CandidateEnd::Complete(size)
+                            }
+                            Err(state) => state,
+                        }
                     } else if fmt.ext == "ogg" {
                         ogg.push(&candidate, cancel)
                     } else if fmt.ext == "gz" {
@@ -988,19 +1009,25 @@ pub(crate) fn scan_reader_with_filter(
                     };
                     match boundary {
                         CandidateEnd::Complete(size) => {
-                            kind = if fmt.ext == "ogg" {
-                                ogg.kind()
-                            } else {
-                                candidate_kind(fmt, &candidate[..size])
-                            };
+                            kind = xar_kind.unwrap_or_else(|| {
+                                if fmt.ext == "ogg" {
+                                    ogg.kind()
+                                } else {
+                                    candidate_kind(fmt, &candidate[..size])
+                                }
+                            });
                             event(Event::Checking {
                                 offset,
                                 kind,
                                 bytes: size,
                             });
-                            if let Some(validation) =
+                            // XAR inspection already checked the size and package type.
+                            let validation = if xar_kind.is_some() {
+                                Some(Validation::Unverified)
+                            } else {
                                 validation::validate(kind, &candidate[..size], cancel)
-                            {
+                            };
+                            if let Some(validation) = validation {
                                 checked = validation;
                                 end = Some(size);
                             }
@@ -1063,7 +1090,8 @@ pub(crate) fn scan_reader_with_filter(
 pub struct FoundReader<'a, R> {
     input: &'a mut R,
     resident: Option<&'a [u8]>,
-    extents: Vec<(u64, u64)>,
+    extents: Option<&'a [(u64, u64)]>,
+    contiguous: (u64, u64),
     /// Index of the current extent and bytes already read from it.
     current: usize,
     used: u64,
@@ -1072,33 +1100,36 @@ pub struct FoundReader<'a, R> {
 impl<R> std::fmt::Debug for FoundReader<'_, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FoundReader")
-            .field("extents", &self.extents.len())
+            .field("extents", &self.ranges().len())
             .field("current", &self.current)
             .field("remaining", &self.remaining)
             .finish_non_exhaustive()
     }
 }
+impl<R> FoundReader<'_, R> {
+    fn ranges(&self) -> &[(u64, u64)] {
+        self.extents
+            .unwrap_or_else(|| std::slice::from_ref(&self.contiguous))
+    }
+}
 impl<'a, R: Read + Seek> FoundReader<'a, R> {
     pub fn new(input: &'a mut R, found: &'a Found) -> io::Result<Self> {
-        let extents = match &found.extents {
-            Some(extents) => {
-                let stored = extents
-                    .iter()
-                    .try_fold(0u64, |sum, (_, length)| sum.checked_add(*length));
-                if stored.is_none_or(|stored| stored < found.size) {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Candidate range is invalid",
-                    ));
-                }
-                extents.to_vec()
+        if let Some(extents) = &found.extents {
+            let stored = extents
+                .iter()
+                .try_fold(0u64, |sum, (_, length)| sum.checked_add(*length));
+            if stored.is_none_or(|stored| stored < found.size) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Candidate range is invalid",
+                ));
             }
-            None => vec![(found.offset, found.size)],
-        };
+        }
         Ok(Self {
             input,
             resident: found.resident_data.as_deref(),
-            extents,
+            extents: found.extents.as_deref(),
+            contiguous: (found.offset, found.size),
             current: 0,
             used: 0,
             remaining: found.size,
@@ -1111,7 +1142,7 @@ impl<R: Read + Seek> Read for FoundReader<'_, R> {
             return resident.read(buffer);
         }
         while self.remaining > 0 {
-            let Some(&(start, length)) = self.extents.get(self.current) else {
+            let Some(&(start, length)) = self.ranges().get(self.current) else {
                 return Ok(0);
             };
             if self.used >= length {
@@ -1161,17 +1192,17 @@ pub fn recover_unique(
     let extension = path
         .extension()
         .map_or_default(|ext| format!(".{}", ext.to_string_lossy()));
+    let mut output = stage_recovery(input, directory, found)?;
     for attempt in 0..10_000 {
-        let name = if attempt == 0 {
-            name.clone()
+        let destination = if attempt == 0 {
+            directory.join(path)
         } else {
-            format!("{stem} ({}){extension}", attempt + 1)
+            directory.join(format!("{stem} ({}){extension}", attempt + 1))
         };
-        let destination = directory.join(name);
-        match recover_reader(input, &destination, found) {
-            Ok(()) => return Ok(destination),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e),
+        match output.persist_noclobber(&destination) {
+            Ok(_) => return Ok(destination),
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => output = e.file,
+            Err(e) => return Err(e.error),
         }
     }
     Err(io::Error::new(
@@ -1186,6 +1217,18 @@ pub fn recover_reader(
     destination: &Path,
     found: &Found,
 ) -> io::Result<()> {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    stage_recovery(input, parent, found)?
+        .persist_noclobber(destination)
+        .map_err(|e| e.error)?;
+    Ok(())
+}
+
+fn stage_recovery(
+    input: &mut (impl Read + Seek),
+    directory: &Path,
+    found: &Found,
+) -> io::Result<tempfile::NamedTempFile> {
     if (found.size == 0 && found.resident_data.is_none())
         || (found.size > LIMIT as u64
             && found.extents.is_none()
@@ -1204,11 +1247,12 @@ pub fn recover_reader(
 
     // Keep incomplete or unvalidated data private. Publish without replacing an
     // existing entry, including a symlink, only after all checks succeed.
-    let parent = destination
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let mut output = tempfile::NamedTempFile::new_in(parent)?;
+    let directory = if directory.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        directory
+    };
+    let mut output = tempfile::NamedTempFile::new_in(directory)?;
     let copied = io::copy(&mut FoundReader::new(input, found)?, &mut output)?;
     if copied != found.size {
         return Err(io::Error::new(
@@ -1260,8 +1304,7 @@ pub fn recover_reader(
         }
     }
     output.as_file().sync_all()?;
-    output.persist_noclobber(destination).map_err(|e| e.error)?;
-    Ok(())
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -1339,7 +1382,7 @@ mod tests {
             PdfAfterEof::Ends(eof + 1)
         );
         assert!(matches!(
-            pdf_end_at_source_end(&pdf(b"\n")),
+            pdf_end(&pdf(b"\n"), &mut 0, true),
             CandidateEnd::Complete(end) if end == eof + 1
         ));
     }
@@ -1401,6 +1444,33 @@ mod tests {
         assert!(recover(&source, &out, &results[0]).is_err());
         assert_eq!(std::fs::read(&source).unwrap(), bytes);
     }
+    #[test]
+    fn pdf_eof_at_read_boundary_does_not_consume_the_next_document() {
+        let second = b"%PDF-1.7\nanother document\n%%EOF\n";
+        for size in 8185..=8199 {
+            let mut data = b"%PDF-1.7\n".to_vec();
+            data.resize(size - b"%%EOF\r\n".len(), b' ');
+            data.extend_from_slice(b"%%EOF\r\n");
+            data.push(0);
+            data.extend_from_slice(second);
+            let mut found = Vec::new();
+            scan_reader(
+                &mut io::Cursor::new(data),
+                &AtomicBool::new(false),
+                |event| {
+                    if let Event::Found(file) = event {
+                        found.push((file.offset, file.size));
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                found,
+                [(0, size as u64), (size as u64 + 1, second.len() as u64)]
+            );
+        }
+    }
+
     #[test]
     fn pdf_keeps_its_final_line_break_and_every_revision() {
         let carve = |pdf: &[u8]| {

@@ -8,6 +8,7 @@ mod gzip;
 mod media;
 mod xar;
 pub(crate) use gzip::Gzip;
+pub(crate) use xar::inspect as inspect_xar;
 type Probe = Result<usize, CandidateEnd>;
 fn need(bytes: &[u8], end: usize) -> Result<(), CandidateEnd> {
     if end > LIMIT {
@@ -132,6 +133,11 @@ pub(crate) fn kind(base: &'static str, bytes: &[u8]) -> &'static str {
     }
 }
 pub(crate) fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<Validation> {
+    if matches!(kind, "xar" | "pkg") {
+        let (size, package) = inspect_xar(bytes, cancel).ok()?;
+        return (size == bytes.len() && package == (kind == "pkg"))
+            .then_some(Validation::Unverified);
+    }
     if !matches!(end(kind, bytes, cancel)?, CandidateEnd::Complete(size) if size == bytes.len()) {
         return None;
     }
@@ -141,24 +147,10 @@ pub(crate) fn validate(kind: &str, bytes: &[u8], cancel: &AtomicBool) -> Option<
     if matches!(kind, "ole" | "msi" | "msp" | "mst") && cfb::kind(bytes) != kind {
         return None;
     }
-    if matches!(kind, "xar" | "pkg") && xar::inspect(bytes, cancel).ok()?.1 != (kind == "pkg") {
-        return None;
-    }
     Some(
         if matches!(
             kind,
-            "exe"
-                | "dll"
-                | "elf"
-                | "ole"
-                | "msi"
-                | "msp"
-                | "mst"
-                | "rpm"
-                | "dex"
-                | "xar"
-                | "pkg"
-                | "swf"
+            "exe" | "dll" | "elf" | "ole" | "msi" | "msp" | "mst" | "rpm" | "dex" | "swf"
         ) {
             Validation::Unverified
         } else {
@@ -687,6 +679,39 @@ fn octal(b: &[u8]) -> Option<usize> {
     }
     usize::from_str_radix(text, 8).ok()
 }
+pub(crate) const TAR_HEADER_SIZE: usize = 512;
+
+pub(crate) fn is_tar_header(bytes: &[u8]) -> bool {
+    bytes
+        .get(..TAR_HEADER_SIZE)
+        .and_then(tar_entry_size)
+        .is_some()
+}
+
+fn tar_entry_size(header: &[u8]) -> Option<usize> {
+    if header[0] == 0
+        || &header[257..262] != b"ustar"
+        || !matches!(header[156], 0 | b'0'..=b'7' | b'x' | b'g' | b'L' | b'K')
+    {
+        return None;
+    }
+    let sum: usize = header
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            if (148..156).contains(&i) {
+                32
+            } else {
+                *c as usize
+            }
+        })
+        .sum();
+    if octal(&header[148..156]) != Some(sum) {
+        return None;
+    }
+    octal(&header[124..136])
+}
+
 fn tar(b: &[u8], cancel: &AtomicBool) -> Probe {
     let mut at = 0;
     for entries in 0..100_000 {
@@ -703,27 +728,7 @@ fn tar(b: &[u8], cancel: &AtomicBool) -> Probe {
                 Err(CandidateEnd::Invalid)
             };
         }
-        if header[0] == 0
-            || &header[257..262] != b"ustar"
-            || !matches!(header[156], 0 | b'0'..=b'7' | b'x' | b'g' | b'L' | b'K')
-        {
-            return Err(CandidateEnd::Invalid);
-        }
-        let sum: usize = header
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                if (148..156).contains(&i) {
-                    32
-                } else {
-                    *c as usize
-                }
-            })
-            .sum();
-        if octal(&header[148..156]) != Some(sum) {
-            return Err(CandidateEnd::Invalid);
-        }
-        let size = octal(&header[124..136]).ok_or(CandidateEnd::Invalid)?;
+        let size = tar_entry_size(header).ok_or(CandidateEnd::Invalid)?;
         at = span((at + 512) as u64, (size as u64).div_ceil(512) * 512)?;
     }
     Err(CandidateEnd::Invalid)

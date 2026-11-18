@@ -147,6 +147,43 @@ fn disconnect_after_partial_export_preserves_existing_files_and_cleans_staging()
 }
 
 #[test]
+fn export_name_collisions_only_read_the_source_once() {
+    use std::io::{Read, Seek, SeekFrom};
+
+    struct Counted {
+        inner: Cursor<&'static [u8]>,
+        bytes_read: usize,
+    }
+    impl Read for Counted {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let read = self.inner.read(buffer)?;
+            self.bytes_read += read;
+            Ok(read)
+        }
+    }
+    impl Seek for Counted {
+        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+            self.inner.seek(position)
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut found = candidate();
+    found.original_name = Some("file.bin".into());
+    for name in ["file.bin", "file (2).bin"] {
+        std::fs::write(directory.path().join(name), b"keep").unwrap();
+    }
+    let mut input = Counted {
+        inner: Cursor::new(b"data"),
+        bytes_read: 0,
+    };
+    let output = recover_unique(&mut input, directory.path(), &found, 1).unwrap();
+    assert_eq!(output, directory.path().join("file (3).bin"));
+    assert_eq!(std::fs::read(output).unwrap(), b"data");
+    assert_eq!(input.bytes_read, 4);
+}
+
+#[test]
 fn simultaneous_exports_never_replace_each_other_or_existing_data() {
     use std::sync::{Arc, Barrier};
     let directory = tempfile::tempdir().unwrap();
