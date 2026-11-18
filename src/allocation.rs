@@ -223,28 +223,9 @@ pub(crate) fn plan(
 struct FreeSpace<'a, R> {
     input: &'a mut R,
     /// Physical `(start, length)` pieces and the stream offset each begins at.
-    pieces: Vec<(u64, u64, u64)>,
+    pieces: &'a [(u64, u64, u64)],
     length: u64,
     position: u64,
-}
-impl<'a, R> FreeSpace<'a, R> {
-    fn new(input: &'a mut R, ranges: &[(u64, u64)]) -> Self {
-        let mut stream_start = 0u64;
-        let pieces = ranges
-            .iter()
-            .map(|&(start, length)| {
-                let piece = (start, length, stream_start);
-                stream_start = stream_start.saturating_add(length);
-                piece
-            })
-            .collect();
-        Self {
-            input,
-            pieces,
-            length: stream_start,
-            position: 0,
-        }
-    }
 }
 /// The piece holding stream offset `at`, as (physical start, length, stream start).
 fn piece(pieces: &[(u64, u64, u64)], at: u64) -> Option<(u64, u64, u64)> {
@@ -277,7 +258,7 @@ fn physical_ranges(pieces: &[(u64, u64, u64)], at: u64, size: u64) -> Vec<(u64, 
 }
 impl<R: Read + Seek> Read for FreeSpace<'_, R> {
     fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
-        let Some((start, length, stream_start)) = piece(&self.pieces, self.position) else {
+        let Some((start, length, stream_start)) = piece(self.pieces, self.position) else {
             return Ok(0);
         };
         let in_piece = stream_start + length - self.position;
@@ -319,13 +300,17 @@ impl<R: Read + Seek> Seek for FreeSpace<'_, R> {
 /// file stored there is not hidden.
 fn exclude_known_files(input: &mut (impl Read + Seek), plan: &mut Plan) {
     let mut owned: Vec<(u64, u64)> = Vec::new();
+    let mut head = Vec::new();
     for file in &mut plan.files {
-        let Some(extents) = file.extents.clone() else {
+        let Some(extents) = &file.extents else {
             continue;
         };
-        let mut head = Vec::with_capacity(64);
-        let read = crate::FoundReader::new(input, file)
-            .and_then(|reader| reader.take(64).read_to_end(&mut head));
+        head.clear();
+        let read = crate::FoundReader::new(input, file).and_then(|reader| {
+            reader
+                .take(crate::formats::TAR_HEADER_SIZE as u64)
+                .read_to_end(&mut head)
+        });
         if read.is_err() {
             // Unreadable start (a bad sector): keep the record, but it cannot
             // prove it owns its space, so that space is still carved.
@@ -444,9 +429,23 @@ pub(crate) fn scan(
     };
     let base = if order.is_some() { half } else { 0 };
     let scale = |at: u64| if order.is_some() { base + at / 2 } else { at };
-    let mut stream = FreeSpace::new(input, order.as_deref().unwrap_or(&plan.ranges));
-    let pieces = stream.pieces.clone();
-    let length = stream.length;
+    let mut length = 0u64;
+    let pieces: Vec<_> = order
+        .as_deref()
+        .unwrap_or(&plan.ranges)
+        .iter()
+        .map(|&(start, size)| {
+            let piece = (start, size, length);
+            length = length.saturating_add(size);
+            piece
+        })
+        .collect();
+    let mut stream = FreeSpace {
+        input,
+        pieces: &pieces,
+        length,
+        position: 0,
+    };
     let mut limited = false;
     crate::resilient::scan(
         &mut stream,

@@ -69,3 +69,48 @@ fn fragmented_deleted_file_returns_whole_from_ext2_block_maps() {
         "the fixture document should be stored in many pieces"
     );
 }
+
+#[test]
+fn fragmented_tar_returns_whole_from_ext2_block_maps() {
+    let mut image = fixture();
+    let pdf_size = document().len();
+    let pdf = scan(&image)
+        .into_iter()
+        .find(|file| file.kind == "pdf" && file.size == pdf_size as u64)
+        .unwrap();
+    let block = 512;
+    let payload = (pdf_size / block - 3) * block;
+    let mut archive = vec![b'A'; block + payload];
+    archive[..block].copy_from_slice(&include_bytes!("fixtures/formats/sample.tar")[..block]);
+    archive[124..136].copy_from_slice(format!("{payload:011o}\0").as_bytes());
+    archive[148..156].fill(b' ');
+    let checksum: usize = archive[..block].iter().map(|&byte| usize::from(byte)).sum();
+    archive[148..156].copy_from_slice(format!("{checksum:06o}\0 ").as_bytes());
+    archive.resize(archive.len() + 2 * block, 0);
+
+    // Replace the fixture document's bytes while retaining its fragmented layout.
+    let mut written = 0;
+    for &(start, size) in pdf.extents.as_deref().unwrap() {
+        let start = usize::try_from(start).unwrap();
+        let count = usize::try_from(size).unwrap().min(archive.len() - written);
+        image[start..start + count].copy_from_slice(&archive[written..written + count]);
+        written += count;
+    }
+    assert_eq!(written, archive.len());
+
+    let tar = scan(&image)
+        .into_iter()
+        .find(|file| file.kind == "tar" && file.offset == pdf.offset)
+        .unwrap();
+    assert!(
+        tar.extents
+            .as_ref()
+            .is_some_and(|extents| extents.len() > 2)
+    );
+    let mut recovered = Vec::new();
+    FoundReader::new(&mut Cursor::new(&image), &tar)
+        .unwrap()
+        .read_to_end(&mut recovered)
+        .unwrap();
+    assert_eq!(recovered, archive);
+}
