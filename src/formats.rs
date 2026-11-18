@@ -681,14 +681,8 @@ fn octal(b: &[u8]) -> Option<usize> {
 }
 pub(crate) const TAR_HEADER_SIZE: usize = 512;
 
-pub(crate) fn is_tar_header(bytes: &[u8]) -> bool {
-    bytes
-        .get(..TAR_HEADER_SIZE)
-        .and_then(tar_entry_size)
-        .is_some()
-}
-
-fn tar_entry_size(header: &[u8]) -> Option<usize> {
+pub(crate) fn tar_entry_size(bytes: &[u8]) -> Option<usize> {
+    let header = bytes.get(..TAR_HEADER_SIZE)?;
     if header[0] == 0
         || &header[257..262] != b"ustar"
         || !matches!(header[156], 0 | b'0'..=b'7' | b'x' | b'g' | b'L' | b'K')

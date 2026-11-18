@@ -317,16 +317,28 @@ fn exclude_known_files(input: &mut (impl Read + Seek), plan: &mut Plan) {
             file.validation = crate::Validation::Unverified;
             continue;
         }
+        let kind = crate::sniff_kind(&head);
+        if kind == Some("tar") {
+            let block = crate::formats::TAR_HEADER_SIZE as u64;
+            let fits = crate::formats::tar_entry_size(&head)
+                .and_then(|size| (size as u64).div_ceil(block).checked_mul(block))
+                .and_then(|size| size.checked_add(block))
+                .is_some_and(|size| size <= file.size);
+            if !fits {
+                file.validation = crate::Validation::Unverified;
+                continue;
+            }
+        }
         if file.original_name.is_none() {
             // A nameless record: the bytes are the only clue to the type.
-            match crate::sniff_kind(&head) {
+            match kind {
                 Some(kind) => {
                     file.kind = kind;
                     owned.extend(extents.iter().copied());
                 }
                 None => file.validation = crate::Validation::Unverified,
             }
-        } else if crate::starts_like(file.kind, &head) {
+        } else if kind.is_some_and(|detected| crate::same_format_family(file.kind, detected)) {
             owned.extend(extents.iter().copied());
         } else {
             file.validation = crate::Validation::Unverified;

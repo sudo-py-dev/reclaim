@@ -472,6 +472,8 @@ enum PdfAfterEof {
     Continues,
     /// The bytes read so far stop before this can be decided.
     Undecided,
+    /// A partial object header can resume without examining its whitespace again.
+    Object { end: usize, header: PdfObjectHeader },
 }
 
 /// Most whitespace looked past after `%%EOF` for another revision.
@@ -502,6 +504,7 @@ fn pdf_after_eof(bytes: &[u8], eof: usize, at_end: bool) -> PdfAfterEof {
     // NUL there is padding, not a gap before another revision.
     let gap = next
         .iter()
+        .take(MAX_PDF_GAP + 1)
         .take_while(|b| **b != 0 && pdf_space(**b))
         .count();
     if gap > MAX_PDF_GAP {
@@ -517,12 +520,18 @@ fn pdf_after_eof(bytes: &[u8], eof: usize, at_end: bool) -> PdfAfterEof {
             Some(false)
         }
     };
-    let answers = [
-        keyword(b"xref"),
-        keyword(b"trailer"),
-        keyword(b"startxref"),
-        pdf_object_header(next),
-    ];
+    if next.first().is_some_and(u8::is_ascii_digit) {
+        let mut header = PdfObjectHeader {
+            offset: end + gap,
+            phase: PdfObjectPhase::Number,
+        };
+        return match header.resume(bytes) {
+            Some(true) => PdfAfterEof::Continues,
+            None if !at_end => PdfAfterEof::Object { end, header },
+            _ => PdfAfterEof::Ends(end),
+        };
+    }
+    let answers = [keyword(b"xref"), keyword(b"trailer"), keyword(b"startxref")];
     if answers.contains(&Some(true)) {
         PdfAfterEof::Continues
     } else if answers.contains(&None) && !at_end {
@@ -532,58 +541,113 @@ fn pdf_after_eof(bytes: &[u8], eof: usize, at_end: bool) -> PdfAfterEof {
     }
 }
 
-/// Whether `bytes` starts with an indirect object header such as `12 0 obj`,
-/// or `None` when `bytes` ends before that is known.
-fn pdf_object_header(bytes: &[u8]) -> Option<bool> {
-    let mut rest = bytes;
-    for _ in 0..2 {
-        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
-        if digits == rest.len() && digits <= 10 {
-            return None;
+#[derive(Debug, PartialEq, Eq)]
+enum PdfObjectPhase {
+    Number,
+    Generation,
+    BeforeGeneration,
+    BeforeKeyword,
+    Keyword,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PdfObjectHeader {
+    offset: usize,
+    phase: PdfObjectPhase,
+}
+
+impl PdfObjectHeader {
+    /// Digits and the keyword have bounded prefixes. Whitespace can run
+    /// across any number of reads, so advance its cursor as bytes arrive.
+    fn resume(&mut self, bytes: &[u8]) -> Option<bool> {
+        loop {
+            let rest = bytes.get(self.offset..)?;
+            self.phase = match self.phase {
+                PdfObjectPhase::Number | PdfObjectPhase::Generation => {
+                    let digits = rest
+                        .iter()
+                        .take(11)
+                        .take_while(|b| b.is_ascii_digit())
+                        .count();
+                    if digits > 10 {
+                        return Some(false);
+                    }
+                    let separator = rest.get(digits)?;
+                    if digits == 0 || !pdf_space(*separator) {
+                        return Some(false);
+                    }
+                    self.offset += digits + 1;
+                    if self.phase == PdfObjectPhase::Number {
+                        PdfObjectPhase::BeforeGeneration
+                    } else {
+                        PdfObjectPhase::BeforeKeyword
+                    }
+                }
+                PdfObjectPhase::BeforeGeneration | PdfObjectPhase::BeforeKeyword => {
+                    let spaces = rest.iter().take_while(|b| pdf_space(**b)).count();
+                    self.offset += spaces;
+                    if spaces == rest.len() {
+                        return None;
+                    }
+                    if self.phase == PdfObjectPhase::BeforeGeneration {
+                        PdfObjectPhase::Generation
+                    } else {
+                        PdfObjectPhase::Keyword
+                    }
+                }
+                PdfObjectPhase::Keyword => {
+                    return if rest.starts_with(b"obj") {
+                        Some(true)
+                    } else if b"obj".starts_with(rest) {
+                        None
+                    } else {
+                        Some(false)
+                    };
+                }
+            };
         }
-        if digits == 0 || digits > 10 {
-            return Some(false);
-        }
-        rest = rest.get(digits..).unwrap_or_default();
-        let spaces = rest.iter().take_while(|b| pdf_space(**b)).count();
-        if spaces == rest.len() {
-            return None;
-        }
-        if spaces == 0 {
-            return Some(false);
-        }
-        rest = rest.get(spaces..).unwrap_or_default();
-    }
-    if rest.starts_with(b"obj") {
-        Some(true)
-    } else if b"obj".starts_with(rest) {
-        None
-    } else {
-        Some(false)
     }
 }
 
+#[derive(Default)]
+struct PdfScan {
+    from: usize,
+    pending: Option<(usize, PdfObjectHeader)>,
+}
+
 /// Resume at the unresolved marker or at the last possible partial marker.
-fn pdf_end(bytes: &[u8], from: &mut usize, at_end: bool) -> CandidateEnd {
+fn pdf_end(bytes: &[u8], scan: &mut PdfScan, at_end: bool) -> CandidateEnd {
     const MARKER: &[u8] = b"%%EOF";
-    let Some(unsearched) = bytes.get(*from..) else {
+    if let Some((end, header)) = &mut scan.pending {
+        match header.resume(bytes) {
+            Some(true) => scan.from = header.offset,
+            None if !at_end => return CandidateEnd::More,
+            _ => return CandidateEnd::Complete(*end),
+        }
+        scan.pending = None;
+    }
+    let Some(unsearched) = bytes.get(scan.from..) else {
         return CandidateEnd::Invalid;
     };
     for (index, window) in unsearched.windows(MARKER.len()).enumerate() {
         if window != MARKER {
             continue;
         }
-        let marker = *from + index;
+        let marker = scan.from + index;
         match pdf_after_eof(bytes, marker + MARKER.len(), at_end) {
             PdfAfterEof::Ends(end) => return CandidateEnd::Complete(end),
             PdfAfterEof::Continues => {}
             PdfAfterEof::Undecided => {
-                *from = marker;
+                scan.from = marker;
+                return CandidateEnd::More;
+            }
+            PdfAfterEof::Object { end, header } => {
+                scan.pending = Some((end, header));
                 return CandidateEnd::More;
             }
         }
     }
-    *from = bytes.len().saturating_sub(MARKER.len() - 1);
+    scan.from = bytes.len().saturating_sub(MARKER.len() - 1);
     if at_end {
         CandidateEnd::Invalid
     } else {
@@ -650,7 +714,7 @@ fn valid_zip(bytes: &[u8], eocd: usize) -> bool {
 /// plus the ISO media (MP4, MOV, HEIC) and Matroska headers. `None` when the
 /// bytes carry no known signature.
 pub(crate) fn sniff_kind(head: &[u8]) -> Option<&'static str> {
-    if formats::is_tar_header(head) {
+    if formats::tar_entry_size(head).is_some() {
         return Some("tar");
     }
     let head = head.get(..64).unwrap_or(head);
@@ -685,7 +749,7 @@ pub(crate) fn sniff_kind(head: &[u8]) -> Option<&'static str> {
 
 /// Whether `head`, the first bytes of a file, carries a signature of the file
 /// type `kind`. Unknown types and plain text never match.
-pub(crate) fn starts_like(kind: &str, head: &[u8]) -> bool {
+pub(crate) fn same_format_family(kind: &str, detected: &str) -> bool {
     fn family(kind: &str) -> &str {
         match kind {
             "docx" | "xlsx" | "pptx" | "docm" | "xlsm" | "pptm" | "odt" | "ods" | "odp"
@@ -699,7 +763,7 @@ pub(crate) fn starts_like(kind: &str, head: &[u8]) -> bool {
             other => other,
         }
     }
-    sniff_kind(head).is_some_and(|found| family(found) == family(kind))
+    family(detected) == family(kind)
 }
 
 fn candidate_kind(fmt: &Format, bytes: &[u8]) -> &'static str {
@@ -935,7 +999,8 @@ pub(crate) fn scan_reader_with_filter(
                     event(Event::Found(found));
                 }
             }
-            if let Some(fmt) = detect_format(&carry[i..]) {
+            let mut next_format = detect_format(&carry[i..]);
+            while let Some(fmt) = next_format.take() {
                 // Read candidate independently so the main streaming buffer stays bounded.
                 let offset = base + i as u64;
                 let position = file.stream_position()?;
@@ -943,7 +1008,7 @@ pub(crate) fn scan_reader_with_filter(
                 let mut candidate = Vec::new();
                 let mut ogg = detection::Ogg::default();
                 let mut gzip = formats::Gzip::default();
-                let mut pdf_from = 0;
+                let mut pdf = PdfScan::default();
                 let mut end = None;
                 let mut kind = fmt.ext;
                 let mut checked = Validation::Unverified;
@@ -991,7 +1056,7 @@ pub(crate) fn scan_reader_with_filter(
                     candidate.extend_from_slice(&chunk[..count]);
                     let mut xar_kind = None;
                     let boundary = if fmt.ext == "pdf" {
-                        pdf_end(&candidate, &mut pdf_from, at_source_end)
+                        pdf_end(&candidate, &mut pdf, at_source_end)
                     } else if fmt.ext == "xar" {
                         match formats::inspect_xar(&candidate, cancel) {
                             Ok((size, package)) => {
@@ -1044,6 +1109,12 @@ pub(crate) fn scan_reader_with_filter(
                 file.seek(SeekFrom::Start(position))?;
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(());
+                }
+                if end.is_none()
+                    && fmt.ext == "bmp"
+                    && carry.get(i + 257..i + 262) == Some(b"ustar".as_slice())
+                {
+                    next_format = Some(&TAR_FORMAT);
                 }
                 if let Some(size) = end
                     && readable(offset, size as u64)
@@ -1360,9 +1431,11 @@ mod tests {
         );
         // The read stops right after %%EOF or inside the next token: wait.
         for cut in [&b"\n"[..], b"\n2 0 o", b"\nxr", b"\nstartx", b"\n12"] {
-            assert_eq!(
-                pdf_after_eof(&pdf(cut), eof, false),
-                PdfAfterEof::Undecided,
+            assert!(
+                matches!(
+                    pdf_after_eof(&pdf(cut), eof, false),
+                    PdfAfterEof::Undecided | PdfAfterEof::Object { .. }
+                ),
                 "{cut:?}"
             );
         }
@@ -1382,9 +1455,51 @@ mod tests {
             PdfAfterEof::Ends(eof + 1)
         );
         assert!(matches!(
-            pdf_end(&pdf(b"\n"), &mut 0, true),
+            pdf_end(&pdf(b"\n"), &mut PdfScan::default(), true),
             CandidateEnd::Complete(end) if end == eof + 1
         ));
+    }
+
+    #[test]
+    fn pdf_object_lookahead_advances_across_reads() {
+        let mut pdf = b"%PDF-1.7\n%%EOF\n2".to_vec();
+        let mut scan = PdfScan::default();
+        for next in [&b"   "[..], b"  ", b"0", b"    ", b"   ", b"ob"] {
+            pdf.extend_from_slice(next);
+            assert!(matches!(
+                pdf_end(&pdf, &mut scan, false),
+                CandidateEnd::More
+            ));
+            if next.ends_with(b" ") {
+                assert_eq!(scan.pending.as_ref().unwrap().1.offset, pdf.len());
+            }
+        }
+        pdf.extend_from_slice(b"j\nendobj\n%%EOF\n");
+        assert!(matches!(
+            pdf_end(&pdf, &mut scan, true),
+            CandidateEnd::Complete(end) if end == pdf.len()
+        ));
+    }
+
+    #[test]
+    fn tar_is_carved_when_its_first_name_looks_like_bmp() {
+        let mut tar = include_bytes!("../tests/fixtures/formats/sample.tar").to_vec();
+        tar[..10].copy_from_slice(b"BM-file.tx");
+        tar[148..156].fill(b' ');
+        let sum: usize = tar[..512].iter().copied().map(usize::from).sum();
+        tar[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        let mut found = Vec::new();
+        scan_reader(
+            &mut io::Cursor::new(tar),
+            &AtomicBool::new(false),
+            |event| {
+                if let Event::Found(file) = event {
+                    found.push((file.offset, file.kind));
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(found, [(0, "tar")]);
     }
 
     #[test]
