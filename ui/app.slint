@@ -395,9 +395,11 @@ component Choice inherits Rectangle {
 // Release notes are rendered as bounded Markdown blocks, without executing links or HTML.
 component ReleaseNotes inherits Rectangle {
     in property <[ReleaseNoteBlock]> notes;
-    height: min(190px, max(48px, notes-content.preferred-height + 8px));
+    height: min(190px, max(48px, notes-content.preferred-height));
+    border-radius: Metrics.radius;
+    background: Palette.bg;
     ScrollView { width: parent.width; height: parent.height;
-        notes-content := VerticalLayout { padding: 0px; padding-left: Locale.rtl ? 16px : 0px; padding-right: Locale.rtl ? 0px : 16px; spacing: 8px; alignment: start;
+        notes-content := VerticalLayout { padding: 12px; padding-left: Locale.rtl ? 20px : 12px; padding-right: Locale.rtl ? 12px : 20px; spacing: 8px; alignment: start;
             if root.notes.length == 0 : Label { text: Strings.no-release-notes; color: Palette.secondary; wrap: word-wrap; }
             for block in root.notes : Label {
                 text: block.text; wrap: word-wrap; min-width: 0px;
@@ -407,6 +409,28 @@ component ReleaseNotes inherits Rectangle {
                 font-family: block.kind == 3 ? "DejaVu Sans Mono" : "DejaVu Sans";
             }
         }
+    }
+}
+
+component UpdateProgress inherits Rectangle {
+    in property <float> progress;
+    in property <string> status;
+    private property <float> fraction: clamp(root.progress, 0, 1);
+    height: 6px;
+    border-radius: 3px;
+    background: Palette.line;
+    clip: true;
+    accessible-role: progress-indicator;
+    accessible-label: root.status;
+    accessible-value: root.fraction > 0 ? root.fraction : "";
+    accessible-value-minimum: 0;
+    accessible-value-maximum: 1;
+    Rectangle {
+        width: (root.fraction > 0 ? root.fraction : 0.25) * parent.width;
+        property <length> start: root.fraction > 0 ? 0px : (parent.width + self.width) * mod(animation-tick() / 1ms, 1800) / 1800 - self.width;
+        x: Locale.rtl ? parent.width - self.width - self.start : self.start;
+        border-radius: 3px;
+        background: Palette.primary;
     }
 }
 
@@ -858,7 +882,8 @@ export component AppWindow inherits Window {
             if root.page == 2 : Rectangle { vertical-stretch: 1; ScrollView { x: 0px; y: 0px; width: parent.width + 16px; height: parent.height; VerticalLayout { padding-right: 16px; spacing: 8px; alignment: start;
                 GroupTitle { text: Strings.updates; }
                 Card { VerticalLayout {
-                    SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version; detail: root.update-available && !root.update-busy && root.update-title != "" ? root.update-title : root.update-status;
+                    SettingRow { icon: @image-url("icons/download.svg"); title: Strings.version + " " + root.version;
+                        detail: root.update-available ? root.update-title : root.update-status;
                         if root.update-available : Action {
                             text: root.update-details-open ? Strings.hide-details : Strings.whats-new;
                             quiet: true;
@@ -875,13 +900,20 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.update-details-open || root.update-installing : VerticalLayout {
+                    if (root.update-available && (root.update-details-open || root.update-status != "")) || root.update-installing : VerticalLayout {
                         padding: 16px; padding-top: 4px;
                         padding-left: Locale.rtl ? 16px : 60px;
                         padding-right: Locale.rtl ? 60px : 16px;
                         spacing: 12px;
-                        if root.update-details-open : ReleaseNotes { notes: root.update-notes; }
-                        if root.update-installing : Rectangle { height: 4px; border-radius: 2px; clip: true; background: Palette.line; Rectangle { x: Locale.rtl ? parent.width - self.width : 0px; width: parent.width * clamp(root.update-progress, 0, 1); background: Palette.primary; animate width { duration: 200ms; } } }
+                        if root.update-available && root.update-status != "" : Row { spacing: 8px;
+                            update-feedback := Body { text: root.update-status; color: Palette.secondary; min-width: 0px; horizontal-stretch: 1; }
+                            if root.update-installing && root.update-progress > 0 : Label {
+                                text: round(clamp(root.update-progress, 0, 1) * 100) + "%";
+                                color: Palette.secondary; font-size: 12px; horizontal-stretch: 0;
+                            }
+                        }
+                        if root.update-installing : UpdateProgress { progress: root.update-progress; status: root.update-status; }
+                        if root.update-available && root.update-details-open : ReleaseNotes { notes: root.update-notes; }
                     }
                 } }
                 Rectangle { height: 8px; }
