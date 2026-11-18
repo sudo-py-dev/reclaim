@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "postinstall": "node scripts/harden-picomatch.mjs",
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
