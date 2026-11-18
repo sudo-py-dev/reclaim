@@ -493,7 +493,15 @@ pub(crate) fn leftovers(ws: &Workspace) -> Vec<Finding> {
     }
     for file in &ws.text {
         let code = file.path.ends_with(".rs") || file.path.ends_with(".slint");
-        if !code || file.path.starts_with("tests/audit/") || file.path.starts_with("website/") {
+        // Upstream Slint carries its own lint and tracking conventions. Apply
+        // Reclaim's conventions to the date module we patched as well as our app.
+        let upstream_slint = file.path.starts_with("vendor/slint-core/")
+            && file.path != "vendor/slint-core/date_time.rs";
+        if !code
+            || upstream_slint
+            || file.path.starts_with("tests/audit/")
+            || file.path.starts_with("website/")
+        {
             continue;
         }
         for (index, line) in file.text.lines().enumerate() {

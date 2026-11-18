@@ -146,6 +146,8 @@
   "Select all": "Выбрать всё",
   "Searching… candidates will appear here.": "Идёт поиск… найденные файлы появятся здесь.",
   "No matching files yet. Start a scan from Sources.": "Совпадающих файлов пока нет. Начните сканирование в разделе источников.",
+  "No files match your search and category filters.": "Нет файлов, соответствующих поиску и фильтру по категории.",
+  "Clear filters": "Сбросить фильтры",
   "FILE INSPECTOR": "СВЕДЕНИЯ О ФАЙЛЕ",
   "Candidates may be incomplete. Verify recovered files before relying on them.": "Найденные файлы могут быть неполными. Проверьте их после восстановления.",
   "Recover selected": "Восстановить выбранное",

@@ -146,6 +146,8 @@
   "Select all": "בחירת הכול",
   "Searching… candidates will appear here.": "מחפשת… הקבצים שיימצאו יופיעו כאן.",
   "No matching files yet. Start a scan from Sources.": "עדיין אין קבצים תואמים. התחילו סריקה במסך המקורות.",
+  "No files match your search and category filters.": "אין קבצים שמתאימים לחיפוש ולסינון לפי קטגוריה.",
+  "Clear filters": "ניקוי מסננים",
   "FILE INSPECTOR": "פרטי הקובץ",
   "Candidates may be incomplete. Verify recovered files before relying on them.": "ייתכן שחלק מהקבצים לא שלמים. בדקו אותם אחרי השחזור לפני שאתם סומכים עליהם.",
   "Recover selected": "שחזור הנבחרים",

@@ -146,6 +146,8 @@
   "Select all": "Tout sélectionner",
   "Searching… candidates will appear here.": "Recherche en cours… les fichiers trouvés apparaîtront ici.",
   "No matching files yet. Start a scan from Sources.": "Aucun fichier correspondant. Lancez une analyse depuis Sources.",
+  "No files match your search and category filters.": "Aucun fichier ne correspond à la recherche et au filtre de catégorie.",
+  "Clear filters": "Effacer les filtres",
   "FILE INSPECTOR": "DÉTAILS DU FICHIER",
   "Candidates may be incomplete. Verify recovered files before relying on them.": "Les fichiers trouvés peuvent être incomplets. Vérifiez-les après récupération avant de vous y fier.",
   "Recover selected": "Récupérer la sélection",

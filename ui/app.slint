@@ -43,6 +43,8 @@ export global Strings {
     in-out property <string> separator: " · ";
     in-out property <string> searching-candidates-will-appear-here: "Searching… candidates will appear here.";
     in-out property <string> no-matching-files-yet-start: "No matching files yet. Start a scan from Sources.";
+    in-out property <string> no-files-match-filters: "No files match your search and category filters.";
+    in-out property <string> clear-filters: "Clear filters";
     in-out property <string> file-inspector: "FILE INSPECTOR";
     in-out property <string> candidates-may-be-incomplete-verify: "Candidates may be incomplete. Verify recovered files before relying on them.";
     in-out property <string> recover-selected: "Recover selected";
@@ -304,13 +306,14 @@ component NavItem inherits Rectangle {
     touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
 }
 
-// Icon-only segmented choice between light, dark and system themes.
+// Segmented choice between light, dark and system themes.
 component ThemeOption inherits Rectangle {
     in property <int> value;
     in property <string> label;
     in property <image> icon;
     property <bool> current: Palette.theme == root.value;
-    width: 40px; height: 30px; border-radius: 6px;
+    preferred-width: caption.preferred-width + 38px;
+    horizontal-stretch: 0; height: 30px; border-radius: 6px;
     forward-focus: focus;
     accessible-role: button;
     accessible-label: root.label;
@@ -321,7 +324,10 @@ component ThemeOption inherits Rectangle {
     border-width: focus.has-focus ? 2px : current ? 1px : 0px;
     border-color: focus.has-focus ? Palette.accent : Palette.line;
     animate background { duration: 120ms; }
-    Image { source: root.icon; width: 18px; height: 18px; colorize: root.current ? Palette.accent : Palette.muted; }
+    Row { spacing: 6px; padding-left: 8px; padding-right: 8px;
+        Image { source: root.icon; width: 16px; height: 16px; colorize: root.current ? Palette.accent : Palette.muted; }
+        caption := Label { text: root.label; color: root.current ? Palette.ink : Palette.muted; font-size: 12px; }
+    }
     focus := FocusScope {
         key-pressed(event) => {
             if event.text == Key.Space || event.text == Key.Return { Palette.theme = root.value; return accept; }
@@ -331,9 +337,9 @@ component ThemeOption inherits Rectangle {
     touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); Palette.theme = root.value; } }
 }
 component ThemePicker inherits Rectangle {
-    width: 132px; height: Metrics.control; horizontal-stretch: 0;
+    preferred-width: options.preferred-width; height: Metrics.control; horizontal-stretch: 0;
     border-radius: Metrics.radius; background: Palette.subtle;
-    Row { padding: 3px; spacing: 3px;
+    options := Row { padding: 3px; spacing: 3px;
         ThemeOption { value: 1; label: Strings.light; icon: @image-url("icons/sun.svg"); }
         ThemeOption { value: 2; label: Strings.dark; icon: @image-url("icons/moon.svg"); }
         ThemeOption { value: 0; label: Strings.system; icon: @image-url("icons/system.svg"); }
@@ -646,8 +652,6 @@ export component AppWindow inherits Window {
                     }
                     if root.custom-frame : WindowMoveArea { }
                 }
-                Rectangle { height: 6px; }
-                Label { text: Strings.a-second-chance-for-your; color: Palette.secondary; font-size: 12px; wrap: word-wrap; }
                 Rectangle { height: 20px; }
                 NavItem { text: Strings.sources; icon: @image-url("icons/drive.svg"); current: root.page == 0; clicked => { root.page = 0; } }
                 NavItem { text: Strings.recovered-files; icon: @image-url("icons/files.svg"); current: root.page == 1; clicked => { root.page = 1; } }
@@ -674,7 +678,7 @@ export component AppWindow inherits Window {
         // ── Page ────────────────────────────────────────────────
         VerticalLayout { horizontal-stretch: 1; padding: 24px; padding-top: root.custom-frame ? 40px : 20px; spacing: 16px;
             VerticalLayout { spacing: 4px; vertical-stretch: 0;
-                Label { text: root.page == 0 ? Strings.sources : root.page == 1 ? Strings.recovered-files : Strings.settings-help; color: Palette.ink; font-size: 22px; font-weight: 700; }
+                Label { text: root.page == 0 ? Strings.sources : root.page == 1 ? Strings.recovered-files : Strings.settings-help; color: Palette.ink; font-size: 24px; font-weight: 700; }
                 Body { text: root.page == 0 ? Strings.choose-a-drive-or-disk : root.page == 1 ? Strings.inspect-candidates-choose-your-files : Strings.appearance-updates-and-a-little; }
             }
             // Sources: pick a drive, then start the scan.
@@ -696,7 +700,6 @@ export component AppWindow inherits Window {
                     if root.drives.length > 0 : ScrollView { VerticalLayout { padding: 8px; spacing: 4px; alignment: start;
                         for drive[i] in root.drives : Rectangle {
                             height: 48px; border-radius: Metrics.radius;
-                            opacity: drive.available ? 1 : 0.5;
                             background: root.selected-drive == i ? Palette.selected : area.has-hover ? Palette.hover : transparent;
                             animate background { duration: 120ms; }
                             Row { padding-left: 8px; padding-right: 12px; spacing: 10px;
@@ -711,7 +714,7 @@ export component AppWindow inherits Window {
                                 }
                                 VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 1px; alignment: center;
                                     Row { spacing: 6px;
-                                        Label { text: drive.name; color: Palette.ink; font-size: 14px; font-weight: 500; overflow: elide; min-width: 0px; horizontal-stretch: 0; }
+                                        Label { text: drive.name; color: drive.available ? Palette.ink : Palette.muted; font-size: 14px; font-weight: 500; overflow: elide; min-width: 0px; horizontal-stretch: 0; }
                                         if drive.device != "" : DeviceTag { text: drive.device; }
                                         Rectangle { horizontal-stretch: 1; }
                                     }
@@ -719,12 +722,15 @@ export component AppWindow inherits Window {
                                 }
                                 Label { text: drive.size; color: Palette.muted; font-size: 13px; vertical-alignment: center; }
                                 Rectangle { width: 18px; height: 18px; border-radius: 9px; border-width: 2px;
-                                    border-color: root.selected-drive == i ? Palette.primary : Palette.line;
+                                    border-color: root.selected-drive == i ? Palette.accent : drive.available ? Palette.muted : Palette.line;
                                     Rectangle { visible: root.selected-drive == i; width: 8px; height: 8px; border-radius: 4px; background: Palette.primary; }
                                 }
                             }
                             forward-focus: drive-focus;
                             accessible-role: button; accessible-label: drive.name;
+                            accessible-description: drive.detail;
+                            accessible-checkable: drive.available;
+                            accessible-checked: root.selected-drive == i;
                             accessible-enabled: !root.busy && drive.available;
                             accessible-action-default => { if !root.busy && drive.available { root.select-drive(i); } }
                             border-width: drive-focus.has-focus ? 2px : 0px; border-color: Palette.accent;
@@ -740,27 +746,31 @@ export component AppWindow inherits Window {
                     VerticalLayout { padding-top: 1px; alignment: start; Image { source: @image-url("icons/phone.svg"); width: 16px; height: 16px; colorize: Palette.muted; } }
                     phone-note := Label { text: Strings.phones-and-cameras-connect-for; color: Palette.secondary; font-size: 12px; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
                 }
-                Rectangle { vertical-stretch: 1; }
                 // One action bar: what will be scanned, the button that scans it, and,
                 // only while something runs or failed, the scan status.
                 Card { vertical-stretch: 0; VerticalLayout { padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 12px;
                     Row { spacing: 16px;
                         VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 4px; alignment: center;
                             SectionLabel { text: Strings.selected-source; }
-                            Label { text: root.source; color: root.can-scan || root.busy ? Palette.ink : Palette.muted; font-size: 14px; overflow: elide; }
+                            if root.selected-drive >= 0 && root.selected-drive < root.drives.length : Label {
+                                text: root.drives[root.selected-drive].name;
+                                color: Palette.ink; font-size: 14px; font-weight: 600; overflow: elide;
+                            }
+                            Label { text: root.source; color: root.selected-drive < 0 && (root.can-scan || root.busy) ? Palette.ink : Palette.muted; font-size: root.selected-drive >= 0 ? 12px : 14px; overflow: elide; }
                         }
                         Action { height: 40px; text: Strings.start-scanning; icon: @image-url("icons/search.svg"); primary: true; enabled: root.can-scan; clicked => { root.scan(); } }
                     }
                     if root.busy || root.error != "" : Divider {}
                     if root.busy || root.error != "" : ScanStatus { status: root.status; detail: root.scan-detail; error: root.error; needs-administrator: root.needs-administrator; restart-as-administrator => { root.restart-as-administrator(); } busy: root.busy; progress: root.progress; stop => { root.stop(); } }
                 } }
+                Rectangle { vertical-stretch: 1; }
             }
             // Recovered files: filter, inspect, select, recover.
             // Two columns all the way down: the list column (search, list, hint) and the
             // inspector column (category, details, Recover), so every edge lines up.
             if root.page == 1 : VerticalLayout { vertical-stretch: 1; spacing: 12px;
                 Row { height: Metrics.control; cross-axis-alignment: stretch; spacing: 12px;
-                    LineEdit { height: Metrics.control; min-width: 120px; horizontal-stretch: 1; font-size: 13px; horizontal-alignment: Locale.rtl ? right : left; placeholder-text: Strings.search-name-or-offset; text <=> root.query; edited => { root.filter(); } }
+                    search := LineEdit { height: Metrics.control; min-width: 120px; horizontal-stretch: 1; font-size: 13px; horizontal-alignment: Locale.rtl ? right : left; placeholder-text: Strings.search-name-or-offset; text <=> root.query; edited => { root.filter(); } }
                     Choice { horizontal-stretch: 0; width: 264px; model: [Strings.all-files, Strings.pictures, Strings.documents, Strings.archives, Strings.audio, Strings.video, Strings.applications, Strings.icons]; current-index <=> root.category; selected(_) => { root.filter(); } }
                 }
                 Row { cross-axis-alignment: stretch; vertical-stretch: 1; spacing: 12px;
@@ -779,15 +789,25 @@ export component AppWindow inherits Window {
                         Divider { }
                         Rectangle { vertical-stretch: 1;
                             if root.files.length == 0 : EmptyState { width: parent.width; height: parent.height;
-                                text: root.busy ? Strings.searching-candidates-will-appear-here : Strings.no-matching-files-yet-start;
+                                text: root.has-results ? Strings.no-files-match-filters : root.busy ? Strings.searching-candidates-will-appear-here : Strings.no-matching-files-yet-start;
                                 icon: @image-url("icons/search.svg");
-                                action: root.busy || root.has-results ? "" : Strings.choose-a-drive;
-                                action-icon: @image-url("icons/drive.svg");
-                                activated => { root.page = 0; }
+                                action: root.has-results ? Strings.clear-filters : root.busy ? "" : Strings.choose-a-drive;
+                                action-icon: root.has-results ? @image-url("icons/refresh.svg") : @image-url("icons/drive.svg");
+                                activated => {
+                                    if root.has-results {
+                                        search.focus();
+                                        root.query = "";
+                                        root.category = 0;
+                                        root.filter();
+                                    } else {
+                                        root.page = 0;
+                                    }
+                                }
                             }
                             if root.files.length > 0 : files-view := ListView { x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px;
                                 content-height: root.files.length * 52px;
                                 for file in root.files : Rectangle { height: 52px;
+                                    forward-focus: row-focus;
                                     accessible-role: list-item; accessible-label: file.name;
                                     accessible-action-default => { root.inspect(file.index); }
                                     Rectangle { y: 2px; height: parent.height - 4px; border-radius: Metrics.radius;

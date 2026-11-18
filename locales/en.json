@@ -146,6 +146,8 @@
   "Select all": "Select all",
   "Searching… candidates will appear here.": "Searching… candidates will appear here.",
   "No matching files yet. Start a scan from Sources.": "No matching files yet. Start a scan from Sources.",
+  "No files match your search and category filters.": "No files match your search and category filters.",
+  "Clear filters": "Clear filters",
   "FILE INSPECTOR": "FILE INSPECTOR",
   "Candidates may be incomplete. Verify recovered files before relying on them.": "Candidates may be incomplete. Verify recovered files before relying on them.",
   "Recover selected": "Recover selected",

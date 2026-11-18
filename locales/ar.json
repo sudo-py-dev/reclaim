@@ -146,6 +146,8 @@
   "Select all": "تحديد الكل",
   "Searching… candidates will appear here.": "جارٍ البحث… ستظهر الملفات المرشحة هنا.",
   "No matching files yet. Start a scan from Sources.": "لا توجد ملفات مطابقة بعد. ابدأ الفحص من المصادر.",
+  "No files match your search and category filters.": "لا توجد ملفات تطابق البحث والفئة المحددة.",
+  "Clear filters": "مسح عوامل التصفية",
   "FILE INSPECTOR": "تفاصيل الملف",
   "Candidates may be incomplete. Verify recovered files before relying on them.": "قد تكون الملفات المرشحة غير مكتملة. تحقق من الملفات المستعادة قبل الاعتماد عليها.",
   "Recover selected": "استعادة المحدد",
