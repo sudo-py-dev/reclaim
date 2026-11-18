@@ -109,6 +109,10 @@ pub fn apply(ui: &AppWindow) {
     ui.global::<Locale<'_>>().set_rtl(i18n::is_rtl());
     let strings = ui.global::<Strings<'_>>();
     apply_labels(&strings);
+    let language_names: Vec<slint::SharedString> = std::iter::once(strings.get_system_language())
+        .chain(i18n::LANGUAGE_NAMES.iter().copied().map(Into::into))
+        .collect();
+    ui.set_language_names(slint::ModelRc::new(slint::VecModel::from(language_names)));
     strings.set_recovery_step_list(slint::ModelRc::new(slint::VecModel::from(recovery_steps())));
     strings.set_window_title(
         window_title(i18n::t(WINDOW_TITLE), i18n::is_rtl(), draws_own_title_bar()).into(),

@@ -24,3 +24,5 @@ Thumbs.db
 *.log
 /coverage/
 /lcov.info
+
+/locales/.translation-progress/

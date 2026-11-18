@@ -652,6 +652,7 @@ export component AppWindow inherits Window {
     in property <string> update-label;
     in property <float> update-progress;
     in-out property <int> language;
+    in property <[string]> language-names: [Strings.system-language];
     callback change-language(int);
     callback open-link(AboutLink);
     callback apply-update();
@@ -920,7 +921,7 @@ export component AppWindow inherits Window {
                 GroupTitle { text: Strings.general; }
                 Card { VerticalLayout {
                     SettingRow { icon: @image-url("icons/globe.svg"); title: Strings.language;
-                        VerticalLayout { horizontal-stretch: 0; width: 220px; alignment: center; Choice { model: [Strings.system-language, "English", "עברית", "Español", "Français", "Deutsch", "العربية", "Русский"]; current-index <=> root.language; selected(i) => { root.change-language(i); } } }
+                        VerticalLayout { horizontal-stretch: 0; width: 220px; alignment: center; Choice { model: root.language-names; current-index <=> root.language; selected(i) => { root.change-language(i); } } }
                     }
                     RowDivider { }
                     SettingRow { icon: @image-url("icons/contrast.svg"); title: Strings.appearance;

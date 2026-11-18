@@ -16,63 +16,47 @@ use std::{
     },
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Language {
-    English,
-    Hebrew,
-    Spanish,
-    French,
-    German,
-    Arabic,
-    Russian,
+// The generated list includes only published catalogs, in menu order.
+macro_rules! define_languages {
+    ($($variant:ident, $code:literal, $name:literal, $path:literal;)*) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Language {
+            $($variant,)*
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Preference {
+            System,
+            $($variant,)*
+        }
+
+        const PREFERENCES: &[(Preference, Option<Language>, &str)] = &[
+            (Preference::System, None, "system"),
+            $((Preference::$variant, Some(Language::$variant), $code),)*
+        ];
+
+        /// Native names in menu order, excluding the localized System entry.
+        pub const LANGUAGE_NAMES: &[&str] = &[$($name,)*];
+
+        fn catalog(language: Language) -> &'static BTreeMap<String, String> {
+            match language {
+                $(Language::$variant => {
+                    static CATALOG: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+                    CATALOG.get_or_init(|| {
+                        serde_json::from_str(include_str!($path)).unwrap_or_default()
+                    })
+                },)*
+            }
+        }
+    };
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Preference {
-    System,
-    English,
-    Hebrew,
-    Spanish,
-    French,
-    German,
-    Arabic,
-    Russian,
-}
-/// Menu order, display language and saved settings code for every preference.
-/// `Preference` discriminants match the menu index used by the interface.
-const PREFERENCES: [(Preference, Option<Language>, &str); 8] = [
-    (Preference::System, None, "system"),
-    (Preference::English, Some(Language::English), "en"),
-    (Preference::Hebrew, Some(Language::Hebrew), "he"),
-    (Preference::Spanish, Some(Language::Spanish), "es"),
-    (Preference::French, Some(Language::French), "fr"),
-    (Preference::German, Some(Language::German), "de"),
-    (Preference::Arabic, Some(Language::Arabic), "ar"),
-    (Preference::Russian, Some(Language::Russian), "ru"),
-];
+
+include!(concat!(env!("OUT_DIR"), "/languages.rs"));
+
 static PREFERENCE: AtomicU8 = AtomicU8::new(0);
 thread_local! { static OVERRIDE: Cell<Option<Language>> = const { Cell::new(None) }; }
 fn en() -> &'static BTreeMap<String, String> {
     catalog(Language::English)
-}
-fn catalog(language: Language) -> &'static BTreeMap<String, String> {
-    macro_rules! bundled {
-        ($file:literal) => {{
-            static C: OnceLock<BTreeMap<String, String>> = OnceLock::new();
-            C.get_or_init(|| {
-                // Catalogs are checked by the audit; a broken one falls back to English.
-                serde_json::from_str(include_str!($file)).unwrap_or_default()
-            })
-        }};
-    }
-    match language {
-        Language::English => bundled!("../locales/en.json"),
-        Language::Hebrew => bundled!("../locales/he.json"),
-        Language::Spanish => bundled!("../locales/es.json"),
-        Language::French => bundled!("../locales/fr.json"),
-        Language::German => bundled!("../locales/de.json"),
-        Language::Arabic => bundled!("../locales/ar.json"),
-        Language::Russian => bundled!("../locales/ru.json"),
-    }
 }
 /// The preference shown at `index` in the language menu.
 pub fn preference_at(index: usize) -> Option<Preference> {
@@ -97,22 +81,19 @@ pub fn is_rtl() -> bool {
     matches!(language(), Language::Hebrew | Language::Arabic)
 }
 fn language_for_locale(locale: &str) -> Language {
-    match locale
+    let code = locale
         .split(['_', '-', '.'])
         .next()
         .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "he" | "iw" => Language::Hebrew,
-        "es" => Language::Spanish,
-        "fr" => Language::French,
-        "de" => Language::German,
-        "ar" => Language::Arabic,
-        "ru" => Language::Russian,
-        _ => Language::English,
-    }
+        .to_ascii_lowercase();
+    let code = if code == "iw" { "he" } else { code.as_str() };
+    PREFERENCES
+        .iter()
+        .find(|entry| entry.2 == code)
+        .and_then(|entry| entry.1)
+        .unwrap_or(Language::English)
 }
+
 fn settings_path() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     let root = std::env::var_os("APPDATA").map(PathBuf::from);
@@ -376,15 +357,9 @@ pub fn with_language<R>(language: Language, f: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const LANGUAGES: [Language; 7] = [
-        Language::English,
-        Language::Hebrew,
-        Language::Spanish,
-        Language::French,
-        Language::German,
-        Language::Arabic,
-        Language::Russian,
-    ];
+    fn languages() -> impl Iterator<Item = Language> {
+        PREFERENCES.iter().filter_map(|entry| entry.1)
+    }
 
     #[test]
     fn preference_table_matches_menu_order_and_round_trips() {
@@ -393,10 +368,14 @@ mod tests {
             assert_eq!(preference_at(index), Some(*preference));
         }
         assert_eq!(preference_at(PREFERENCES.len()), None);
+        assert_eq!(LANGUAGE_NAMES.len() + 1, PREFERENCES.len());
+        for (_, language, code) in &PREFERENCES[1..] {
+            assert_eq!(Some(language_for_locale(code)), *language);
+        }
     }
     #[test]
     fn catalogs_cover_all_keys_and_keep_format_arguments() {
-        for language in LANGUAGES {
+        for language in languages() {
             let translations = catalog(language);
             assert_eq!(
                 en().keys().collect::<Vec<_>>(),
@@ -471,7 +450,7 @@ mod tests {
     #[test]
     fn formatted_data_is_isolated_without_recursive_translation_or_injection() {
         let path = "/media/תמונות/report {1}.png";
-        for language in LANGUAGES {
+        for language in languages() {
             with_language(language, || {
                 let value = message("Mounted at {0}", &[path]);
                 assert!(value.contains(&isolate(path)));
@@ -490,7 +469,7 @@ mod tests {
         let premature_end = "The source stopped returning data before its reported end. It may be truncated, disconnected, or restricted by the operating system. Files already found can still be recovered.";
         let cancelled = "Administrator permission was not granted. Reclaim is still open.";
         let technical = "Windows error 1234";
-        for language in LANGUAGES {
+        for language in languages() {
             with_language(language, || {
                 // Workers keep catalog keys so switching the UI language also
                 // translates an error that was reported before the switch.

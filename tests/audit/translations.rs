@@ -8,8 +8,6 @@ use std::{
     fmt,
 };
 
-const LANGUAGES: &[&str] = &["en", "he", "ar", "es", "fr", "de", "ru"];
-
 /// Ordered key/value pairs, keeping duplicates so they can be reported.
 struct Pairs(Vec<(String, String)>);
 
@@ -39,10 +37,12 @@ struct Catalog {
 }
 
 fn load(ws: &Workspace) -> Vec<Catalog> {
-    LANGUAGES
-        .iter()
-        .map(|code| {
-            let path = format!("locales/{code}.json");
+    include_str!("../../locales/languages.txt")
+        .lines()
+        .filter_map(|row| row.split_ascii_whitespace().nth(1))
+        .map(|code| format!("locales/{code}.json"))
+        .filter(|path| ws.root.join(path).is_file())
+        .map(|path| {
             let Pairs(pairs) =
                 serde_json::from_str(ws.file(&path)).unwrap_or_else(|e| panic!("{path}: {e}"));
             Catalog { path, pairs }
