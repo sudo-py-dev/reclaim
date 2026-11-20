@@ -48,7 +48,9 @@ fn generate_languages() -> Result<(), Box<dyn Error>> {
 
 fn read_limited(path: &Path, limit: u64) -> Result<String, Box<dyn Error>> {
     let mut text = String::new();
-    File::open(path)?.take(limit + 1).read_to_string(&mut text)?;
+    File::open(path)?
+        .take(limit + 1)
+        .read_to_string(&mut text)?;
     if text.len() as u64 > limit {
         return Err(format!("{} exceeds {limit} bytes", path.display()).into());
     }
