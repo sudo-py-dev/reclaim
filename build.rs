@@ -36,7 +36,8 @@ fn generate_languages() -> Result<(), Box<dyn Error>> {
         let (code, name) = rest.split_once(' ').ok_or("missing locale name")?;
         let path = locales.join(format!("{code}.json"));
         if path.is_file() {
-            writeln!(generated, "    {variant}, {code:?}, {name:?}, {:?};", path)?;
+            let path = path.to_str().ok_or("locale path is not UTF-8")?;
+            writeln!(generated, "    {variant}, {code:?}, {name:?}, {path:?};")?;
         }
     }
     generated.push_str("}\n");
