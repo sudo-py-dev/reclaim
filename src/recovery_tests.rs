@@ -148,6 +148,9 @@ fn automatic_drive_updates_preserve_selection_and_scan_results() {
         encrypted: false,
         sector_size: 512,
         phone: false,
+        unlocked: false,
+        parent: None,
+        system: false,
     };
     let mut app = Reclaim::default();
     app.drives = vec![drive("usb1")];

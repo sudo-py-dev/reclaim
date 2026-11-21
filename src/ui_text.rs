@@ -9,6 +9,9 @@ use reclaim::i18n;
 use slint::ComponentHandle;
 const WINDOW_TITLE: &str = "Reclaim - File Recovery";
 const BRAND: &str = "Reclaim";
+const SUPPORTED_FORMATS: &str = "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on {0} volumes.";
+/// Filesystem names are the same in every language and always read left to right.
+const FILESYSTEMS: &[&str] = &["FAT", "exFAT", "NTFS", "ext2/3/4", "HFS+"];
 const RECOVERY_STEPS: &str = "1. Stop using the drive you lost files from. Don't save, download or install anything to it.\n\n2. Choose that drive or a raw disk image, then scan its unused space. Stop any time and keep partial results.\n\n3. Inspect and select files, then save them to a different physical drive.";
 
 /// One table drives both the Slint setters and the catalog-coverage test, so a
@@ -16,7 +19,7 @@ const RECOVERY_STEPS: &str = "1. Stop using the drive you lost files from. Don't
 macro_rules! ui_strings {
     ($($setter:ident => $text:literal,)*) => {
         #[cfg(test)]
-        pub const UI_MESSAGES: &[&str] = &[WINDOW_TITLE, BRAND, RECOVERY_STEPS, $($text),*];
+        pub const UI_MESSAGES: &[&str] = &[WINDOW_TITLE, BRAND, RECOVERY_STEPS, SUPPORTED_FORMATS, $($text),*];
         fn apply_labels(strings: &Strings<'_>) {
             $(strings.$setter(i18n::t($text).into());)*
         }
@@ -26,7 +29,7 @@ macro_rules! ui_strings {
 ui_strings! {
     set_no_source_selected => "No source selected",
     set_select_a_file_to_inspect => "Select a file to inspect its details.",
-    set_reclaim => "reclaim",
+    set_reclaim => "Reclaim",
     set_a_second_chance_for_your => "A second chance for your files",
     set_sources => "Sources",
     set_recovered_files => "Recovered files",
@@ -52,7 +55,8 @@ ui_strings! {
     set_applications => "Applications",
     set_icons => "Icons",
     set_select_all => "Select all",
-    set_choose_a_drive => "Choose a drive",
+    set_choose_a_source => "Choose a source",
+    set_choose_a_source_above => "Choose a source above to start scanning.",
     set_minimize => "Minimize",
     set_maximize => "Maximize",
     set_restore => "Restore",
@@ -60,7 +64,8 @@ ui_strings! {
     set_save_to_a_different_physical_drive => "Save to a different physical drive",
     set_separator => " · ",
     set_searching_candidates_will_appear_here => "Searching… candidates will appear here.",
-    set_no_matching_files_yet_start => "No matching files yet. Start a scan from Sources.",
+    set_no_scan_yet => "No scan yet. Choose a source and start a scan.",
+    set_no_files_were_found => "No files were found. Try another source.",
     set_no_files_match_filters => "No files match your search and category filters.",
     set_clear_filters => "Clear filters",
     set_file_inspector => "FILE INSPECTOR",
@@ -75,7 +80,6 @@ ui_strings! {
     set_version => "Version",
     set_recover_in_three_steps => "Recover in three steps",
     set_supported_formats => "Supported formats",
-    set_photos_documents_archives_audio_video => "Photos, documents, archives, audio, video, applications, and small NTFS resident files. Unused-space scanning on FAT, exFAT, NTFS, ext2/3/4, and HFS+ volumes.",
     set_check_for_updates => "Check for updates",
     set_restart_as_administrator => "Restart as administrator",
     set_whats_new => "What’s new",
@@ -113,11 +117,28 @@ pub fn apply(ui: &AppWindow) {
         .chain(i18n::LANGUAGE_NAMES.iter().copied().map(Into::into))
         .collect();
     ui.set_language_names(slint::ModelRc::new(slint::VecModel::from(language_names)));
+    strings.set_photos_documents_archives_audio_video(
+        // Not `message`: it would merge the separately isolated names back into one run.
+        i18n::t(SUPPORTED_FORMATS)
+            .replace("{0}", &filesystem_list())
+            .into(),
+    );
     strings.set_recovery_step_list(slint::ModelRc::new(slint::VecModel::from(recovery_steps())));
     strings.set_window_title(
         window_title(i18n::t(WINDOW_TITLE), i18n::is_rtl(), draws_own_title_bar()).into(),
     );
     ui.set_version(env!("CARGO_PKG_VERSION").into());
+}
+
+/// Each filesystem name is its own left-to-right run, so the slashes of ext2/3/4 and
+/// the plus of HFS+ stay put inside right-to-left text, while the commas between
+/// names follow the sentence and the line can still wrap between them.
+fn filesystem_list() -> String {
+    FILESYSTEMS
+        .iter()
+        .map(|name| i18n::ltr(name))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The catalog keeps the steps as one numbered paragraph; the interface draws its own

@@ -89,6 +89,9 @@ fn phones_at(usb: &Path) -> Vec<Drive> {
             encrypted: false,
             sector_size: 512,
             phone: true,
+            unlocked: false,
+            parent: None,
+            system: false,
         });
     }
     phones
@@ -228,6 +231,12 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             break;
         }
     }
+    // Encrypted containers that have an open dm-crypt mapping on top of them.
+    let open_containers: HashSet<&str> = nodes
+        .iter()
+        .filter(|node| read(node.sys.join("dm/uuid")).starts_with("CRYPT-"))
+        .flat_map(|node| node.parents.iter().map(String::as_str))
+        .collect();
     let mut labels = HashMap::new();
     if let Ok(entries) = fs::read_dir(dev.join("disk/by-label")) {
         for entry in entries.flatten() {
@@ -265,6 +274,8 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
         let dm_uuid = read(node.sys.join("dm/uuid"));
         let unlocked = dm_uuid.starts_with("CRYPT-");
         let encrypted = get("ID_FS_TYPE") == "crypto_LUKS";
+        // An encrypted container is open when a dm-crypt mapping sits on top of it.
+        let opened = encrypted && open_containers.contains(node.name.as_str());
         let usb = get("ID_BUS") == "usb"
             || fs::canonicalize(&node.sys).is_ok_and(|p| {
                 p.components()
@@ -320,7 +331,9 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
                 "Volume"
             }
             .into(),
-            location: if encrypted {
+            location: if opened {
+                "Encrypted and unlocked: choose the volume inside".into()
+            } else if encrypted {
                 "Encrypted: unlock in Disks, then refresh".into()
             } else if let Some(m) = mount {
                 format!("Mounted at {m}")
@@ -333,6 +346,13 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             encrypted,
             sector_size,
             phone: false,
+            unlocked: opened,
+            // Device-mapper layers (dm-crypt, LVM) nest under what they were opened from.
+            parent: (!node.partition)
+                .then(|| node.parents.first())
+                .flatten()
+                .map(|parent| dev.join(parent)),
+            system: mount.is_some_and(|m| m == "/"),
         });
     }
     // Prefer named volumes over their parent disk. The volume retains its
@@ -346,7 +366,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
         .collect();
     drives.retain(|drive| !represented_parents.contains(&drive.path));
 
-    Ok(drives)
+    Ok(super::nest(drives))
 }
 
 /// Compares device numbers rather than paths, so symlinks, bind mounts and
@@ -645,6 +665,12 @@ mod tests {
             .find(|row| row.path.ends_with("nvme0n1p1"))
             .unwrap();
         assert!(partition.encrypted);
+        // Its dm-crypt mapping is open, so it is not reported as locked.
+        assert!(partition.unlocked);
+        assert_eq!(
+            partition.location,
+            "Encrypted and unlocked: choose the volume inside"
+        );
         assert_eq!(partition.size, 9000 * 512); // sysfs units, not 4096-byte sectors
         assert_eq!(partition.sector_size, 4096);
         let unlocked = rows.iter().find(|row| row.path.ends_with("dm-0")).unwrap();
@@ -652,6 +678,43 @@ mod tests {
         assert!(!unlocked.encrypted);
         assert_eq!(unlocked.kind, "Unlocked volume");
         assert_eq!(unlocked.location, "Mounted at /media/My Photos");
+        // The opened volume is listed right under the container it came from.
+        assert_eq!(unlocked.parent.as_ref(), Some(&partition.path));
+        assert!(partition.parent.is_none());
+        assert!(rows[0].path.ends_with("nvme0n1p1") && rows[1].path.ends_with("dm-0"));
+        assert!(!rows.iter().any(|row| row.system));
+    }
+
+    #[test]
+    fn the_running_system_volume_is_flagged_and_locked_containers_stay_locked() {
+        let f = Fixture::new();
+        f.disk("sda", "8:0", "4000");
+        f.write("devices/sda/sda1/size", "2000");
+        f.write("devices/sda/sda1/dev", "8:1");
+        f.write("devices/sda/sda1/partition", "1");
+        symlink(
+            f.0.path().join("devices/sda/sda1"),
+            f.0.path().join("sys/sda1"),
+        )
+        .unwrap();
+        f.write("dev/sda1", "");
+        f.write("devices/sda/sda2/size", "1000");
+        f.write("devices/sda/sda2/dev", "8:2");
+        f.write("devices/sda/sda2/partition", "1");
+        symlink(
+            f.0.path().join("devices/sda/sda2"),
+            f.0.path().join("sys/sda2"),
+        )
+        .unwrap();
+        f.write("dev/sda2", "");
+        f.write("udev/b8:2", "E:ID_FS_TYPE=crypto_LUKS\n");
+        f.write("mountinfo", "30 1 8:1 / / rw - ext4 /dev/sda1 rw\n");
+        let rows = f.discover().unwrap();
+        let root = rows.iter().find(|row| row.path.ends_with("sda1")).unwrap();
+        assert!(root.system);
+        let locked = rows.iter().find(|row| row.path.ends_with("sda2")).unwrap();
+        assert!(locked.encrypted && !locked.unlocked && !locked.system);
+        assert_eq!(locked.location, "Encrypted: unlock in Disks, then refresh");
     }
 
     #[test]
