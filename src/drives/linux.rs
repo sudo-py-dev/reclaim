@@ -147,6 +147,14 @@ fn octal_byte(digits: [u8; 3]) -> Option<u8> {
     u8::from_str_radix(std::str::from_utf8(&digits).ok()?, 8).ok()
 }
 
+/// Where `node` is mounted: by device number, or by name for filesystems that
+/// report an anonymous device number (see `discover_at`).
+fn mount_of<'a>(mounted: &'a HashMap<String, String>, node: &Node) -> Option<&'a String> {
+    mounted
+        .get(&node.dev)
+        .or_else(|| mounted.get(&format!("name:{}", node.name)))
+}
+
 struct Node {
     name: String,
     sys: PathBuf,
@@ -162,11 +170,24 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
     for line in mount_text.lines() {
         let fields: Vec<_> = line.split_whitespace().collect();
         if let [_, _, device, _, point, _, _, ..] = fields.as_slice()
-            && fields.contains(&"-")
+            && let Some(separator) = fields.iter().position(|field| *field == "-")
         {
             let point = unescape(point, true);
+            // Btrfs and other multi-device filesystems report an anonymous device
+            // number (major 0), so match them by their source device's name instead.
+            let key = match fields.get(separator.saturating_add(2)) {
+                Some(source) if device.starts_with("0:") && source.starts_with("/dev/") => {
+                    let source = Path::new(source);
+                    let real = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+                    match real.file_name() {
+                        Some(name) => format!("name:{}", name.to_string_lossy()),
+                        None => (*device).into(),
+                    }
+                }
+                _ => (*device).into(),
+            };
             mounted
-                .entry((*device).into())
+                .entry(key)
                 .and_modify(|old| {
                     if point == "/" {
                         old.clone_from(&point);
@@ -214,7 +235,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
     nodes.sort_by(|a, b| a.name.cmp(&b.name));
     let mut active: HashSet<_> = nodes
         .iter()
-        .filter(|n| mounted.contains_key(&n.dev))
+        .filter(|n| mount_of(&mounted, n).is_some())
         .map(|n| n.name.clone())
         .collect();
     // Propagate mounted state through partitions, dm-crypt, LVM, and RAID.
@@ -282,7 +303,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
                     .any(|c| c.as_os_str().to_string_lossy().starts_with("usb"))
             });
         let model = read(node.sys.join("device/model"));
-        let mount = mounted.get(&node.dev);
+        let mount = mount_of(&mounted, node);
         let name = if !label.is_empty() {
             label.clone()
         } else if !model.is_empty() {
@@ -715,6 +736,12 @@ mod tests {
         let locked = rows.iter().find(|row| row.path.ends_with("sda2")).unwrap();
         assert!(locked.encrypted && !locked.unlocked && !locked.system);
         assert_eq!(locked.location, "Encrypted: unlock in Disks, then refresh");
+        // Btrfs reports an anonymous device number for its subvolume mounts.
+        f.write("mountinfo", "30 1 0:42 /@ / rw - btrfs /dev/sda1 rw\n");
+        let rows = f.discover().unwrap();
+        let root = rows.iter().find(|row| row.path.ends_with("sda1")).unwrap();
+        assert!(root.system && root.mounted);
+        assert_eq!(root.location, "Mounted at /");
     }
 
     #[test]

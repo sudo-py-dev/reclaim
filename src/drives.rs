@@ -94,17 +94,20 @@ pub fn nest(drives: Vec<Drive>) -> Vec<Drive> {
 }
 
 /// How many listed entries `drive` sits inside, for indenting the list.
+/// An entry caught in a parent cycle is shown at the top level, as [`nest`] places it.
 pub fn depth(drives: &[Drive], drive: &Drive) -> usize {
-    let mut depth = 0;
+    let mut seen = vec![&drive.path];
     let mut current = drive;
     while let Some(parent) = current.parent.as_ref()
-        && depth < drives.len()
         && let Some(next) = drives.iter().find(|d| &d.path == parent)
     {
-        depth += 1;
+        if seen.contains(&&next.path) {
+            return 0;
+        }
+        seen.push(&next.path);
         current = next;
     }
-    depth
+    seen.len().saturating_sub(1)
 }
 
 /// Whether saving into a folder could overwrite the scanned source's data.
@@ -344,6 +347,13 @@ mod nest_tests {
             entry("c", None),
         ]);
         assert_eq!(nested.len(), 3);
-        assert!(nested.iter().all(|d| depth(&nested, d) <= nested.len()));
+        assert!(nested.iter().all(|d| depth(&nested, d) == 0));
+        // An entry hanging off a cycle is still top level, not indented by the loop.
+        let tail = nest(vec![
+            entry("a", Some("b")),
+            entry("b", Some("a")),
+            entry("t", Some("a")),
+        ]);
+        assert!(tail.iter().all(|d| depth(&tail, d) == 0));
     }
 }
