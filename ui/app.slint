@@ -464,15 +464,18 @@ component StepBadge inherits Rectangle {
 component GroupTitle inherits Label { color: Palette.muted; font-size: 12px; font-weight: 600; }
 component IconTile inherits Rectangle {
     in property <image> icon;
-    width: 32px; height: 32px; border-radius: Metrics.radius; background: Palette.tint;
-    Image { source: root.icon; width: 18px; height: self.width; colorize: Palette.accent; }
+    // Full-colour artwork (the app icon) is shown as is, larger and untinted.
+    in property <bool> full-colour: false;
+    width: 32px; height: 32px; border-radius: Metrics.radius; background: root.full-colour ? transparent : Palette.tint;
+    Image { source: root.icon; width: root.full-colour ? 30px : 18px; height: self.width; colorize: root.full-colour ? transparent : Palette.accent; }
 }
 component SettingRow inherits Row {
     in property <image> icon;
     in property <string> title;
     in property <string> detail;
+    in property <bool> full-colour-icon: false;
     padding: 12px; padding-left: 16px; padding-right: 16px; spacing: 12px; min-height: 60px;
-    IconTile { icon: root.icon; }
+    IconTile { icon: root.icon; full-colour: root.full-colour-icon; }
     VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 2px; alignment: center;
         Label { text: root.title; color: Palette.ink; font-size: 13px; font-weight: 500; wrap: word-wrap; }
         if root.detail != "" : Label { text: root.detail; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
@@ -693,10 +696,7 @@ export component AppWindow inherits Window {
                 // Brand: icon and name kept together at the inline start; drags the window.
                 Rectangle { height: 36px;
                     Row { alignment: start; spacing: 8px;
-                        // The mark is the same line icon as Recover, so it belongs with the rest of the interface.
-                        Rectangle { width: 32px; height: 32px; border-radius: Metrics.radius; background: Palette.primary;
-                            Image { width: 20px; height: 20px; source: @image-url("icons/reclaim.svg"); colorize: white; }
-                        }
+                        Image { width: 32px; height: 32px; source: @image-url("../assets/icons/reclaim-64.png"); }
                         Label { text: Strings.reclaim; color: Palette.ink; font-size: 19px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 0; }
                     }
                     if root.custom-frame : WindowMoveArea { }
@@ -1011,7 +1011,7 @@ export component AppWindow inherits Window {
                 Rectangle { height: 8px; }
                 GroupTitle { text: Strings.about; }
                 Card { VerticalLayout {
-                    SettingRow { icon: @image-url("icons/reclaim.svg"); title: Strings.reclaim; detail: Strings.built-with-rust-and-slint; }
+                    SettingRow { icon: @image-url("../assets/icons/reclaim-64.png"); full-colour-icon: true; title: Strings.reclaim; detail: Strings.built-with-rust-and-slint; }
                     RowDivider { }
                     LinkRow { icon: @image-url("icons/github.svg"); title: Strings.source-code; detail: "github.com/sudo-py-dev/reclaim"; clicked => { root.open-link(AboutLink.source); } }
                     RowDivider { }
