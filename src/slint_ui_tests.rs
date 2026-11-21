@@ -1845,7 +1845,7 @@ fn update_flow_previews() {
             // A new version: the dialog on another page.
             reset();
             ui.set_update_available(true);
-            ui.set_update_title(title.clone().into());
+            ui.set_update_title(title.into());
             ui.set_update_label(i18n::t("Update and restart").into());
             ui.set_page(0);
             ui.set_update_notice(true);
