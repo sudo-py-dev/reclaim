@@ -199,6 +199,9 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             encrypted: false,
             sector_size: sector,
             phone: false,
+            unlocked: false,
+            parent: None,
+            system: false,
         });
     }
     // SAFETY: GetLogicalDrives has no pointer arguments.
@@ -288,6 +291,11 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             encrypted,
             sector_size,
             phone: false,
+            unlocked: false,
+            parent: None,
+            // The volume Windows runs from, such as C:.
+            system: std::env::var("SystemDrive")
+                .is_ok_and(|drive| drive.eq_ignore_ascii_case(&format!("{letter}:"))),
         });
     }
     if unknown_backing_disk {

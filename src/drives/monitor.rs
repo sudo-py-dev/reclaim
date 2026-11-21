@@ -91,6 +91,9 @@ mod tests {
             encrypted: false,
             sector_size: 512,
             phone: false,
+            unlocked: false,
+            parent: None,
+            system: false,
         }
     }
     #[test]

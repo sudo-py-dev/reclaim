@@ -24,6 +24,15 @@ pub struct Drive {
     /// A phone or camera connected for file transfer (MTP/PTP). It is listed
     /// so the user can see why it cannot be scanned; it is never opened.
     pub phone: bool,
+    /// An encrypted container that is open: its contents are listed under it as
+    /// their own entry, which is what can be scanned. The container stays ciphertext.
+    pub unlocked: bool,
+    /// The listed entry this one was opened from or sits in (dm-crypt, LVM, RAID),
+    /// so the list can nest it there. `None` for top-level entries.
+    pub parent: Option<PathBuf>,
+    /// The running operating system's volume. Scanning it while in use can
+    /// overwrite the very files the user wants back.
+    pub system: bool,
 }
 
 impl Drive {
@@ -38,6 +47,67 @@ impl Drive {
             self.name.clone()
         }
     }
+}
+
+/// Orders `drives` so each entry follows the one it sits in, depth first,
+/// keeping the original order among siblings. A parent that is not listed, or a
+/// cycle, leaves the entry at the top level.
+pub fn nest(drives: Vec<Drive>) -> Vec<Drive> {
+    fn place(index: usize, parents: &[Option<usize>], placed: &mut [bool], order: &mut Vec<usize>) {
+        if placed.get(index).copied().unwrap_or(true) {
+            return;
+        }
+        if let Some(slot) = placed.get_mut(index) {
+            *slot = true;
+        }
+        order.push(index);
+        for (child, parent) in parents.iter().enumerate() {
+            if *parent == Some(index) {
+                place(child, parents, placed, order);
+            }
+        }
+    }
+    let paths: Vec<PathBuf> = drives.iter().map(|d| d.path.clone()).collect();
+    let parent_of = |drive: &Drive| {
+        drive
+            .parent
+            .as_ref()
+            .and_then(|parent| paths.iter().position(|p| p == parent))
+    };
+    let parents: Vec<Option<usize>> = drives.iter().map(parent_of).collect();
+    let mut order = Vec::with_capacity(drives.len());
+    let mut placed = vec![false; drives.len()];
+    for index in 0..drives.len() {
+        if parents.get(index).copied().flatten().is_none() {
+            place(index, &parents, &mut placed, &mut order);
+        }
+    }
+    // Whatever is left sits in a cycle; it is shown at the top level, never dropped.
+    for index in 0..drives.len() {
+        place(index, &parents, &mut placed, &mut order);
+    }
+    let mut slots: Vec<Option<Drive>> = drives.into_iter().map(Some).collect();
+    order
+        .into_iter()
+        .filter_map(|index| slots.get_mut(index).and_then(Option::take))
+        .collect()
+}
+
+/// How many listed entries `drive` sits inside, for indenting the list.
+/// An entry caught in a parent cycle is shown at the top level, as [`nest`] places it.
+pub fn depth(drives: &[Drive], drive: &Drive) -> usize {
+    let mut seen = vec![&drive.path];
+    let mut current = drive;
+    while let Some(parent) = current.parent.as_ref()
+        && let Some(next) = drives.iter().find(|d| &d.path == parent)
+    {
+        if seen.contains(&&next.path) {
+            return 0;
+        }
+        seen.push(&next.path);
+        current = next;
+    }
+    seen.len().saturating_sub(1)
 }
 
 /// Whether saving into a folder could overwrite the scanned source's data.
@@ -225,5 +295,65 @@ mod tests {
             object_path(Path::new("/dev/nvme0n1p1")).unwrap(),
             "/org/freedesktop/UDisks2/block_devices/nvme0n1p1"
         );
+    }
+}
+
+#[cfg(test)]
+mod nest_tests {
+    use super::*;
+
+    fn entry(path: &str, parent: Option<&str>) -> Drive {
+        Drive {
+            path: path.into(),
+            name: path.into(),
+            name_is_message: false,
+            size: 1,
+            kind: "Volume".into(),
+            location: "Not mounted".into(),
+            mounted: false,
+            encrypted: false,
+            sector_size: 512,
+            phone: false,
+            unlocked: false,
+            parent: parent.map(Into::into),
+            system: false,
+        }
+    }
+
+    fn paths(drives: &[Drive]) -> Vec<&str> {
+        drives.iter().map(|d| d.path.to_str().unwrap()).collect()
+    }
+
+    #[test]
+    fn layered_volumes_follow_what_they_were_opened_from() {
+        let nested = nest(vec![
+            entry("p1", None),
+            entry("dm-1", Some("dm-0")),
+            entry("dm-0", Some("p3")),
+            entry("p2", None),
+            entry("p3", None),
+            entry("orphan", Some("gone")),
+        ]);
+        assert_eq!(paths(&nested), ["p1", "p2", "p3", "dm-0", "dm-1", "orphan"]);
+        let depths: Vec<_> = nested.iter().map(|d| depth(&nested, d)).collect();
+        assert_eq!(depths, [0, 0, 0, 1, 2, 0]);
+    }
+
+    #[test]
+    fn a_parent_cycle_keeps_every_entry_and_terminates() {
+        let nested = nest(vec![
+            entry("a", Some("b")),
+            entry("b", Some("a")),
+            entry("c", None),
+        ]);
+        assert_eq!(nested.len(), 3);
+        assert!(nested.iter().all(|d| depth(&nested, d) == 0));
+        // An entry hanging off a cycle is still top level, not indented by the loop.
+        let tail = nest(vec![
+            entry("a", Some("b")),
+            entry("b", Some("a")),
+            entry("t", Some("a")),
+        ]);
+        assert!(tail.iter().all(|d| depth(&tail, d) == 0));
     }
 }

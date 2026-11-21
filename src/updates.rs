@@ -202,10 +202,12 @@ impl Updates {
                                 .as_ref()
                                 .is_some_and(|r| self.dismissed.as_ref() != Some(&r.version));
                             // The available version is presented separately from operation feedback.
+                            // Say when it was checked, not that it is the newest:
+                            // the answer is only as fresh as the check.
                             self.status = if release.is_some() {
                                 String::new()
                             } else {
-                                "You’re up to date.".into()
+                                last_checked(&jiff::Zoned::now())
                             };
                             self.notes =
                                 release.as_ref().map_or_default(|r| format_notes(&r.notes));
@@ -261,6 +263,15 @@ pub struct NoteBlock {
     pub text: String,
     // 0 = paragraph, 1 = heading, 2 = list item, 3 = code.
     pub kind: i32,
+}
+
+/// "Last checked: 2026-11-21 14:05" in local time. The stamp is isolated so a
+/// right-to-left translation cannot reorder its digits and dashes.
+fn last_checked(now: &jiff::Zoned) -> String {
+    format!(
+        "Last checked: {}",
+        reclaim::i18n::ltr(&now.strftime("%Y-%m-%d %H:%M").to_string())
+    )
 }
 
 fn format_notes(notes: &str) -> Vec<NoteBlock> {
@@ -355,6 +366,28 @@ fn format_notes(notes: &str) -> Vec<NoteBlock> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn up_to_date_checks_report_when_they_ran() {
+        use reclaim::i18n::Language;
+        let now: jiff::Zoned = "2026-11-21T14:05:09[UTC]".parse().unwrap();
+        let status = last_checked(&now);
+        assert!(status.contains("2026-11-21 14:05"));
+        for language in [
+            Language::English,
+            Language::Hebrew,
+            Language::Arabic,
+            Language::German,
+        ] {
+            reclaim::i18n::with_language(language, || {
+                let shown = reclaim::i18n::t(&status);
+                assert!(shown.contains("2026-11-21 14:05"), "{language:?}: {shown}");
+                if language != Language::English {
+                    assert_ne!(shown, status, "{language:?} is untranslated");
+                }
+            });
+        }
+    }
+
     use super::*;
     fn release(version: &str) -> Release {
         Release {

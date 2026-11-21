@@ -38,29 +38,11 @@ Names include locale, window width, page number, and theme, for example
 `he-900-1-light.png`. Live desktop input-method behavior still needs platform
 validation; translation wording benefits from native-speaker review.
 
-## Generate catalogs
+## Add a language
 
 The language list in `languages.txt` includes 20 targets counting English.
 A locale appears in Settings and is recognized by System after its JSON catalog
-is added and the app is rebuilt. The translation command fills missing entries,
-keeps valid existing translations, and writes the catalog once every English
-message has a translation.
-
-Run with `curl` on your PATH. The generator uses MyMemory's free public
-translation endpoint without an API key. Anonymous use is limited to 5,000
-characters per day, with a maximum of 500 UTF-8 bytes per request. Generating
-all 13 new catalogs will take multiple quota resets. [API specification](https://mymemory.translated.net/doc/spec.php) · [Usage limits](https://mymemory.translated.net/doc/usagelimits.php)
-
-```sh
-cargo xtask translate --list
-cargo xtask translate it pt
-cargo xtask translate
-```
-
-The last command processes all configured non-English locales. Each translated
-message is saved to the ignored `.translation-progress` directory. Transient
-HTTP failures use bounded retries with `Retry-After` support. If MyMemory
-reports that the daily quota is exhausted, rerun after the reset to resume.
-Review the generated wording, especially recovery warnings, before
-committing the catalogs. Run `cargo test --locked --lib i18n` to check message
+is added and the app is rebuilt. A catalog must translate every English message
+and keep its placeholders. Review the wording, especially recovery warnings,
+before committing it. Run `cargo test --locked --lib i18n` to check message
 coverage and placeholders.

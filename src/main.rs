@@ -76,6 +76,8 @@ struct Reclaim {
     scanned: u64,
     total: u64,
     source_size: Option<u64>,
+    /// A disk image chosen with "Open disk image", and its size, listed as a source row.
+    opened_image: Option<(PathBuf, u64)>,
     busy: bool,
     scan_stopped: bool,
     scan_error: Option<String>,
@@ -164,6 +166,7 @@ impl Default for Reclaim {
             scanned: 0,
             total: 0,
             source_size: None,
+            opened_image: None,
             busy: false,
             scan_stopped: false,
             scan_error: None,
@@ -186,6 +189,9 @@ impl Default for Reclaim {
     }
 }
 /// Shown until the user picks a source; the results page hides it as noise.
+/// Shown on the running system's volume, where scanning competes with the system's own writes.
+const SYSTEM_VOLUME_WARNING: &str =
+    "In use by the running system. Writes during a scan can overwrite the files you want back.";
 const FIRST_RUN_STATUS: &str = "Choose a drive or disk image to get started.";
 impl Reclaim {
     fn stop_operation(&mut self) {
@@ -566,7 +572,8 @@ impl Reclaim {
                 if was_drive && !drives.iter().any(|d| Some(&d.path) == self.source.as_ref()) {
                     self.source = None;
                 }
-                self.drives = drives;
+                // Every platform's list is nested here, so layered volumes follow their parent.
+                self.drives = drives::nest(drives);
                 self.drives_error = None;
             }
             Err(e) => self.drives_error = Some(e),
@@ -707,6 +714,8 @@ impl Reclaim {
             .set_title(i18n::t("Choose a raw disk image"))
             .pick_file()
         {
+            let size = path.metadata().map_or(0, |m| m.len());
+            self.opened_image = Some((path.clone(), size));
             self.source = Some(path);
             self.needs_administrator = false;
             self.scan_error = None;
@@ -781,7 +790,7 @@ impl Reclaim {
                 .as_ref()
                 .map_or_else(
                     || i18n::t("No source selected"),
-                    |p| i18n::isolate(&p.display().to_string()),
+                    |p| i18n::ltr(&p.display().to_string()),
                 )
                 .into(),
         );
@@ -797,11 +806,13 @@ impl Reclaim {
         ui.set_destination_same_drive(matches!(review, Some((_, drives::Destination::SameDrive))));
         ui.set_destination_path(
             review
-                .map_or_default(|(folder, _)| i18n::isolate(&folder.display().to_string()))
+                .map_or_default(|(folder, _)| i18n::ltr(&folder.display().to_string()))
                 .into(),
         );
         ui.set_all_selected(visible > 0 && selected == visible);
         ui.set_has_results(!self.results.is_empty());
+        ui.set_has_source(self.source.is_some());
+        ui.set_scanned(self.scanned_source.is_some());
         ui.set_show_status(
             self.busy
                 || self.scan_error.is_some()
@@ -857,10 +868,17 @@ impl Reclaim {
             self.drives
                 .iter()
                 .position(|d| Some(&d.path) == self.source.as_ref())
+                // An opened disk image is the row after the drives.
+                .or_else(|| {
+                    self.opened_image
+                        .as_ref()
+                        .filter(|(image, _)| self.source.as_ref() == Some(image))
+                        .map(|_| self.drives.len())
+                })
                 .and_then(|n| i32::try_from(n).ok())
                 .unwrap_or(-1),
         );
-        let drives: Vec<_> = self
+        let mut drives: Vec<_> = self
             .drives
             .iter()
             .map(|d| DriveItem {
@@ -878,9 +896,9 @@ impl Reclaim {
                     i18n::t(&d.kind),
                     d.location.strip_prefix("Mounted at ").map_or_else(
                         || i18n::t(&d.location),
-                        |path| i18n::message("Mounted at {0}", &[path])
+                        |path| i18n::message("Mounted at {0}", &[&i18n::ltr(path)])
                     ),
-                    if d.encrypted {
+                    if d.encrypted && !d.unlocked {
                         format!(" · {}", i18n::t("Locked"))
                     } else {
                         String::new()
@@ -894,8 +912,43 @@ impl Reclaim {
                 }
                 .into(),
                 available: d.scannable(),
+                depth: i32::try_from(drives::depth(&self.drives, d)).unwrap_or(0),
+                warning: if d.system {
+                    i18n::t(SYSTEM_VOLUME_WARNING)
+                } else {
+                    String::new()
+                }
+                .into(),
             })
             .collect();
+        // A disk image the user opened is listed after the drives, already selected.
+        if let Some((image, size)) = self
+            .opened_image
+            .as_ref()
+            .filter(|(image, _)| self.source.as_ref() == Some(image))
+        {
+            drives.push(DriveItem {
+                name: i18n::isolate(&image.file_name().map_or_else(
+                    || image.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                ))
+                .into(),
+                device: String::new().into(),
+                icon: DriveIcon::Image,
+                detail: format!(
+                    "{} · {}",
+                    i18n::t("Disk image"),
+                    i18n::ltr(&image.display().to_string())
+                )
+                .into(),
+                size: format_bytes(*size).into(),
+                available: true,
+                depth: 0,
+                warning: String::new().into(),
+            });
+        }
+        let warnings = drives.iter().filter(|d| !d.warning.is_empty()).count();
+        ui.set_drive_warnings(i32::try_from(warnings).unwrap_or(0));
         replace_model(&ui.get_drives(), drives, |m| ui.set_drives(m));
         ui.set_phone_connected(self.drives.iter().any(|d| d.phone));
     }
@@ -938,6 +991,8 @@ fn about_link_url(link: AboutLink) -> &'static str {
 fn drive_icon(drive: &drives::Drive) -> DriveIcon {
     if drive.phone {
         DriveIcon::Phone
+    } else if drive.unlocked {
+        DriveIcon::Unlocked
     } else if drive.encrypted {
         DriveIcon::Locked
     } else if drive.kind == "USB drive" {

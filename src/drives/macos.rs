@@ -330,6 +330,8 @@ pub fn discover() -> Result<Vec<Drive>, String> {
         }
         let in_use = mount.is_some() || boolean(property(entry.0, "Open").0);
         topology.push((registry_id(entry.0), ancestors(entry.0)));
+        // The volume macOS runs from; read before `mount` moves into the location.
+        let system = mount.as_deref() == Some("/");
         rows.push(Drive {
             path: path.into(),
             name,
@@ -349,6 +351,9 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             encrypted: locked,
             sector_size: 1,
             phone: false,
+            unlocked: false,
+            parent: None,
+            system,
         });
     }
     let active_parents: HashSet<_> = rows

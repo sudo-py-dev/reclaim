@@ -219,6 +219,14 @@ pub fn isolate(text: &str) -> String {
         .collect();
     format!("\u{2068}{safe}\u{2069}")
 }
+/// Isolate text that is always left-to-right (a path, a device or format name),
+/// like `<bdi dir="ltr">`: the marks inside the isolate fix its direction even
+/// when it holds no Latin letter or the renderer ignores isolates, so `/boot/efi`
+/// never shows as `boot/efi/` inside a right-to-left sentence. The marks survive
+/// [`isolate`] and [`message`], so the result can be passed as a message value.
+pub fn ltr(text: &str) -> String {
+    isolate(&format!("\u{200e}{text}\u{200e}"))
+}
 /// Format a translated message with numbered, directionally isolated data values.
 /// Values are never recursively translated or interpreted as formatting syntax.
 pub fn message(key: &str, values: &[&str]) -> String {
@@ -462,6 +470,23 @@ mod tests {
             isolate("photo\u{202e}.exe\u{2069}"),
             "\u{2068}photo.exe\u{2069}"
         );
+    }
+
+    #[test]
+    fn left_to_right_values_keep_their_direction_inside_messages() {
+        assert_eq!(
+            ltr("/boot/efi"),
+            "\u{2068}\u{200e}/boot/efi\u{200e}\u{2069}"
+        );
+        // A path of neutral characters alone still reads left to right.
+        assert_eq!(ltr("/"), "\u{2068}\u{200e}/\u{200e}\u{2069}");
+        // Embedded controls cannot end the isolate early.
+        assert_eq!(ltr("a\u{2069}b"), "\u{2068}\u{200e}ab\u{200e}\u{2069}");
+        with_language(Language::Hebrew, || {
+            let value = message("Mounted at {0}", &[&ltr("/boot/efi")]);
+            assert!(value.contains("\u{2068}\u{200e}/boot/efi\u{200e}\u{2069}"));
+            assert_eq!(value.matches('\u{2068}').count(), 1);
+        });
     }
 
     #[test]

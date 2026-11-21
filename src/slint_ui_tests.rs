@@ -13,6 +13,9 @@ fn phone() -> drives::Drive {
         encrypted: false,
         sector_size: 512,
         phone: true,
+        unlocked: false,
+        parent: None,
+        system: false,
     }
 }
 
@@ -62,6 +65,9 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
         encrypted: false,
         sector_size: 512,
         phone: false,
+        unlocked: false,
+        parent: None,
+        system: false,
     });
     // Other kinds render their own icon and device tag in the previews.
     for (path, name, name_is_message, kind, location, encrypted) in [
@@ -101,6 +107,9 @@ fn slint_workspace_renders_all_pages_and_filters_recovery_selection() {
             encrypted,
             sector_size: 512,
             phone: false,
+            unlocked: false,
+            parent: None,
+            system: false,
         });
     }
     state.drives.push(phone());
@@ -329,6 +338,7 @@ fn recovery_scrollbar_keeps_controls_clear_and_reaches_the_last_file() {
     .unwrap();
     let ui = AppWindow::new().unwrap();
     ui.set_page(1);
+    ui.set_has_results(true);
     ui.set_files(ModelRc::new(VecModel::from(
         (0..200)
             .map(|index| FileItem {
@@ -1283,6 +1293,18 @@ fn destination_review_offers_a_safe_choice_and_never_accepts_the_source_drive() 
                     ("unknown", drives::Destination::Unknown),
                 ] {
                     let mut state = Reclaim::default();
+                    // Recovery is only offered once a scan has found files.
+                    state.results = vec![Found {
+                        offset: 4096,
+                        size: 2048,
+                        kind: "png",
+                        selected: true,
+                        original_name: None,
+                        resident_data: None,
+                        ntfs: None,
+                        extents: None,
+                        validation: reclaim::Validation::StructureChecked,
+                    }];
                     state.destination_review = Some((folder.clone(), destination));
                     state.sync_ui(&ui);
                     let snapshot = ui.window().take_snapshot().unwrap();
@@ -1586,4 +1608,103 @@ fn about_card_previews() {
             }
         });
     }
+}
+
+#[test]
+fn nested_sources_show_one_unlocked_chain_with_a_system_warning() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    let volume = |path: &str, location: &str, parent: Option<&str>| drives::Drive {
+        path: path.into(),
+        name: "Volume".into(),
+        name_is_message: true,
+        size: 230 << 30,
+        kind: "Volume".into(),
+        location: location.into(),
+        mounted: true,
+        encrypted: false,
+        sector_size: 512,
+        phone: false,
+        unlocked: false,
+        parent: parent.map(Into::into),
+        system: false,
+    };
+    let mut state = Reclaim::default();
+    state.drives = drives::nest(vec![
+        volume("/dev/nvme0n1p1", "Mounted at /boot/efi", None),
+        volume("/dev/dm-1", "Mounted at /", Some("/dev/dm-0")),
+        volume(
+            "/dev/dm-0",
+            "Contains mounted volumes",
+            Some("/dev/nvme0n1p3"),
+        ),
+        drives::Drive {
+            encrypted: true,
+            unlocked: true,
+            ..volume(
+                "/dev/nvme0n1p3",
+                "Encrypted and unlocked: choose the volume inside",
+                None,
+            )
+        },
+    ]);
+    state.drives[3].system = true;
+    i18n::with_language(i18n::Language::Hebrew, || {
+        ui_text::apply(&ui);
+        state.sync_ui(&ui);
+        let rows: Vec<DriveItem> = ui.get_drives().iter().collect();
+        assert_eq!(
+            rows.iter().map(|r| r.device.as_str()).collect::<Vec<_>>(),
+            ["nvme0n1p1", "nvme0n1p3", "dm-0", "dm-1"]
+        );
+        assert_eq!(
+            rows.iter().map(|r| r.depth).collect::<Vec<_>>(),
+            [0, 0, 1, 2]
+        );
+        // The open container is not called locked, and it cannot be scanned itself.
+        assert_eq!(rows[1].icon, DriveIcon::Unlocked);
+        assert!(!rows[1].available);
+        assert!(!rows[1].detail.contains(&i18n::t("Locked")));
+        // Only the running system's volume carries the warning.
+        assert_eq!(ui.get_drive_warnings(), 1);
+        assert!(!rows[3].warning.is_empty() && rows[..3].iter().all(|r| r.warning.is_empty()));
+        // Paths are explicit left-to-right runs inside the Hebrew sentence.
+        assert!(rows[0].detail.contains("\u{200e}/boot/efi\u{200e}"));
+        assert!(!ui.get_has_source());
+        assert!(!ui.get_can_scan());
+    });
+}
+
+#[test]
+fn an_opened_disk_image_is_listed_selected_with_its_own_icon() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    let mut state = Reclaim::default();
+    state.drives.push(phone());
+    let image = PathBuf::from("/images/card.img");
+    state.opened_image = Some((image.clone(), 64 << 20));
+    state.source = Some(image);
+    state.sync_ui(&ui);
+    let rows: Vec<DriveItem> = ui.get_drives().iter().collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].icon, DriveIcon::Image);
+    assert_eq!(rows[1].size, "64.0 MiB");
+    assert_eq!(ui.get_selected_drive(), 1);
+    assert!(ui.get_has_source());
+    // Choosing a listed drive instead removes the image row.
+    state.source = Some("/dev/sdz".into());
+    state.sync_ui(&ui);
+    assert_eq!(ui.get_drives().row_count(), 1);
 }

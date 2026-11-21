@@ -89,6 +89,9 @@ fn phones_at(usb: &Path) -> Vec<Drive> {
             encrypted: false,
             sector_size: 512,
             phone: true,
+            unlocked: false,
+            parent: None,
+            system: false,
         });
     }
     phones
@@ -144,6 +147,14 @@ fn octal_byte(digits: [u8; 3]) -> Option<u8> {
     u8::from_str_radix(std::str::from_utf8(&digits).ok()?, 8).ok()
 }
 
+/// Where `node` is mounted: by device number, or by name for filesystems that
+/// report an anonymous device number (see `discover_at`).
+fn mount_of<'a>(mounted: &'a HashMap<String, String>, node: &Node) -> Option<&'a String> {
+    mounted
+        .get(&node.dev)
+        .or_else(|| mounted.get(&format!("name:{}", node.name)))
+}
+
 struct Node {
     name: String,
     sys: PathBuf,
@@ -159,11 +170,24 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
     for line in mount_text.lines() {
         let fields: Vec<_> = line.split_whitespace().collect();
         if let [_, _, device, _, point, _, _, ..] = fields.as_slice()
-            && fields.contains(&"-")
+            && let Some(separator) = fields.iter().position(|field| *field == "-")
         {
             let point = unescape(point, true);
+            // Btrfs and other multi-device filesystems report an anonymous device
+            // number (major 0), so match them by their source device's name instead.
+            let key = match fields.get(separator.saturating_add(2)) {
+                Some(source) if device.starts_with("0:") && source.starts_with("/dev/") => {
+                    let source = Path::new(source);
+                    let real = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+                    match real.file_name() {
+                        Some(name) => format!("name:{}", name.to_string_lossy()),
+                        None => (*device).into(),
+                    }
+                }
+                _ => (*device).into(),
+            };
             mounted
-                .entry((*device).into())
+                .entry(key)
                 .and_modify(|old| {
                     if point == "/" {
                         old.clone_from(&point);
@@ -211,7 +235,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
     nodes.sort_by(|a, b| a.name.cmp(&b.name));
     let mut active: HashSet<_> = nodes
         .iter()
-        .filter(|n| mounted.contains_key(&n.dev))
+        .filter(|n| mount_of(&mounted, n).is_some())
         .map(|n| n.name.clone())
         .collect();
     // Propagate mounted state through partitions, dm-crypt, LVM, and RAID.
@@ -228,6 +252,12 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             break;
         }
     }
+    // Encrypted containers that have an open dm-crypt mapping on top of them.
+    let open_containers: HashSet<&str> = nodes
+        .iter()
+        .filter(|node| read(node.sys.join("dm/uuid")).starts_with("CRYPT-"))
+        .flat_map(|node| node.parents.iter().map(String::as_str))
+        .collect();
     let mut labels = HashMap::new();
     if let Ok(entries) = fs::read_dir(dev.join("disk/by-label")) {
         for entry in entries.flatten() {
@@ -265,13 +295,15 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
         let dm_uuid = read(node.sys.join("dm/uuid"));
         let unlocked = dm_uuid.starts_with("CRYPT-");
         let encrypted = get("ID_FS_TYPE") == "crypto_LUKS";
+        // An encrypted container is open when a dm-crypt mapping sits on top of it.
+        let opened = encrypted && open_containers.contains(node.name.as_str());
         let usb = get("ID_BUS") == "usb"
             || fs::canonicalize(&node.sys).is_ok_and(|p| {
                 p.components()
                     .any(|c| c.as_os_str().to_string_lossy().starts_with("usb"))
             });
         let model = read(node.sys.join("device/model"));
-        let mount = mounted.get(&node.dev);
+        let mount = mount_of(&mounted, node);
         let name = if !label.is_empty() {
             label.clone()
         } else if !model.is_empty() {
@@ -320,7 +352,9 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
                 "Volume"
             }
             .into(),
-            location: if encrypted {
+            location: if opened {
+                "Encrypted and unlocked: choose the volume inside".into()
+            } else if encrypted {
                 "Encrypted: unlock in Disks, then refresh".into()
             } else if let Some(m) = mount {
                 format!("Mounted at {m}")
@@ -333,6 +367,13 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             encrypted,
             sector_size,
             phone: false,
+            unlocked: opened,
+            // Device-mapper layers (dm-crypt, LVM) nest under what they were opened from.
+            parent: (!node.partition)
+                .then(|| node.parents.first())
+                .flatten()
+                .map(|parent| dev.join(parent)),
+            system: mount.is_some_and(|m| m == "/"),
         });
     }
     // Prefer named volumes over their parent disk. The volume retains its
@@ -636,7 +677,7 @@ mod tests {
         )
         .unwrap();
         f.write("udev/b259:1", "E:ID_FS_TYPE=crypto_LUKS\n");
-        let rows = f.discover().unwrap();
+        let rows = super::super::nest(f.discover().unwrap());
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.mounted));
         assert!(!rows.iter().any(|row| row.path.ends_with("nvme0n1")));
@@ -645,6 +686,12 @@ mod tests {
             .find(|row| row.path.ends_with("nvme0n1p1"))
             .unwrap();
         assert!(partition.encrypted);
+        // Its dm-crypt mapping is open, so it is not reported as locked.
+        assert!(partition.unlocked);
+        assert_eq!(
+            partition.location,
+            "Encrypted and unlocked: choose the volume inside"
+        );
         assert_eq!(partition.size, 9000 * 512); // sysfs units, not 4096-byte sectors
         assert_eq!(partition.sector_size, 4096);
         let unlocked = rows.iter().find(|row| row.path.ends_with("dm-0")).unwrap();
@@ -652,6 +699,49 @@ mod tests {
         assert!(!unlocked.encrypted);
         assert_eq!(unlocked.kind, "Unlocked volume");
         assert_eq!(unlocked.location, "Mounted at /media/My Photos");
+        // The opened volume is listed right under the container it came from.
+        assert_eq!(unlocked.parent.as_ref(), Some(&partition.path));
+        assert!(partition.parent.is_none());
+        assert!(rows[0].path.ends_with("nvme0n1p1") && rows[1].path.ends_with("dm-0"));
+        assert!(!rows.iter().any(|row| row.system));
+    }
+
+    #[test]
+    fn the_running_system_volume_is_flagged_and_locked_containers_stay_locked() {
+        let f = Fixture::new();
+        f.disk("sda", "8:0", "4000");
+        f.write("devices/sda/sda1/size", "2000");
+        f.write("devices/sda/sda1/dev", "8:1");
+        f.write("devices/sda/sda1/partition", "1");
+        symlink(
+            f.0.path().join("devices/sda/sda1"),
+            f.0.path().join("sys/sda1"),
+        )
+        .unwrap();
+        f.write("dev/sda1", "");
+        f.write("devices/sda/sda2/size", "1000");
+        f.write("devices/sda/sda2/dev", "8:2");
+        f.write("devices/sda/sda2/partition", "1");
+        symlink(
+            f.0.path().join("devices/sda/sda2"),
+            f.0.path().join("sys/sda2"),
+        )
+        .unwrap();
+        f.write("dev/sda2", "");
+        f.write("udev/b8:2", "E:ID_FS_TYPE=crypto_LUKS\n");
+        f.write("mountinfo", "30 1 8:1 / / rw - ext4 /dev/sda1 rw\n");
+        let rows = f.discover().unwrap();
+        let root = rows.iter().find(|row| row.path.ends_with("sda1")).unwrap();
+        assert!(root.system);
+        let locked = rows.iter().find(|row| row.path.ends_with("sda2")).unwrap();
+        assert!(locked.encrypted && !locked.unlocked && !locked.system);
+        assert_eq!(locked.location, "Encrypted: unlock in Disks, then refresh");
+        // Btrfs reports an anonymous device number for its subvolume mounts.
+        f.write("mountinfo", "30 1 0:42 /@ / rw - btrfs /dev/sda1 rw\n");
+        let rows = f.discover().unwrap();
+        let root = rows.iter().find(|row| row.path.ends_with("sda1")).unwrap();
+        assert!(root.system && root.mounted);
+        assert_eq!(root.location, "Mounted at /");
     }
 
     #[test]
