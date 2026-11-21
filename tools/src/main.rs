@@ -2,7 +2,6 @@
 mod fixtures;
 mod package;
 mod seeds;
-mod translate;
 
 use sha2::{Digest, Sha256};
 use std::{
@@ -130,10 +129,9 @@ fn main() -> Result {
         Some("bundle") if args.len() == 4 => bundle(Path::new(&args[1]), Path::new(&args[2]), &args[3]),
         Some("checksums") if args.len() == 2 => checksums(Path::new(&args[1])),
         Some("package") => package::main(&args[1..]),
-        Some("translate") => translate::run(&root().join("locales"), &args[1..]),
         Some("fixtures") if args.len() <= 2 => fixtures::generate(&args.get(1).map(PathBuf::from).unwrap_or_else(|| root().join("tests/fixtures/formats"))),
         Some("seed-corpus") if args.len() <= 2 => seeds::generate(&args.get(1).map(PathBuf::from).unwrap_or_else(root)),
-        _ => Err("Usage: cargo xtask <validate-tag REF | bundle BINARY OUTPUT ASSET | checksums DIR | package PLATFORM --binary PATH [--output DIR] [--arch x86_64|aarch64] | fixtures [DIR] | seed-corpus [REPO] | translate [LOCALE ...]>".into()),
+        _ => Err("Usage: cargo xtask <validate-tag REF | bundle BINARY OUTPUT ASSET | checksums DIR | package PLATFORM --binary PATH [--output DIR] [--arch x86_64|aarch64] | fixtures [DIR] | seed-corpus [REPO]>".into()),
     }
 }
 
