@@ -237,5 +237,7 @@
   "No files were found. Try another source.": "Es wurden keine Dateien gefunden. Versuchen Sie eine andere Quelle.",
   "Encrypted and unlocked: choose the volume inside": "Verschlüsselt und entsperrt: Wählen Sie das Volume darin",
   "In use by the running system. Writes during a scan can overwrite the files you want back.": "Wird vom laufenden System verwendet. Schreibvorgänge während der Suche können die Dateien überschreiben, die Sie zurückhaben möchten.",
-  "Disk image": "Datenträgerabbild"
+  "Disk image": "Datenträgerabbild",
+  "The installer is open. Follow its steps to finish.": "Das Installationsprogramm ist geöffnet. Folgen Sie seinen Schritten zum Abschluss.",
+  "Finish the scan or recovery first, then update.": "Schließen Sie zuerst den Scan oder die Wiederherstellung ab und aktualisieren Sie dann."
 }

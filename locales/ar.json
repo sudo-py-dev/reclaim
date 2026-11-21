@@ -237,5 +237,7 @@
   "No files were found. Try another source.": "لم يُعثر على أي ملفات. جرّب مصدرًا آخر.",
   "Encrypted and unlocked: choose the volume inside": "مشفّر ومفتوح القفل: اختر وحدة التخزين التي بداخله",
   "In use by the running system. Writes during a scan can overwrite the files you want back.": "قيد الاستخدام من النظام الحالي. قد تؤدي الكتابة أثناء الفحص إلى استبدال الملفات التي تريد استعادتها.",
-  "Disk image": "صورة قرص"
+  "Disk image": "صورة قرص",
+  "The installer is open. Follow its steps to finish.": "المثبت مفتوح. اتبع خطواته لإكمال التحديث.",
+  "Finish the scan or recovery first, then update.": "أنهِ الفحص أو الاستعادة أولًا، ثم حدّث."
 }

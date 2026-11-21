@@ -25,6 +25,8 @@ pub struct Updates {
     checked: bool,
     manual_check: bool,
     installing: bool,
+    // The worker only launches an already verified installer; it does not finish the update.
+    opening_installer: bool,
     dismissed: Option<semver::Version>,
     dismissal_path: Option<PathBuf>,
     pub notice_visible: bool,
@@ -139,6 +141,8 @@ impl Updates {
         let (tx, rx) = mpsc::channel();
         if let Some(path) = self.downloaded.clone() {
             self.installing = true;
+            self.opening_installer = true;
+            self.progress = 0.0;
             self.notice_visible = false;
             self.receiver = Some(rx);
             std::thread::spawn(move || {
@@ -185,6 +189,7 @@ impl Updates {
                         self.status = "Update worker stopped. Try again.".into();
                     }
                     self.installing = false;
+                    self.opening_installer = false;
                     break;
                 }
             };
@@ -235,10 +240,17 @@ impl Updates {
                 Message::Finished(result) => {
                     self.receiver = None;
                     self.installing = false;
+                    let opened_installer = std::mem::take(&mut self.opening_installer);
                     match result {
                         Ok(Some(path)) => {
                             self.downloaded = Some(path);
                             self.status = "Update verified. Open the installer to finish.".into();
+                        }
+                        // The installer now runs on its own; keep the release so the user
+                        // can reopen it if they closed it before finishing.
+                        Ok(None) if opened_installer => {
+                            self.status =
+                                "The installer is open. Follow its steps to finish.".into();
                         }
                         Ok(None) => {
                             self.restart = crate::update_runtime::supported();
@@ -449,6 +461,27 @@ mod tests {
         updates.manual_check = true;
         checked(&mut updates, Err(anyhow::anyhow!("offline")));
         assert_ne!(updates.status, "");
+    }
+    #[test]
+    fn opening_the_installer_is_not_reported_as_a_finished_update() {
+        let mut updates = Updates::default();
+        checked(&mut updates, Ok(Some(release("2.0.0"))));
+        updates.downloaded = Some(PathBuf::from("reclaim-2.0.0.pkg"));
+        updates.opening_installer = true;
+        updates.installing = true;
+        let (tx, rx) = mpsc::channel();
+        updates.receiver = Some(rx);
+        tx.send(Message::Finished(Ok(None))).unwrap();
+        updates.poll();
+        assert!(!updates.installing());
+        assert!(!updates.restart);
+        assert_eq!(
+            updates.status,
+            "The installer is open. Follow its steps to finish."
+        );
+        assert!(updates.available(), "the installer can be opened again");
+        assert_eq!(updates.label(), "Open installer");
+        assert!(updates.title().contains("2.0.0"));
     }
     #[test]
     fn release_notes_render_markdown_with_bounds() {

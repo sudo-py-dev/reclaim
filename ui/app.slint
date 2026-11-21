@@ -68,6 +68,7 @@ export global Strings {
     in-out property <string> later: "Later";
     in-out property <string> hide-details: "Hide details";
     in-out property <string> update-when-ready: "You can keep working and update later.";
+    in-out property <string> update-after-work: "Finish the scan or recovery first, then update.";
     in-out property <string> no-release-notes: "No release notes.";
     in-out property <string> source-code: "Source code";
     in-out property <string> report-a-problem: "Report a problem";
@@ -675,6 +676,8 @@ export component AppWindow inherits Window {
     in property <bool> update-available;
     in property <string> update-label;
     in property <float> update-progress;
+    // An update restarts the app, so it waits for a scan or recovery to finish.
+    private property <bool> update-blocked: root.update-available && !root.update-installing && (root.busy || root.recovering);
     in-out property <int> language;
     in property <[string]> language-names: [Strings.system-language];
     callback change-language(int);
@@ -957,7 +960,7 @@ export component AppWindow inherits Window {
                             quiet: true;
                             clicked => { root.update-details-open = !root.update-details-open; }
                         }
-                        if !root.updates-managed : Action { enabled: !root.update-busy && (root.update-available ? !root.busy : !root.update-check-feedback);
+                        if !root.updates-managed : Action { enabled: !root.update-busy && (root.update-available ? !root.update-blocked : !root.update-check-feedback);
                             spinning: root.update-busy || (!root.update-available && root.update-check-feedback);
                             primary: root.update-available;
                             text: root.update-available ? root.update-label : Strings.check-for-updates;
@@ -968,13 +971,13 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if (root.update-available && (root.update-details-open || root.update-status != "")) || root.update-installing : VerticalLayout {
+                    if (root.update-available && (root.update-details-open || root.update-status != "" || root.update-blocked)) || root.update-installing : VerticalLayout {
                         padding: 16px; padding-top: 4px;
                         padding-left: Locale.rtl ? 16px : 60px;
                         padding-right: Locale.rtl ? 60px : 16px;
                         spacing: 12px;
-                        if root.update-available && root.update-status != "" : Row { spacing: 8px;
-                            update-feedback := Body { text: root.update-status; color: Palette.secondary; min-width: 0px; horizontal-stretch: 1; }
+                        if root.update-available && (root.update-status != "" || root.update-blocked) : Row { spacing: 8px;
+                            update-feedback := Body { text: root.update-blocked ? Strings.update-after-work : root.update-status; color: Palette.secondary; min-width: 0px; horizontal-stretch: 1; }
                             if root.update-installing && root.update-progress > 0 : Label {
                                 text: round(clamp(root.update-progress, 0, 1) * 100) + "%";
                                 color: Palette.secondary; font-size: 12px; horizontal-stretch: 0;
@@ -1030,10 +1033,16 @@ export component AppWindow inherits Window {
         }
     }
     // The update notice is a centered dialog over a dimmed backdrop. The backdrop swallows
-    // clicks so nothing behind it is triggered by accident; it is dismissed only with Later.
-    if root.update-notice && !root.busy && !root.update-installing && root.page != 2 : Rectangle {
-        background: #00000066;
-        TouchArea { }
+    // clicks so nothing behind it is triggered by accident; Later or Escape dismisses it.
+    // It waits while a scan or recovery runs, since updating restarts the app.
+    if root.update-notice && !root.busy && !root.recovering && !root.update-installing && root.page != 2 : FocusScope {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.dismiss-update(); return accept; }
+            return reject;
+        }
+        Rectangle { background: #00000066; TouchArea { } }
         Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
@@ -1051,10 +1060,10 @@ export component AppWindow inherits Window {
             }
             if root.update-details-open : ReleaseNotes { notes: root.update-notes; }
             Row { spacing: 8px;
-                Action { text: root.update-details-open ? Strings.hide-details : Strings.whats-new; quiet: true; clicked => { root.update-details-open = !root.update-details-open; } }
+                Action { text: root.update-details-open ? Strings.hide-details : Strings.whats-new; quiet: true; fit: true; clicked => { root.update-details-open = !root.update-details-open; } }
                 Rectangle { horizontal-stretch: 1; }
-                Action { text: Strings.later; quiet: true; clicked => { root.dismiss-update(); } }
-                Action { text: root.update-label; primary: true; enabled: !root.update-busy; clicked => { root.apply-update(); } }
+                Action { text: Strings.later; quiet: true; fit: true; clicked => { root.dismiss-update(); } }
+                Action { text: root.update-label; primary: true; fit: true; enabled: !root.update-busy; clicked => { root.apply-update(); } }
             }
         }
         }

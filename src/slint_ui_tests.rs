@@ -550,6 +550,25 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
                     "no update notice during a scan"
                 );
                 ui.set_busy(false);
+                ui.set_recovering(true);
+                ui.window().take_snapshot().unwrap();
+                assert!(
+                    i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                        &ui,
+                        &i18n::t("Later")
+                    )
+                    .next()
+                    .is_none(),
+                    "no update notice during a recovery"
+                );
+                ui.set_recovering(false);
+                ui.window().take_snapshot().unwrap();
+                ui.window()
+                    .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                        text: slint::platform::Key::Escape.into(),
+                    });
+                assert!(!ui.get_update_notice(), "Escape means Later");
+                ui.set_update_notice(true);
                 ui.window().take_snapshot().unwrap();
                 let apply = i_slint_backend_testing::ElementHandle::find_by_accessible_label(
                     &ui,
@@ -591,6 +610,22 @@ fn update_notice_can_be_dismissed_and_release_notes_open_only_on_request() {
                     .expect("release notes remain available in settings");
                 settings_details.invoke_accessible_default_action();
                 assert!(ui.get_update_details_open());
+                ui.window().take_snapshot().unwrap();
+
+                // While a scan runs the install action waits and says why.
+                ui.set_busy(true);
+                ui.window().take_snapshot().unwrap();
+                let blocked = i_slint_backend_testing::ElementHandle::find_by_element_id(
+                    &ui,
+                    "AppWindow::update-feedback",
+                )
+                .next()
+                .expect("reason the update waits");
+                assert_eq!(
+                    blocked.accessible_label().unwrap(),
+                    i18n::t("Finish the scan or recovery first, then update.")
+                );
+                ui.set_busy(false);
                 ui.window().take_snapshot().unwrap();
 
                 // Installation feedback stays visible while the version and
@@ -1707,4 +1742,157 @@ fn an_opened_disk_image_is_listed_selected_with_its_own_icon() {
     state.source = Some("/dev/sdz".into());
     state.sync_ui(&ui);
     assert_eq!(ui.get_drives().row_count(), 1);
+}
+
+/// Renders each step of the update flow for visual review:
+/// `RECLAIM_PREVIEW_DIR=/tmp/p cargo test --bin reclaim update_flow_previews -- --ignored`
+#[test]
+#[ignore = "renders preview images on request"]
+fn update_flow_previews() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let directory =
+        std::env::var("RECLAIM_PREVIEW_DIR").unwrap_or_else(|_| "update-previews".into());
+    std::fs::create_dir_all(&directory).unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.set_version("0.2.5".into());
+    ui.set_update_notes(
+        Rc::new(VecModel::from(vec![
+            ReleaseNoteBlock {
+                text: "Improvements".into(),
+                kind: 1,
+            },
+            ReleaseNoteBlock {
+                text: "• Clearer recovery results".into(),
+                kind: 2,
+            },
+            ReleaseNoteBlock {
+                text: "• More reliable drive detection".into(),
+                kind: 2,
+            },
+            ReleaseNoteBlock {
+                text: "• Smaller downloads".into(),
+                kind: 2,
+            },
+        ]))
+        .into(),
+    );
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    for (code, language) in [
+        ("en", i18n::Language::English),
+        ("he", i18n::Language::Hebrew),
+    ] {
+        i18n::with_language(language, || {
+            ui_text::apply(&ui);
+            let title = i18n::message("Version {0} is available.", &["0.3.0"]);
+            let mut step = 0;
+            let mut shot = |name: &str| {
+                step += 1;
+                // Let colour transitions settle before capturing.
+                ui.window().take_snapshot().unwrap();
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(500));
+                let snapshot = ui.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    format!("{directory}/{code}-{step:02}-{name}.png"),
+                    snapshot.as_bytes(),
+                    snapshot.width(),
+                    snapshot.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            };
+            let reset = || {
+                ui.set_busy(false);
+                ui.set_recovering(false);
+                ui.set_update_busy(false);
+                ui.set_update_installing(false);
+                ui.set_update_check_feedback(false);
+                ui.set_update_notice(false);
+                ui.set_update_details_open(false);
+                ui.set_update_progress(0.0);
+                ui.set_update_status("".into());
+            };
+            // Settings before and during a manual check.
+            reset();
+            ui.set_page(2);
+            ui.set_update_available(false);
+            ui.set_update_title("".into());
+            shot("settings-not-checked");
+            ui.set_update_busy(true);
+            ui.set_update_check_feedback(true);
+            ui.set_update_status(i18n::t("Checking for updates…").into());
+            shot("settings-checking");
+            reset();
+            ui.set_update_status(
+                i18n::t(&format!("Last checked: {}", i18n::ltr("2026-11-21 14:05"))).into(),
+            );
+            shot("settings-up-to-date");
+            reset();
+            ui.set_update_status(
+                i18n::t(&i18n::explain(
+                    "Could not check for updates: {0}",
+                    anyhow::anyhow!("network is unreachable"),
+                ))
+                .into(),
+            );
+            shot("settings-check-failed");
+            // A new version: the dialog on another page.
+            reset();
+            ui.set_update_available(true);
+            ui.set_update_title(title.clone().into());
+            ui.set_update_label(i18n::t("Update and restart").into());
+            ui.set_page(0);
+            ui.set_update_notice(true);
+            shot("notice");
+            ui.set_update_details_open(true);
+            shot("notice-whats-new");
+            // The same release in Settings.
+            reset();
+            ui.set_page(2);
+            shot("settings-available");
+            ui.set_update_details_open(true);
+            shot("settings-whats-new");
+            reset();
+            ui.set_busy(true);
+            shot("settings-waits-for-scan");
+            // Installing.
+            reset();
+            ui.set_update_busy(true);
+            ui.set_update_installing(true);
+            ui.set_update_status(i18n::t("Preparing update…").into());
+            shot("preparing");
+            ui.set_update_status(i18n::t("Downloading and verifying update…").into());
+            ui.set_update_progress(0.42);
+            shot("downloading");
+            ui.set_update_status(i18n::t("Installing update…").into());
+            ui.set_update_progress(1.0);
+            shot("installing");
+            ui.set_update_status(i18n::t("Restarting Reclaim…").into());
+            shot("restarting");
+            reset();
+            ui.set_update_status(
+                i18n::t(&i18n::explain(
+                    "The update could not be installed: {0}",
+                    anyhow::anyhow!("signature does not match"),
+                ))
+                .into(),
+            );
+            shot("install-failed");
+            // Platforms that hand off to the OS installer.
+            reset();
+            ui.set_update_label(i18n::t("Open installer").into());
+            ui.set_update_status(i18n::t("Update verified. Open the installer to finish.").into());
+            shot("installer-ready");
+            ui.set_update_status(
+                i18n::t("The installer is open. Follow its steps to finish.").into(),
+            );
+            shot("installer-open");
+        });
+    }
 }

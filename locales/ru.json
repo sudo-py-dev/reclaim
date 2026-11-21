@@ -237,5 +237,7 @@
   "No files were found. Try another source.": "Файлы не найдены. Попробуйте другой источник.",
   "Encrypted and unlocked: choose the volume inside": "Зашифрован и разблокирован: выберите том внутри",
   "In use by the running system. Writes during a scan can overwrite the files you want back.": "Используется работающей системой. Запись во время сканирования может перезаписать файлы, которые вы хотите вернуть.",
-  "Disk image": "Образ диска"
+  "Disk image": "Образ диска",
+  "The installer is open. Follow its steps to finish.": "Установщик открыт. Следуйте его шагам для завершения.",
+  "Finish the scan or recovery first, then update.": "Сначала завершите сканирование или восстановление, затем обновите."
 }

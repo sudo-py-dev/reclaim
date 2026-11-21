@@ -237,5 +237,7 @@
   "No files were found. Try another source.": "לא נמצאו קבצים. נסו מקור אחר.",
   "Encrypted and unlocked: choose the volume inside": "מוצפן ופתוח: בחרו את המחיצה שבתוכו",
   "In use by the running system. Writes during a scan can overwrite the files you want back.": "בשימוש המערכת הפועלת. כתיבות במהלך הסריקה עלולות לדרוס את הקבצים שאתם רוצים לשחזר.",
-  "Disk image": "תמונת דיסק"
+  "Disk image": "תמונת דיסק",
+  "The installer is open. Follow its steps to finish.": "תוכנית ההתקנה פתוחה. בצעו את השלבים שלה כדי לסיים.",
+  "Finish the scan or recovery first, then update.": "סיימו קודם את הסריקה או השחזור, ואז עדכנו."
 }

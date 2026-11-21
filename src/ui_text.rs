@@ -87,6 +87,7 @@ ui_strings! {
     set_later => "Later",
     set_hide_details => "Hide details",
     set_update_when_ready => "You can keep working and update later.",
+    set_update_after_work => "Finish the scan or recovery first, then update.",
     set_no_release_notes => "No release notes.",
     set_source_code => "Source code",
     set_report_a_problem => "Report a problem",

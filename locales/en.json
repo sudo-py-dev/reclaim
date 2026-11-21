@@ -237,5 +237,7 @@
   "No files were found. Try another source.": "No files were found. Try another source.",
   "Encrypted and unlocked: choose the volume inside": "Encrypted and unlocked: choose the volume inside",
   "In use by the running system. Writes during a scan can overwrite the files you want back.": "In use by the running system. Writes during a scan can overwrite the files you want back.",
-  "Disk image": "Disk image"
+  "Disk image": "Disk image",
+  "The installer is open. Follow its steps to finish.": "The installer is open. Follow its steps to finish.",
+  "Finish the scan or recovery first, then update.": "Finish the scan or recovery first, then update."
 }
