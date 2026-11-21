@@ -572,7 +572,8 @@ impl Reclaim {
                 if was_drive && !drives.iter().any(|d| Some(&d.path) == self.source.as_ref()) {
                     self.source = None;
                 }
-                self.drives = drives;
+                // Every platform's list is nested here, so layered volumes follow their parent.
+                self.drives = drives::nest(drives);
                 self.drives_error = None;
             }
             Err(e) => self.drives_error = Some(e),

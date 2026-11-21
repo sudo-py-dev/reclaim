@@ -366,7 +366,7 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
         .collect();
     drives.retain(|drive| !represented_parents.contains(&drive.path));
 
-    Ok(super::nest(drives))
+    Ok(drives)
 }
 
 /// Compares device numbers rather than paths, so symlinks, bind mounts and
@@ -656,7 +656,7 @@ mod tests {
         )
         .unwrap();
         f.write("udev/b259:1", "E:ID_FS_TYPE=crypto_LUKS\n");
-        let rows = f.discover().unwrap();
+        let rows = super::super::nest(f.discover().unwrap());
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.mounted));
         assert!(!rows.iter().any(|row| row.path.ends_with("nvme0n1")));
