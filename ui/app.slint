@@ -14,7 +14,7 @@ export global Strings {
     in-out property <string> recovered-files: "Recovered files";
     in-out property <string> settings-help: "Settings & help";
     in-out property <string> read-only-by-design: "Read-only by design";
-    in-out property <string> never-writes-to-source: "Reclaim never writes to the drive it scans.";
+    in-out property <string> scanning-only-reads: "Scanning only reads the drive.";
     in-out property <string> choose-a-drive-or-disk: "Choose a drive or disk image to search for deleted files.";
     in-out property <string> inspect-candidates-choose-your-files: "Inspect candidates, choose your files, and recover them safely.";
     in-out property <string> appearance-updates-and-a-little: "Appearance, updates, and a little guidance.";
@@ -394,6 +394,8 @@ component SearchField inherits Rectangle {
     in property <string> placeholder;
     callback edited();
     forward-focus: input;
+    // Focus goes back to the input first, since clearing removes the button.
+    function clear() { input.focus(); root.text = ""; root.edited(); }
     height: Metrics.control;
     border-radius: Metrics.radius; background: Palette.surface;
     border-width: input.has-focus ? 2px : 1px; border-color: input.has-focus ? Palette.accent : Palette.line;
@@ -413,10 +415,17 @@ component SearchField inherits Rectangle {
         }
         if root.text != "" : Rectangle { width: 28px; height: 28px; border-radius: 6px;
             background: clear.pressed ? Palette.line : clear.has-hover ? Palette.subtle : transparent;
+            border-width: clear-focus.ring ? 2px : 0px; border-color: Palette.accent;
             accessible-role: button; accessible-label: Strings.clear-search;
-            accessible-action-default => { root.text = ""; root.edited(); }
+            accessible-action-default => { root.clear(); }
             Image { source: @image-url("icons/window-close.svg"); width: 14px; height: 14px; colorize: Palette.muted; }
-            clear := TouchArea { mouse-cursor: pointer; clicked => { root.text = ""; root.edited(); input.focus(); } }
+            clear-focus := KeyFocus {
+                key-pressed(event) => {
+                    if event.text == Key.Space || event.text == Key.Return { root.clear(); return accept; }
+                    return reject;
+                }
+            }
+            clear := TouchArea { mouse-cursor: pointer; clicked => { root.clear(); } }
         }
     }
 }
@@ -858,7 +867,7 @@ export component AppWindow inherits Window {
                             Image { source: @image-url("icons/shield.svg"); width: 16px; height: 16px; colorize: Palette.accent; }
                             Label { text: Strings.read-only-by-design; color: Palette.ink; font-size: 12px; font-weight: 600; min-width: 0px; horizontal-stretch: 1; wrap: word-wrap; }
                         }
-                        Label { text: Strings.never-writes-to-source; color: Palette.secondary; wrap: word-wrap; font-size: 12px; }
+                        Label { text: Strings.scanning-only-reads; color: Palette.secondary; wrap: word-wrap; font-size: 12px; }
                     }
                 }
                 Rectangle { height: 12px; }
@@ -1224,7 +1233,8 @@ export component AppWindow inherits Window {
     // clicks so nothing behind it is triggered by accident; Later or Escape dismisses it.
     // It waits while a scan or recovery runs, since updating restarts the app.
     // Focus starts on Later, the safe choice, and Tab cycles through the dialog's buttons only.
-    if root.update-notice && !root.busy && !root.recovering && !root.update-installing && root.page != 2 : FocusScope {
+    // One dialog at a time: it also waits while the recovery destination is being reviewed.
+    if root.update-notice && !root.busy && !root.recovering && !root.update-installing && root.page != 2 && !root.destination-review : FocusScope {
         x: 0px; y: 0px; width: root.width; height: root.height;
         init => { notice-later.focus(); }
         key-pressed(event) => {

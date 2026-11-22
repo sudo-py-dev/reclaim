@@ -33,8 +33,40 @@ pub fn reduce_motion() -> bool {
         return !enabled;
     }
     read("org.kde.kdeglobals.KDE", "AnimationDurationFactor")
-        .and_then(|v| f64::try_from(v).ok())
+        .and_then(|v| animation_factor(&v))
         .is_some_and(|factor| factor <= 0.0)
+}
+
+/// KDE's animation speed. Its portal sends the config entry as text ("0"),
+/// so both a number and a numeric string are accepted.
+#[cfg(target_os = "linux")]
+fn animation_factor(value: &zbus::zvariant::Value<'_>) -> Option<f64> {
+    use zbus::zvariant::Value;
+    if let Value::F64(factor) = value {
+        Some(*factor)
+    } else if let Value::Str(text) = value {
+        text.as_str().trim().parse().ok()
+    } else if let Value::Value(inner) = value {
+        animation_factor(inner)
+    } else {
+        None
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::animation_factor;
+    use zbus::zvariant::Value;
+
+    #[test]
+    fn kde_animation_factor_reads_text_and_numbers() {
+        assert_eq!(animation_factor(&Value::from("0")), Some(0.0));
+        assert_eq!(animation_factor(&Value::from("1")), Some(1.0));
+        assert_eq!(animation_factor(&Value::from(0.5_f64)), Some(0.5));
+        assert_eq!(animation_factor(&Value::new(Value::from("0"))), Some(0.0));
+        assert_eq!(animation_factor(&Value::from("fast")), None);
+        assert_eq!(animation_factor(&Value::from(true)), None);
+    }
 }
 
 /// Windows "Show animations in Windows" (Settings > Accessibility > Visual effects).

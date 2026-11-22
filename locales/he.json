@@ -133,7 +133,7 @@
   "Recovered files": "קבצים לשחזור",
   "Settings & help": "הגדרות ועזרה",
   "Read-only by design": "קריאה בלבד",
-  "Reclaim never writes to the drive it scans.": "היישום אף פעם לא כותב לכונן שהוא סורק.",
+  "Scanning only reads the drive.": "הסריקה לא משנה דבר בכונן.",
   "Choose a drive or disk image to search for deleted files.": "בחרו כונן או תמונת דיסק כדי לחפש קבצים שנמחקו.",
   "Inspect candidates, choose your files, and recover them safely.": "בדקו את מה שנמצא, בחרו את הקבצים ושחזרו אותם בבטחה.",
   "Appearance, updates, and a little guidance.": "מראה, עדכונים וקצת הדרכה.",

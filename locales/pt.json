@@ -224,7 +224,7 @@
   "Window closed": "Janela fechada",
   "Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.": "O Windows negou o acesso. Para unidades físicas, reinicie o Reclaim com Executar como administrador ou abra uma imagem de disco. Os volumes do BitLocker devem ser desbloqueados primeiro.",
   "You can keep working and update later.": "Você pode continuar trabalhando e atualizar mais tarde.",
-  "Reclaim never writes to the drive it scans.": "O Reclaim nunca grava na unidade que analisa.",
+  "Scanning only reads the drive.": "A leitura não altera a unidade.",
   "Last checked: {0}": "Última verificação: {0}",
   "bytes": "bytes",
   "macOS could not inspect drives. Open a raw disk image instead.": "O macOS não conseguiu inspecionar as unidades. Em vez disso, abra uma imagem de disco bruta.",

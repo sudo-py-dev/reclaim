@@ -2087,4 +2087,16 @@ fn destination_review_keeps_tab_inside_the_dialog() {
         "choose",
         "Shift+Tab from the first wraps to the last"
     );
+    // An update found meanwhile waits until the review closes: one dialog at a time.
+    let later = |ui: &AppWindow| {
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(ui, &i18n::t("Later"))
+            .next()
+            .is_some()
+    };
+    ui.set_update_notice(true);
+    ui.window().take_snapshot().unwrap();
+    assert!(!later(&ui), "no update notice over the destination review");
+    ui.set_destination_review(false);
+    ui.window().take_snapshot().unwrap();
+    assert!(later(&ui), "the update notice shows once the review closes");
 }

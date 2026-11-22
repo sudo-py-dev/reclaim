@@ -812,7 +812,11 @@ impl Reclaim {
         ui.set_destination_same_drive(matches!(review, Some((_, drives::Destination::SameDrive))));
         ui.set_destination_path(
             review
-                .map_or_default(|(folder, _)| i18n::ltr(&folder.display().to_string()))
+                // At most about two lines in the dialog, keeping the folder name at
+                // the end, so a deep path cannot push the choices out of view.
+                .map_or_default(|(folder, _)| {
+                    i18n::ltr(&shorten_middle(&folder.display().to_string(), 40, 120))
+                })
                 .into(),
         );
         ui.set_all_selected(visible > 0 && selected == visible);
@@ -867,7 +871,7 @@ impl Reclaim {
         } else {
             details_text(&details).into()
         });
-        ui.set_details(ModelRc::new(VecModel::from(details)));
+        show_details(ui, details);
         ui.set_inspected(
             self.inspected
                 .filter(|&index| index < self.results.len())
@@ -968,21 +972,19 @@ impl Reclaim {
 /// Shortens a long name in the middle, keeping its start and its end (where
 /// numbers and the extension are). The list shows it only when the full name
 /// does not fit.
-fn shorten_middle(name: &str) -> String {
-    const KEEP_START: usize = 18;
-    const KEEP_END: usize = 12;
+fn shorten_middle(name: &str, keep_start: usize, keep_end: usize) -> String {
     let count = name.chars().count();
-    if count <= KEEP_START.saturating_add(KEEP_END).saturating_add(1) {
+    if count <= keep_start.saturating_add(keep_end).saturating_add(1) {
         return name.to_owned();
     }
-    let start: String = name.chars().take(KEEP_START).collect();
-    let end: String = name.chars().skip(count.saturating_sub(KEEP_END)).collect();
+    let start: String = name.chars().take(keep_start).collect();
+    let end: String = name.chars().skip(count.saturating_sub(keep_end)).collect();
     format!("{}…{}", start.trim_end(), end.trim_start())
 }
 fn file_item(f: &Found, index: usize) -> FileItem {
     let name = f.recovery_name(index.saturating_add(1));
     FileItem {
-        short: i18n::isolate(&shorten_middle(&name)).into(),
+        short: i18n::isolate(&shorten_middle(&name, 18, 12)).into(),
         category: i32::try_from(reclaim::category_index(f.kind)).unwrap_or(0),
         name: i18n::isolate(&name).into(),
         kind: f.kind.to_uppercase().into(),
@@ -1100,10 +1102,11 @@ fn file_details(file: &Found, number: usize) -> Vec<DetailLine> {
                 i18n::t("bytes")
             ),
         ),
+        // Plain text, without direction marks: it is selected and copied.
         detail(
             DETAIL_COPYABLE,
             "Source offset",
-            i18n::isolate(&format!("0x{:X}", file.offset)),
+            format!("0x{:X}", file.offset),
         ),
     ];
     if let Some(metadata) = &file.ntfs {
@@ -1158,6 +1161,15 @@ fn file_details(file: &Found, number: usize) -> Vec<DetailLine> {
         ));
     }
     lines
+}
+/// Replaces the inspector rows only when they changed, so a selection in the
+/// copyable offset survives the many progress updates of a running scan.
+fn show_details(ui: &AppWindow, details: Vec<DetailLine>) {
+    let current = ui.get_details();
+    if current.row_count() == details.len() && current.iter().zip(&details).all(|(a, b)| a == *b) {
+        return;
+    }
+    ui.set_details(ModelRc::new(VecModel::from(details)));
 }
 /// The inspector rows as one text, for the window's accessible description.
 fn details_text(lines: &[DetailLine]) -> String {
@@ -1385,7 +1397,7 @@ fn run() -> Result<(), slint::PlatformError> {
             reset_preview(&ui);
             let details = file_details(f, index.saturating_add(1));
             ui.set_detail(details_text(&details).into());
-            ui.set_details(ModelRc::new(VecModel::from(details)));
+            show_details(&ui, details);
             ui.set_inspected(i);
             if preview::supported(f.kind) {
                 let f = f.clone();

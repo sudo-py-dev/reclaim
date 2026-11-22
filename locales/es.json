@@ -133,7 +133,7 @@
   "Recovered files": "Archivos para recuperar",
   "Settings & help": "Ajustes y ayuda",
   "Read-only by design": "Solo lectura",
-  "Reclaim never writes to the drive it scans.": "Reclaim nunca escribe en la unidad que analiza.",
+  "Scanning only reads the drive.": "El análisis solo lee la unidad.",
   "Choose a drive or disk image to search for deleted files.": "Elige una unidad o imagen de disco para buscar archivos eliminados.",
   "Inspect candidates, choose your files, and recover them safely.": "Revisa los candidatos, elige tus archivos y recupéralos con seguridad.",
   "Appearance, updates, and a little guidance.": "Apariencia, actualizaciones y una breve guía.",

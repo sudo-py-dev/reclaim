@@ -133,7 +133,7 @@
   "Recovered files": "Файлы для восстановления",
   "Settings & help": "Настройки и помощь",
   "Read-only by design": "Только чтение",
-  "Reclaim never writes to the drive it scans.": "Reclaim никогда не записывает данные на сканируемый диск.",
+  "Scanning only reads the drive.": "Сканирование только читает диск.",
   "Choose a drive or disk image to search for deleted files.": "Выберите диск или образ диска для поиска удалённых файлов.",
   "Inspect candidates, choose your files, and recover them safely.": "Проверьте найденные файлы, выберите нужные и безопасно восстановите их.",
   "Appearance, updates, and a little guidance.": "Оформление, обновления и краткое руководство.",

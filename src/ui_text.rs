@@ -35,7 +35,7 @@ ui_strings! {
     set_recovered_files => "Recovered files",
     set_settings_help => "Settings & help",
     set_read_only_by_design => "Read-only by design",
-    set_never_writes_to_source => "Reclaim never writes to the drive it scans.",
+    set_scanning_only_reads => "Scanning only reads the drive.",
     set_choose_a_drive_or_disk => "Choose a drive or disk image to search for deleted files.",
     set_inspect_candidates_choose_your_files => "Inspect candidates, choose your files, and recover them safely.",
     set_appearance_updates_and_a_little => "Appearance, updates, and a little guidance.",

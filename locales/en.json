@@ -133,7 +133,7 @@
   "Recovered files": "Recovered files",
   "Settings & help": "Settings & help",
   "Read-only by design": "Read-only by design",
-  "Reclaim never writes to the drive it scans.": "Reclaim never writes to the drive it scans.",
+  "Scanning only reads the drive.": "Scanning only reads the drive.",
   "Choose a drive or disk image to search for deleted files.": "Choose a drive or disk image to search for deleted files.",
   "Inspect candidates, choose your files, and recover them safely.": "Inspect candidates, choose your files, and recover them safely.",
   "Appearance, updates, and a little guidance.": "Appearance, updates, and a little guidance.",

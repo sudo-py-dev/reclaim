@@ -133,7 +133,7 @@
   "Recovered files": "ملفات للاستعادة",
   "Settings & help": "الإعدادات والمساعدة",
   "Read-only by design": "للقراءة فقط",
-  "Reclaim never writes to the drive it scans.": "لا يكتب Reclaim أبدًا على القرص الذي يفحصه.",
+  "Scanning only reads the drive.": "الفحص يقرأ القرص فقط.",
   "Choose a drive or disk image to search for deleted files.": "اختر قرصًا أو صورة قرص للبحث عن الملفات المحذوفة.",
   "Inspect candidates, choose your files, and recover them safely.": "افحص الملفات المرشحة واختر ما تريد واستعدها بأمان.",
   "Appearance, updates, and a little guidance.": "المظهر والتحديثات وإرشادات مختصرة.",
