@@ -2,7 +2,7 @@
   <img src="assets/icons/reclaim.png" alt="Reclaim app icon" width="88">
   <h1>Reclaim</h1>
   <p><strong>Get back deleted photos, documents and other files.</strong></p>
-  <p>Free, open source, and it never changes the drive it scans.<br>For Windows, macOS and Linux, in 7 languages.</p>
+  <p>Free, open source, and scanning never changes your drive.<br>For Windows, macOS and Linux, in 7 languages.</p>
 
 [**Download Reclaim**](#download) · [Lost files just now?](#lost-files-just-now-do-this-first) · [How to recover](#how-to-recover-your-files) · [Problems and fixes](#problems-and-fixes)
 
@@ -56,7 +56,7 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 - **Ubuntu / Debian:** open a terminal in the folder you downloaded the file to and run the command below, using the version number in your file name. It needs Ubuntu 22.04, Debian 12 or newer.
 
   ```sh
-  sudo apt install ./reclaim_0.2.4_amd64.deb
+  sudo apt install ./reclaim_0.2.6_amd64.deb
   ```
 - **Portable ZIP:** unzip it into a folder (or onto a USB stick) and run the `reclaim` program inside. On Mac and Linux you may first need to run `chmod +x reclaim-*` in that folder.
 
@@ -65,9 +65,9 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 1. **Choose the drive** where the files were. Connected drives appear on their own; click **Refresh** after plugging one in. If the drive is encrypted (BitLocker, FileVault, LUKS), unlock it first.
 2. **Click Start scanning.** Files appear while the scan runs. You can recover them right away, without waiting for the scan to finish, or stop the scan as soon as you see what you need.
 3. **Look through the results.** Search by name or type, filter by category (photos, documents…), and click a file to see its details and a preview for pictures.
-4. **Tick the files you want and click Recover selected.** Pick a folder on a **different drive**. Then open the recovered files to check they are complete.
+4. **Tick the files you want and click Recover selected.** Pick a folder on a **different drive**; Reclaim warns you if the folder might be on the drive you scanned. When it's done, click **Open folder** and check the recovered files are complete.
 
-![Reclaim showing found files with search, category filters and the file details panel](docs/screenshots/reclaim-results.png)
+![Reclaim showing found files with search, file-type icons and the file details panel](docs/screenshots/reclaim-results.png)
 
 *Screenshots use sample data. They show the interface, not a promise of what will be found.*
 
@@ -79,6 +79,7 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 - **Large files:** most file types are limited to 64 MiB, so very large videos or archives may not come back.
 - **Results are not saved** when you close Reclaim. Recover what you need first.
 - **No deletion dates.** Reclaim can't tell when a file was deleted.
+- **Works with the keyboard.** In the results, press Tab to reach the list, use the arrow keys to move between files, Space to tick one and Enter to see its details. Reclaim also follows your system's reduce-motion setting.
 
 ### What it finds
 
@@ -99,7 +100,7 @@ Common video formats such as MP4 and MOV can't be found yet. Technical details a
 Yes. Reclaim is free and open source (MIT licence). There's no paid version and no account.
 
 **Can it change or damage my drive?**
-No. Reclaim only reads the drive it scans. It never writes to it.
+No. Scanning only reads the drive. Apart from its own small settings file and log, Reclaim writes only the files you choose to recover, into the folder you pick, and it warns you if that folder might be on the drive you scanned.
 
 **Can I get files back after emptying the Recycle Bin or Trash?**
 If they're still in the Recycle Bin or Trash, restore them from there; that's faster and keeps their names. After emptying it, files on hard drives, memory cards and USB sticks can often still be found. On a computer's internal SSD, they are usually gone (see below).
