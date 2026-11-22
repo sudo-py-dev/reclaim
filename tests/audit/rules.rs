@@ -11,6 +11,7 @@ const UNSAFE_FILES: &[&str] = &[
     "src/drives/windows.rs", // volume and device IOCTLs
     "src/installer.rs",      // ShellExecuteW
     "src/legacy_install.rs", // reading the old uninstall entry
+    "src/motion.rs",         // reduce-motion setting (SystemParametersInfoW, CFPreferences)
     "src/native_process.rs", // posix_spawn / CreateProcessW
     "src/preview.rs",        // reopening a Windows handle, extended volume reads
     "src/update_runtime.rs", // geteuid for the elevated update helper

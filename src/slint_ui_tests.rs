@@ -347,6 +347,7 @@ fn recovery_scrollbar_keeps_controls_clear_and_reaches_the_last_file() {
                 size: "2 KiB".into(),
                 selected: true,
                 index,
+                ..Default::default()
             })
             .collect::<Vec<_>>(),
     )));
@@ -393,9 +394,11 @@ fn recovery_scrollbar_keeps_controls_clear_and_reaches_the_last_file() {
                 &ui,
                 "candidate-0199.png",
             )
+            // A row, not the list itself, which also carries the name of the row the
+            // keyboard cursor is on.
             .find(|element| {
                 let y = element.absolute_position().y;
-                y >= position.y && y < position.y + size.height
+                y >= position.y && y < position.y + size.height && element.size().height <= 52.5
             });
             let last = last.expect("last file reachable by keyboard");
             let last_position = last.absolute_position();
@@ -1134,6 +1137,26 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
                     scanning().sync_ui(ui);
                     ui.window().take_snapshot().unwrap();
                 };
+                // A finished recovery offers its folder beside the message.
+                let saved = || {
+                    let mut state = scanning();
+                    state.recovery_status = "Saved 1 file.".into();
+                    state.saved_folder = Some(PathBuf::from("/media/user/Backup/Recovered"));
+                    state
+                };
+                let saved_now = |ui: &AppWindow| {
+                    saved().sync_ui(ui);
+                    ui.window().take_snapshot().unwrap();
+                    assert!(
+                        i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                            ui,
+                            &i18n::t("Open folder"),
+                        )
+                        .next()
+                        .is_some(),
+                        "a finished recovery offers to open its folder"
+                    );
+                };
                 assert_steady(
                     &ui,
                     "AppWindow::recovery-message",
@@ -1142,19 +1165,67 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
                         ("hint", &mut hint),
                         ("recovering", &mut message("Recovering selected files…")),
                         (
-                            "saved",
-                            &mut message(
-                                "Saved 1 file. Open the destination folder and verify their contents.",
-                            ),
-                        ),
-                        (
                             "warning",
-                            &mut message(
-                                "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.",
-                            ),
+                            &mut message("Not saved: that folder is on the drive you scanned."),
                         ),
                     ],
                 );
+                // Open folder takes room from the message, but both stay readable.
+                saved_now(&ui);
+                assert_controls_clear(&ui, window, &format!("{code} {width}x{height} saved"));
+                // Every recovery message fits its two lines, with Open folder beside the
+                // ones that come after a recovery finished.
+                for (name, state) in [
+                    ("hint", scanning()),
+                    ("saved", saved()),
+                    ("recovering", {
+                        let mut state = recovering();
+                        state.recovery_status = "Recovering selected files…".into();
+                        state
+                    }),
+                    ("Not saved: that folder is on the drive you scanned.", {
+                        let mut state = scanning();
+                        state.recovery_status =
+                            "Not saved: that folder is on the drive you scanned.".into();
+                        state
+                    }),
+                    (
+                        "Source changed since scanning. Scan it again before recovering.",
+                        {
+                            let mut state = scanning();
+                            state.recovery_status =
+                                "Source changed since scanning. Scan it again before recovering."
+                                    .into();
+                            state
+                        },
+                    ),
+                    ("Scan the selected source before recovering files.", {
+                        let mut state = scanning();
+                        state.recovery_status =
+                            "Scan the selected source before recovering files.".into();
+                        state
+                    }),
+                    ("Recovery ended unexpectedly.", {
+                        let mut state = saved();
+                        state.recovery_status = "Recovery ended unexpectedly.".into();
+                        state
+                    }),
+                    ("Stopping after the current step…", {
+                        let mut state = scanning();
+                        state.recovery_status = "Stopping after the current step…".into();
+                        state
+                    }),
+                ] {
+                    let mut state = state;
+                    state.sync_ui(&ui);
+                    ui.window().take_snapshot().unwrap();
+                    layout_checks::assert_text_fits(
+                        &ui,
+                        "AppWindow::recovery-message",
+                        "AppWindow::recovery-message-room",
+                        &format!("{code} {width}x{height} {name}"),
+                    );
+                }
                 // Selected files can be recovered mid-scan; the button then stops it.
                 scanning().sync_ui(&ui);
                 assert!(ui.get_can_recover(), "{code}: recover during a scan");
@@ -1171,11 +1242,7 @@ fn layout_is_clear_and_steady_on_every_page_language_and_size() {
                     "{code}: the recover button offers to stop"
                 );
                 if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
-                    let mut state = recovering();
-                    state.recovery_status =
-                        "Saved 1 file. Open the destination folder and verify their contents."
-                            .into();
-                    state.sync_ui(&ui);
+                    saved().sync_ui(&ui);
                     let snapshot = ui.window().take_snapshot().unwrap();
                     image::save_buffer(
                         format!("{directory}/recovering-{code}-{width}.png"),
@@ -1249,7 +1316,8 @@ fn windows_drive_access_failure_has_an_actionable_aligned_restart_button() {
             ui_text::apply(&ui);
             ui.set_page(1);
             ui.set_show_status(true);
-            ui.set_status(i18n::t("Scan failed. See the message above.").into());
+            ui.set_status(i18n::t("Scan failed. See the details below.").into());
+            ui.set_scan_failed(true);
             ui.set_error(i18n::t("Windows denied access. For physical drives, restart Reclaim with Run as administrator, or open a disk image. BitLocker volumes must be unlocked first.").into());
             ui.set_needs_administrator(true);
             ui.window().set_size(slint::PhysicalSize::new(900, 640));
@@ -1498,7 +1566,7 @@ fn stop_buttons_are_filled_red_in_light_and_dark() {
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(300));
         slint::platform::update_timers_and_animations();
         let snapshot = ui.window().take_snapshot().unwrap();
-        for label in ["Stop", "Stop recovery"] {
+        for label in ["Stop scan", "Stop recovery"] {
             let button =
                 i_slint_backend_testing::ElementHandle::find_by_accessible_label(&ui, label)
                     .next()
@@ -1895,4 +1963,140 @@ fn update_flow_previews() {
             shot("installer-open");
         });
     }
+}
+
+/// Presses and releases one key on the window.
+fn press(ui: &AppWindow, key: slint::platform::Key) {
+    for event in [
+        slint::platform::WindowEvent::KeyPressed { text: key.into() },
+        slint::platform::WindowEvent::KeyReleased { text: key.into() },
+    ] {
+        ui.window().dispatch_event(event);
+    }
+}
+
+#[test]
+fn file_list_is_one_tab_stop_driven_by_arrows_and_space() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    ui.set_page(1);
+    ui.set_has_results(true);
+    ui.set_files(ModelRc::new(VecModel::from(
+        (0..3)
+            .map(|index| FileItem {
+                name: format!("file-{index}.png").into(),
+                kind: "PNG".into(),
+                size: "2 KiB".into(),
+                selected: false,
+                index,
+                ..Default::default()
+            })
+            .collect::<Vec<_>>(),
+    )));
+    let inspected = Rc::new(std::cell::Cell::new(-1));
+    let toggled = Rc::new(std::cell::Cell::new(-1));
+    let (seen, flag) = (Rc::clone(&inspected), Rc::clone(&toggled));
+    ui.on_inspect(move |index| seen.set(index));
+    ui.on_toggle_file(move |index| flag.set(index));
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    ui.window().take_snapshot().unwrap();
+    // Clicking a row inspects it and puts the keyboard cursor there.
+    let row = i_slint_backend_testing::ElementHandle::find_by_accessible_label(&ui, "file-0.png")
+        .find(|element| element.size().height > 40.0)
+        .expect("first file row");
+    let (corner, size) = (row.absolute_position(), row.size());
+    let centre =
+        slint::LogicalPosition::new(corner.x + size.width / 2.0, corner.y + size.height / 2.0);
+    for event in [
+        slint::platform::WindowEvent::PointerPressed {
+            position: centre,
+            button: slint::platform::PointerEventButton::Left,
+        },
+        slint::platform::WindowEvent::PointerReleased {
+            position: centre,
+            button: slint::platform::PointerEventButton::Left,
+        },
+    ] {
+        ui.window().dispatch_event(event);
+    }
+    assert_eq!(inspected.get(), 0);
+    press(&ui, slint::platform::Key::DownArrow);
+    assert_eq!(
+        inspected.get(),
+        1,
+        "Down moves to and inspects the next file"
+    );
+    press(&ui, slint::platform::Key::Space);
+    assert_eq!(toggled.get(), 1, "Space ticks the file under the cursor");
+    press(&ui, slint::platform::Key::End);
+    assert_eq!(inspected.get(), 2);
+    press(&ui, slint::platform::Key::DownArrow);
+    assert_eq!(inspected.get(), 2, "the cursor stops at the last file");
+    press(&ui, slint::platform::Key::Home);
+    assert_eq!(inspected.get(), 0);
+}
+
+#[test]
+fn destination_review_keeps_tab_inside_the_dialog() {
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .ok();
+    let ui = AppWindow::new().unwrap();
+    ui.set_page(1);
+    let chosen = Rc::new(std::cell::Cell::new(""));
+    let record = |name: &'static str| {
+        let flag = Rc::clone(&chosen);
+        move || flag.set(name)
+    };
+    ui.on_cancel_destination(record("cancel"));
+    ui.on_choose_another_destination(record("choose"));
+    ui.on_save_here_anyway(record("anyway"));
+    ui.show().unwrap();
+    ui.set_destination_review(true);
+    ui.window().take_snapshot().unwrap();
+    // Focus starts on the safe choice.
+    press(&ui, slint::platform::Key::Return);
+    assert_eq!(chosen.get(), "choose");
+    // Tab from the last button wraps to the first, never to the page behind.
+    chosen.set("");
+    press(&ui, slint::platform::Key::Tab);
+    press(&ui, slint::platform::Key::Return);
+    assert_eq!(chosen.get(), "cancel");
+    chosen.set("");
+    press(&ui, slint::platform::Key::Tab);
+    press(&ui, slint::platform::Key::Tab);
+    press(&ui, slint::platform::Key::Tab);
+    press(&ui, slint::platform::Key::Return);
+    assert_eq!(chosen.get(), "cancel", "three Tabs cycle the three buttons");
+    chosen.set("");
+    press(&ui, slint::platform::Key::Backtab);
+    press(&ui, slint::platform::Key::Return);
+    assert_eq!(
+        chosen.get(),
+        "choose",
+        "Shift+Tab from the first wraps to the last"
+    );
+    // An update found meanwhile waits until the review closes: one dialog at a time.
+    let later = |ui: &AppWindow| {
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(ui, &i18n::t("Later"))
+            .next()
+            .is_some()
+    };
+    ui.set_update_notice(true);
+    ui.window().take_snapshot().unwrap();
+    assert!(!later(&ui), "no update notice over the destination review");
+    ui.set_destination_review(false);
+    ui.window().take_snapshot().unwrap();
+    assert!(later(&ui), "the update notice shows once the review closes");
 }

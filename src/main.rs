@@ -6,6 +6,7 @@ mod diagnostics;
 mod drives;
 mod installer;
 mod legacy_install;
+mod motion;
 #[cfg(any(target_os = "linux", windows))]
 mod native_process;
 mod preview;
@@ -100,6 +101,8 @@ struct Reclaim {
     destination_review: Option<(PathBuf, drives::Destination)>,
     /// The folder the last recovery saved to; the folder picker opens there next.
     last_destination: Option<PathBuf>,
+    /// The folder of the recovery that just finished, offered as "Open folder".
+    saved_folder: Option<PathBuf>,
     shown: ShownFiles,
     /// A slow candidate check named in the status line, and since when.
     long_check: Option<(&'static str, std::time::Instant)>,
@@ -183,6 +186,7 @@ impl Default for Reclaim {
             source_stamp: None,
             destination_review: None,
             last_destination: None,
+            saved_folder: None,
             shown: ShownFiles::default(),
             long_check: None,
         }
@@ -193,6 +197,8 @@ impl Default for Reclaim {
 const SYSTEM_VOLUME_WARNING: &str =
     "In use by the running system. Writes during a scan can overwrite the files you want back.";
 const FIRST_RUN_STATUS: &str = "Choose a drive or disk image to get started.";
+/// Status after a scan stops on an error; the error itself is shown under it.
+const SCAN_FAILED_STATUS: &str = "Scan failed. See the details below.";
 impl Reclaim {
     fn stop_operation(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -219,6 +225,7 @@ impl Reclaim {
         self.needs_administrator = false;
         self.unreadable.clear();
         self.recovery_status.clear();
+        self.saved_folder = None;
         self.started = Some(std::time::Instant::now());
         self.source_stamp = path.metadata().ok().map(|m| (m.len(), m.modified().ok()));
         self.scan_activity = None;
@@ -442,10 +449,12 @@ impl Reclaim {
         if self.exporting {
             return;
         }
+        self.saved_folder = None;
         // Recheck after the dialog: a mount or drive may have changed while it
         // was open. Never allow an affirmative click to write onto the source.
         if drives::destination(&source, &directory) == drives::Destination::SameDrive {
-            self.recovery_status = "Saving here can overwrite the deleted files you are trying to recover and damage them permanently. Choose a folder on a different physical drive, such as a USB drive.".into();
+            // Short: it shares a two-line row with Open folder and Recover.
+            self.recovery_status = "Not saved: that folder is on the drive you scanned.".into();
             return;
         }
         let files = self.recovery_files();
@@ -522,20 +531,16 @@ impl Reclaim {
         let result = match rx.try_recv() {
             Ok(result) => result,
             Err(mpsc::TryRecvError::Empty) => return false,
-            Err(mpsc::TryRecvError::Disconnected) => Err(
-                "Recovery ended unexpectedly. Check the destination folder before trying again."
-                    .into(),
-            ),
+            // Short: Open folder sits beside it for checking what was saved.
+            Err(mpsc::TryRecvError::Disconnected) => Err("Recovery ended unexpectedly.".into()),
         };
         self.export_receiver = None;
         self.exporting = false;
+        // Also after an error: files saved before it are in the folder.
+        self.saved_folder = self.last_destination.clone();
         self.recovery_status = match result {
-            Ok(n @ 1) => {
-                format!("Saved {n} file. Open the destination folder and verify their contents.")
-            }
-            Ok(n) => {
-                format!("Saved {n} files. Open the destination folder and verify their contents.")
-            }
+            Ok(n @ 1) => format!("Saved {n} file."),
+            Ok(n) => format!("Saved {n} files."),
             Err(e) => e,
         };
         true
@@ -609,7 +614,7 @@ impl Reclaim {
                             self.busy = false;
                             self.scan_activity = None;
                             self.scan_error = Some("The scan ended unexpectedly. You can recover the files already found or scan again.".into());
-                            self.status = "Scan failed. See the message above.".into();
+                            self.status = SCAN_FAILED_STATUS.into();
                         }
                         break;
                     }
@@ -696,7 +701,7 @@ impl Reclaim {
                             Err(e) => {
                                 self.scan_error =
                                     Some(i18n::explain("Could not read this volume: {0}", e));
-                                "Scan failed. See the message above.".into()
+                                SCAN_FAILED_STATUS.into()
                             }
                         };
                     }
@@ -801,18 +806,24 @@ impl Reclaim {
         ui.set_can_recover(self.exporting || selected > 0);
         ui.set_recovering(self.exporting);
         ui.set_recovery_status(i18n::t(&self.recovery_status).into());
+        ui.set_can_open_saved_folder(!self.exporting && self.saved_folder.is_some());
         let review = self.destination_review.as_ref();
         ui.set_destination_review(review.is_some());
         ui.set_destination_same_drive(matches!(review, Some((_, drives::Destination::SameDrive))));
         ui.set_destination_path(
             review
-                .map_or_default(|(folder, _)| i18n::ltr(&folder.display().to_string()))
+                // At most about two lines in the dialog, keeping the folder name at
+                // the end, so a deep path cannot push the choices out of view.
+                .map_or_default(|(folder, _)| {
+                    i18n::ltr(&shorten_middle(&folder.display().to_string(), 40, 120))
+                })
                 .into(),
         );
         ui.set_all_selected(visible > 0 && selected == visible);
         ui.set_has_results(!self.results.is_empty());
         ui.set_has_source(self.source.is_some());
         ui.set_scanned(self.scanned_source.is_some());
+        ui.set_scan_failed(self.status == SCAN_FAILED_STATUS);
         ui.set_show_status(
             self.busy
                 || self.scan_error.is_some()
@@ -847,16 +858,20 @@ impl Reclaim {
             )
             .into(),
         );
-        ui.set_detail(
-            self.inspected
-                .and_then(|index| {
-                    self.results
-                        .get(index)
-                        .map(|file| file_details(file, index.saturating_add(1)))
-                })
-                .unwrap_or_else(|| i18n::t("Select a file to inspect its details."))
-                .into(),
-        );
+        let details = self
+            .inspected
+            .and_then(|index| {
+                self.results
+                    .get(index)
+                    .map(|file| file_details(file, index.saturating_add(1)))
+            })
+            .unwrap_or_default();
+        ui.set_detail(if details.is_empty() {
+            i18n::t("Select a file to inspect its details.").into()
+        } else {
+            details_text(&details).into()
+        });
+        show_details(ui, details);
         ui.set_inspected(
             self.inspected
                 .filter(|&index| index < self.results.len())
@@ -954,9 +969,24 @@ impl Reclaim {
     }
 }
 /// One row of the file list for result `index`.
+/// Shortens a long name in the middle, keeping its start and its end (where
+/// numbers and the extension are). The list shows it only when the full name
+/// does not fit.
+fn shorten_middle(name: &str, keep_start: usize, keep_end: usize) -> String {
+    let count = name.chars().count();
+    if count <= keep_start.saturating_add(keep_end).saturating_add(1) {
+        return name.to_owned();
+    }
+    let start: String = name.chars().take(keep_start).collect();
+    let end: String = name.chars().skip(count.saturating_sub(keep_end)).collect();
+    format!("{}…{}", start.trim_end(), end.trim_start())
+}
 fn file_item(f: &Found, index: usize) -> FileItem {
+    let name = f.recovery_name(index.saturating_add(1));
     FileItem {
-        name: i18n::isolate(&f.recovery_name(index.saturating_add(1))).into(),
+        short: i18n::isolate(&shorten_middle(&name, 18, 12)).into(),
+        category: i32::try_from(reclaim::category_index(f.kind)).unwrap_or(0),
+        name: i18n::isolate(&name).into(),
         kind: f.kind.to_uppercase().into(),
         size: format_bytes(f.size).into(),
         selected: f.selected,
@@ -1033,40 +1063,62 @@ fn replace_model<T: Clone + PartialEq + 'static>(
         set(Rc::new(VecModel::from(rows)).into());
     }
 }
-fn file_details(file: &Found, number: usize) -> String {
-    let mut lines = vec![
-        i18n::isolate(&file.recovery_name(number)),
-        format!(
-            "{}: {}",
-            i18n::t("File type"),
-            i18n::isolate(&file.kind.to_uppercase())
-        ),
-        format!(
-            "{}: {} ({} {})",
-            i18n::t("Size"),
-            i18n::isolate(&format_bytes(file.size)),
-            i18n::isolate(&file.size.to_string()),
-            i18n::t("bytes")
-        ),
-        format!(
-            "{}: {}",
-            i18n::t("Source offset"),
-            i18n::isolate(&format!("0x{:X}", file.offset))
-        ),
-        i18n::t(file.validation.label()),
-        i18n::t(if file.original_name.is_some() {
-            "Original name recovered"
+/// Inspector line kinds, matching `DetailLine.kind` in the UI.
+const DETAIL_HEADING: i32 = 0;
+const DETAIL_FIELD: i32 = 1;
+const DETAIL_COPYABLE: i32 = 2;
+const DETAIL_NOTE: i32 = 3;
+fn detail(kind: i32, label: &str, value: String) -> DetailLine {
+    DetailLine {
+        kind,
+        label: if label.is_empty() {
+            "".into()
         } else {
-            "Generated filename"
-        }),
+            i18n::t(label).into()
+        },
+        value: value.into(),
+    }
+}
+/// The inspector's rows: the name, labelled facts, then plain notes.
+fn file_details(file: &Found, number: usize) -> Vec<DetailLine> {
+    let mut lines = vec![
+        detail(
+            DETAIL_HEADING,
+            "",
+            i18n::isolate(&file.recovery_name(number)),
+        ),
+        detail(
+            DETAIL_FIELD,
+            "File type",
+            i18n::isolate(&file.kind.to_uppercase()),
+        ),
+        detail(
+            DETAIL_FIELD,
+            "Size",
+            format!(
+                "{} ({} {})",
+                i18n::isolate(&format_bytes(file.size)),
+                i18n::isolate(&file.size.to_string()),
+                i18n::t("bytes")
+            ),
+        ),
+        // Plain text, without direction marks: it is selected and copied.
+        detail(
+            DETAIL_COPYABLE,
+            "Source offset",
+            format!("0x{:X}", file.offset),
+        ),
     ];
     if let Some(metadata) = &file.ntfs {
-        lines.push(format!(
-            "{}: {} · {}: {}",
-            i18n::t("Deleted NTFS record"),
-            i18n::isolate(&metadata.record_number.to_string()),
-            i18n::t("Sequence"),
-            i18n::isolate(&metadata.sequence_number.to_string())
+        lines.push(detail(
+            DETAIL_FIELD,
+            "Deleted NTFS record",
+            format!(
+                "{} · {}: {}",
+                i18n::isolate(&metadata.record_number.to_string()),
+                i18n::t("Sequence"),
+                i18n::isolate(&metadata.sequence_number.to_string())
+            ),
         ));
         let unix_epoch = jiff::civil::date(1970, 1, 1).at(0, 0, 0, 0);
         for (label, value) in [
@@ -1080,21 +1132,58 @@ fn file_details(file: &Found, number: usize) -> String {
                     .checked_add(jiff::SignedDuration::from_secs(timestamp))
                     .ok()
             }) {
-                lines.push(format!(
-                    "{}: {}",
-                    i18n::t(label),
-                    i18n::isolate(&format!("{} UTC", date.strftime("%Y-%m-%d %H:%M:%S")))
+                lines.push(detail(
+                    DETAIL_FIELD,
+                    label,
+                    i18n::isolate(&format!("{} UTC", date.strftime("%Y-%m-%d %H:%M:%S"))),
                 ));
             }
         }
-        lines.push(i18n::t("File dates do not indicate when a file was deleted. This scanner does not recover deletion timestamps."));
+    }
+    lines.push(detail(DETAIL_NOTE, "", i18n::t(file.validation.label())));
+    lines.push(detail(
+        DETAIL_NOTE,
+        "",
+        i18n::t(if file.original_name.is_some() {
+            "Original name recovered"
+        } else {
+            "Generated filename"
+        }),
+    ));
+    if file.ntfs.is_some() {
+        lines.push(detail(DETAIL_NOTE, "", i18n::t("File dates do not indicate when a file was deleted. This scanner does not recover deletion timestamps.")));
     } else {
-        lines.push(i18n::t("Deletion not confirmed"));
-        lines.push(i18n::t(
-            "Dates are not available for files found by signature scanning.",
+        lines.push(detail(DETAIL_NOTE, "", i18n::t("Deletion not confirmed")));
+        lines.push(detail(
+            DETAIL_NOTE,
+            "",
+            i18n::t("Dates are not available for files found by signature scanning."),
         ));
     }
-    lines.join("\n\n")
+    lines
+}
+/// Replaces the inspector rows only when they changed, so a selection in the
+/// copyable offset survives the many progress updates of a running scan.
+fn show_details(ui: &AppWindow, details: Vec<DetailLine>) {
+    let current = ui.get_details();
+    if current.row_count() == details.len() && current.iter().zip(&details).all(|(a, b)| a == *b) {
+        return;
+    }
+    ui.set_details(ModelRc::new(VecModel::from(details)));
+}
+/// The inspector rows as one text, for the window's accessible description.
+fn details_text(lines: &[DetailLine]) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            if line.label.is_empty() {
+                line.value.to_string()
+            } else {
+                format!("{}: {}", line.label, line.value)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 /// Desktop file ID (`packaging/linux/io.github.reclaim.Reclaim.desktop`). Linux
 /// desktops, Wayland ones in particular, take the window icon and taskbar
@@ -1144,6 +1233,28 @@ fn run() -> Result<(), slint::PlatformError> {
         });
     });
     let state = Rc::new(RefCell::new(Reclaim::default()));
+    {
+        let state = Rc::clone(&state);
+        ui.on_open_saved_folder(move || {
+            if let Some(folder) = state.borrow().saved_folder.clone() {
+                std::thread::spawn(move || {
+                    if let Err(e) = installer::open_folder(&folder) {
+                        diagnostics::write(&format!("{e:#}"));
+                    }
+                });
+            }
+        });
+    }
+    // Read off the UI thread: the desktop portal may be slow to answer.
+    {
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            if motion::reduce_motion() {
+                weak.upgrade_in_event_loop(|ui| ui.global::<Motion<'_>>().set_reduce(true))
+                    .ok();
+            }
+        });
+    }
     #[cfg(windows)]
     {
         let state = Rc::clone(&state);
@@ -1284,7 +1395,9 @@ fn run() -> Result<(), slint::PlatformError> {
                 return;
             };
             reset_preview(&ui);
-            ui.set_detail(file_details(f, index.saturating_add(1)).into());
+            let details = file_details(f, index.saturating_add(1));
+            ui.set_detail(details_text(&details).into());
+            show_details(&ui, details);
             ui.set_inspected(i);
             if preview::supported(f.kind) {
                 let f = f.clone();
