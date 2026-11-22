@@ -52,6 +52,55 @@ pub fn open_installer(path: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Show a local folder in the desktop's file manager, without a shell or command helper.
+pub fn open_folder(path: &std::path::Path) -> anyhow::Result<()> {
+    let path = if cfg!(windows) {
+        std::path::absolute(path)
+    } else {
+        path.canonicalize()
+    }?;
+    if !path.is_dir() {
+        bail!(reclaim::i18n::diagnostic(
+            "The recovery folder no longer exists."
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    portal_open(Some(&path), None)?;
+    #[cfg(windows)]
+    shell_open(path.as_os_str()).map_err(|code| {
+        anyhow!(reclaim::i18n::diagnostic(&format!(
+            "Could not open the folder (Windows error {code})."
+        )))
+    })?;
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let bytes = path.as_os_str().as_bytes();
+        // SAFETY: the URL is created from a live byte slice; the +1 reference is
+        // handed to `launch`, which releases it.
+        let url = unsafe {
+            core_foundation_sys::url::CFURLCreateFromFileSystemRepresentation(
+                core_foundation_sys::base::kCFAllocatorDefault,
+                bytes.as_ptr(),
+                isize::try_from(bytes.len()).unwrap_or(isize::MAX),
+                1,
+            )
+        };
+        launch(url)
+            .with_context(|| reclaim::i18n::diagnostic("Could not create folder URL"))?
+            .map_err(|status| {
+                anyhow!(reclaim::i18n::diagnostic(&format!(
+                    "Could not open the folder: {status}"
+                )))
+            })?;
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+    bail!(reclaim::i18n::diagnostic(
+        "Opening folders is unavailable on this platform."
+    ));
+    Ok(())
+}
+
 /// `ShellExecuteW` "open" for a file or URL; returns the Windows error code on failure.
 #[cfg(windows)]
 fn shell_open(target: &std::ffi::OsStr) -> Result<(), isize> {

@@ -184,3 +184,18 @@ pub fn assert_steady<R: ElementRoot>(ui: &R, id: &str, context: &str, states: &m
         }
     }
 }
+
+/// Fails when a wrapped label needs more height than its box, so its text is
+/// cut off. `room` is an invisible copy of the text sized to what it needs.
+pub fn assert_text_fits<R: ElementRoot>(ui: &R, label: &str, room: &str, context: &str) {
+    let find = |id: &str| {
+        ElementHandle::find_by_element_id(ui, id)
+            .next()
+            .unwrap_or_else(|| panic!("{context}: no element {id}"))
+    };
+    let (shown, needed) = (find(label).size().height, find(room).size().height);
+    assert!(
+        needed <= shown + SLACK,
+        "{context}: {label} needs {needed}px but has {shown}px, so its text is cut off"
+    );
+}
