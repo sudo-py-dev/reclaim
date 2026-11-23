@@ -111,7 +111,7 @@ const de: Dict = {
       { name: 'Dokumente und E-Books', list: 'PDF, Word, Excel, PowerPoint, OpenDocument, EPUB' },
       { name: 'Archive', list: 'ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK' },
       { name: 'Programme und Installer', list: 'EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG' },
-      { name: 'Audio und Video', list: 'WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
+      { name: 'Audio und Video', list: 'WAV, RF64, BW64, AIFF, AU, MIDI, AVI, MKV, WebM, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
       { name: 'Datenbanken', list: 'SQLite' },
     ],
     more: 'Vollständige Formatliste',
@@ -123,7 +123,7 @@ const de: Dict = {
     items: [
       'Überschriebene oder per SSD-TRIM gelöschte Daten lassen sich nicht zurückholen.',
       'Ursprüngliche Dateinamen und Ordner werden nicht wiederhergestellt; Dateien erhalten generierte Namen.',
-      'Die meisten Dateien sind auf 64 MiB begrenzt, fragmentierte Dateien können unvollständig sein.',
+      'Einige Formate lassen sich auch über 64 MiB wiederherstellen. Fragmentierte Dateien können unvollständig bleiben.',
       'Interne Mac-Laufwerke (APFS), Linux-Partitionen mit Btrfs oder XFS und komplette Disk-Images mit Partitionstabelle können noch nicht durchsucht werden.',
       'Ergebnisse gehen beim Beenden verloren, also speichere zuerst, was du brauchst.',
     ],

@@ -76,7 +76,7 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 - **Scan soon.** The longer the drive is used, the more deleted data gets overwritten.
 - **Names may change.** Reclaim finds files by their contents, so most come back with new names like `Image 0001.jpg` and without their original folders. Open them to see what they are.
 - **Some files may be damaged or incomplete**, even if they appear in the list. Check them before relying on them.
-- **Large files:** most file types are limited to 64 MiB, so very large videos or archives may not come back.
+- **Large files:** WAV, RF64, BW64, AVI, MKV, WebM, AIFF, AIFC, AU, Ogg, SQLite, TAR, 7z, and supported classic ZIP files can exceed 64 MiB. Other formats that require whole-file buffering may still hit that limit.
 - **Results are not saved** when you close Reclaim. Recover what you need first.
 - **No deletion dates.** Reclaim can't tell when a file was deleted.
 - **Works with the keyboard.** In the results, press Tab to reach the list, use the arrow keys to move between files, Space to tick one and Enter to see its details. Reclaim also follows your system's reduce-motion setting.
@@ -89,7 +89,7 @@ Pick the file for your computer from the **[latest release](https://github.com/s
 | Documents and ebooks | PDF, Word, Excel, PowerPoint, OpenDocument, EPUB |
 | Archives | ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK |
 | Programs and installers | EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG |
-| Audio and video | WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF) |
+| Audio and video | WAV, RF64, BW64, AIFF, AU, MIDI, AVI, MKV, WebM, Ogg Vorbis, Opus, Theora, Flash (SWF) |
 | Databases | SQLite |
 
 Common video formats such as MP4 and MOV can't be found yet. Technical details are in the [format report](docs/FILE_FORMAT_RESEARCH.md).

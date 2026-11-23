@@ -80,10 +80,20 @@ and content independently of signature carving.
 - `tests/new_formats.rs` verifies cross-block carving, exact exports, truncation,
   mutated headers, short reads, cancellation, checksum rejection, neighbouring
   GZIP members, XAR DTD rejection, and bounded work for common MZ noise.
-- Probes retain the existing 64 MiB candidate limit; the earlier bounded-memory
-  large-classic-ZIP path is separate. Loops, table counts, inflated output and XML
+- Whole-file probes retain a 64 MiB candidate limit. The bounded-memory paths
+  for WAV, RF64, BW64, AVI, MKV, WebM, AIFF, AIFC, AU, Ogg, SQLite, TAR, 7z
+  and supported classic ZIP
+  can discover and export larger files. Loops, table counts, inflated output and XML
   depth have limits. These bounds do not establish a wall-clock deadline for a
   blocked drive read.
+- MKV and WebM use finite EBML segment lengths and verify top-level element
+  framing, including Info, Tracks, and Cluster.
+  [EBML](https://www.rfc-editor.org/rfc/rfc8794.html) and
+  [Matroska](https://www.rfc-editor.org/rfc/rfc9559.html).
+- RF64 and BW64 require a table-free `ds64` chunk and use its 64-bit lengths
+  to walk aligned WAVE chunks.
+  [EBU Tech 3306](https://tech.ebu.ch/docs/tech/tech3306v1_1.pdf) and
+  [ITU-R BS.2088](https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.2088-2-202511-I%21%21PDF-E.pdf).
 - Header buckets are built from the signature table at compile time. Most bytes
   need no signature comparisons. Impossible MZ pointers are rejected from the
   streaming scan buffer before extra I/O. GZIP uses a persistent decoder so each

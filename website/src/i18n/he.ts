@@ -116,7 +116,7 @@ const he: Dict = {
       { name: 'מסמכים וספרים דיגיטליים', list: 'PDF, Word, Excel, PowerPoint, OpenDocument, EPUB' },
       { name: 'קובצי ארכיון', list: 'ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK' },
       { name: 'תוכנות וקובצי התקנה', list: 'EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG' },
-      { name: 'שמע ווידאו', list: 'WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
+      { name: 'שמע ווידאו', list: 'WAV, RF64, BW64, AIFF, AU, MIDI, AVI, MKV, WebM, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
       { name: 'מסדי נתונים', list: 'SQLite' },
     ],
     more: 'לרשימת הפורמטים המלאה',
@@ -128,7 +128,7 @@ const he: Dict = {
     items: [
       'מידע שנדרס, או שנמחק בפקודת TRIM בכונן SSD, אינו ניתן לשחזור.',
       'שמות הקבצים והתיקיות המקוריים אינם משוחזרים. לכל קובץ משוחזר מוקצה שם באופן אוטומטי.',
-      'לרוב סוגי הקבצים יש מגבלת גודל של 64 MiB, והשחזור של קבצים שמאוחסנים במקטעים עשוי להיות חלקי.',
+      'אפשר לשחזר חלק מסוגי הקבצים גם מעל 64 MiB. השחזור של קבצים שמאוחסנים במקטעים עשוי להיות חלקי.',
       'עדיין אי אפשר לסרוק את הכונן הפנימי של מחשבי Mac‏ (APFS), מחיצות Linux מסוג Btrfs או XFS וקובצי דימות של דיסק שלם הכוללות טבלת מחיצות.',
       'תוצאות הסריקה אינן נשמרות לאחר סגירת התוכנה. שחזרו את הקבצים הדרושים לפני הסגירה.',
     ],

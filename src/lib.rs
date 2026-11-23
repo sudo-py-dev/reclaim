@@ -5,6 +5,7 @@ mod allocation;
 mod bytes;
 mod detection;
 mod formats;
+mod large;
 use detection::{CandidateEnd, LIMIT};
 pub mod i18n;
 mod ntfs;
@@ -39,7 +40,8 @@ pub fn category_index(kind: &str) -> usize {
         "pdf" | "docx" | "xlsx" | "pptx" | "docm" | "xlsm" | "pptm" | "odt" | "ods" | "odp"
         | "epub" | "ole" | "txt" | "csv" | "json" | "xml" | "md" | "html" | "log" | "sqlite" => 2,
         "zip" | "7z" | "cab" | "rar" | "tar" | "gz" | "xar" => 3,
-        "wav" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" | "mid" | "m4a" => 4,
+        "wav" | "rf64" | "bw64" | "aiff" | "aifc" | "au" | "mp3" | "ogg" | "opus" | "mid"
+        | "m4a" => 4,
         "avi" | "mp4" | "ogv" | "mov" | "3gp" | "mkv" | "webm" => 5,
         "jar" | "apk" | "exe" | "dll" | "elf" | "msi" | "msp" | "mst" | "deb" | "rpm" | "dex"
         | "pkg" | "swf" => 6,
@@ -179,6 +181,21 @@ struct Format {
     ext: &'static str,
 }
 static FORMATS: &[Format] = &[
+    Format {
+        head: b"\x1a\x45\xdf\xa3",
+        tail: b"",
+        ext: "ebml",
+    },
+    Format {
+        head: b"RF64",
+        tail: b"",
+        ext: "rf64",
+    },
+    Format {
+        head: b"BW64",
+        tail: b"",
+        ext: "bw64",
+    },
     Format {
         head: b"MThd",
         tail: b"",
@@ -362,66 +379,9 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
         _ => {}
     }
     if fmt.tail.is_empty() {
-        let size = match fmt.ext {
-            "riff" | "aiff" => {
-                if bytes.len() < 12 {
-                    return CandidateEnd::More;
-                }
-                let kind = &bytes[8..12];
-                let n = if fmt.ext == "riff" {
-                    if !matches!(kind, b"WAVE" | b"WEBP" | b"AVI ") {
-                        return CandidateEnd::Invalid;
-                    }
-                    bytes::u32_le(bytes, 4)
-                } else {
-                    if !matches!(kind, b"AIFF" | b"AIFC") {
-                        return CandidateEnd::Invalid;
-                    }
-                    bytes::u32_be(bytes, 4)
-                };
-                if n < 4 {
-                    return CandidateEnd::Invalid;
-                }
-                u64::from(n) + 8
-            }
-            "au" => {
-                if bytes.len() < 24 {
-                    return CandidateEnd::More;
-                }
-                let read = |i| bytes::u32_be(bytes, i);
-                let (offset, data) = (read(4), read(8));
-                // Unknown-length AU streams cannot be bounded reliably in a disk image.
-                if offset < 24 || data == u32::MAX || data == 0 || read(16) == 0 || read(20) == 0 {
-                    return CandidateEnd::Invalid;
-                }
-                u64::from(offset) + u64::from(data)
-            }
-            "bmp" => {
-                if bytes.len() < 14 {
-                    return CandidateEnd::More;
-                }
-                if bytes[6..10] != [0; 4] {
-                    return CandidateEnd::Invalid;
-                }
-                let n = bytes::u32_le(bytes, 2);
-                if n < 14 {
-                    return CandidateEnd::Invalid;
-                }
-                if bytes.len() < 18 {
-                    return CandidateEnd::More;
-                }
-                let dib = bytes::u32_le(bytes, 14);
-                let pixel_offset = bytes::u32_le(bytes, 10);
-                if !matches!(dib, 12 | 40 | 52 | 56 | 64 | 108 | 124)
-                    || u64::from(dib) + 14 > u64::from(n)
-                    || u64::from(pixel_offset) < u64::from(dib) + 14
-                    || pixel_offset >= n
-                {
-                    return CandidateEnd::Invalid;
-                }
-                u64::from(n)
-            }
-            _ => return CandidateEnd::Invalid,
+        let size = match declared_size(fmt.ext, bytes) {
+            Ok(size) => size,
+            Err(state) => return state,
         };
         if size > LIMIT as u64 {
             return CandidateEnd::Invalid;
@@ -461,6 +421,71 @@ fn candidate_end(fmt: &Format, bytes: &[u8], from: usize, cancel: &AtomicBool) -
         }
     }
     CandidateEnd::More
+}
+
+fn declared_size(kind: &str, bytes: &[u8]) -> Result<u64, CandidateEnd> {
+    let size = match kind {
+        "riff" | "aiff" => {
+            if bytes.len() < 12 {
+                return Err(CandidateEnd::More);
+            }
+            let form = &bytes[8..12];
+            let n = if kind == "riff" {
+                if !matches!(form, b"WAVE" | b"WEBP" | b"AVI ") {
+                    return Err(CandidateEnd::Invalid);
+                }
+                bytes::u32_le(bytes, 4)
+            } else {
+                if !matches!(form, b"AIFF" | b"AIFC") {
+                    return Err(CandidateEnd::Invalid);
+                }
+                bytes::u32_be(bytes, 4)
+            };
+            if n < 4 {
+                return Err(CandidateEnd::Invalid);
+            }
+            u64::from(n) + 8
+        }
+        "au" => {
+            if bytes.len() < 24 {
+                return Err(CandidateEnd::More);
+            }
+            let read = |i| bytes::u32_be(bytes, i);
+            let (offset, data) = (read(4), read(8));
+            // Unknown-length AU streams cannot be bounded reliably in a disk image.
+            if offset < 24 || data == u32::MAX || data == 0 || read(16) == 0 || read(20) == 0 {
+                return Err(CandidateEnd::Invalid);
+            }
+            u64::from(offset) + u64::from(data)
+        }
+        "bmp" => {
+            if bytes.len() < 14 {
+                return Err(CandidateEnd::More);
+            }
+            if bytes[6..10] != [0; 4] {
+                return Err(CandidateEnd::Invalid);
+            }
+            let n = bytes::u32_le(bytes, 2);
+            if n < 14 {
+                return Err(CandidateEnd::Invalid);
+            }
+            if bytes.len() < 18 {
+                return Err(CandidateEnd::More);
+            }
+            let dib = bytes::u32_le(bytes, 14);
+            let pixel_offset = bytes::u32_le(bytes, 10);
+            if !matches!(dib, 12 | 40 | 52 | 56 | 64 | 108 | 124)
+                || u64::from(dib) + 14 > u64::from(n)
+                || u64::from(pixel_offset) < u64::from(dib) + 14
+                || pixel_offset >= n
+            {
+                return Err(CandidateEnd::Invalid);
+            }
+            u64::from(n)
+        }
+        _ => return Err(CandidateEnd::Invalid),
+    };
+    Ok(size)
 }
 
 /// What follows a PDF `%%EOF`.
@@ -759,6 +784,7 @@ pub(crate) fn same_format_family(kind: &str, detected: &str) -> bool {
             "mov" | "3gp" | "m4a" => "mp4",
             "webm" => "mkv",
             "aifc" => "aiff",
+            "rf64" | "bw64" => "wav",
             "msi" | "msp" | "mst" | "ole" => "cfb",
             other => other,
         }
@@ -1004,14 +1030,13 @@ pub(crate) fn scan_reader_with_filter(
                 let position = file.stream_position()?;
                 file.seek(SeekFrom::Start(offset))?;
                 let mut candidate = Vec::new();
-                let mut ogg = detection::Ogg::default();
                 let mut gzip = formats::Gzip::default();
                 let mut pdf = PdfScan::default();
                 let mut end = None;
                 let mut kind = fmt.ext;
                 let mut checked = Validation::Unverified;
                 let mut chunk = vec![0u8; 8192];
-                let mut rejected_zip = false;
+                let mut rejected = false;
                 let mut candidate_limit = LIMIT;
                 if fmt.ext == "zip" {
                     event(Event::Checking {
@@ -1021,16 +1046,25 @@ pub(crate) fn scan_reader_with_filter(
                     });
                     match zip::inspect(file, offset, cancel)? {
                         zip::Inspection::Complete(size) if size > LIMIT as u64 => {
-                            end = Some(to_usize(size));
+                            end = Some(size);
                             checked = Validation::StructureChecked;
                         }
                         zip::Inspection::Complete(size) => candidate_limit = to_usize(size),
-                        zip::Inspection::Invalid => rejected_zip = true,
+                        zip::Inspection::Invalid => rejected = true,
                         zip::Inspection::Unsupported => {}
                     }
                     file.seek(SeekFrom::Start(offset))?;
                 }
-                while !rejected_zip
+                if large::supports(fmt.ext) {
+                    if let Some(result) = large::inspect(file, offset, fmt.ext, cancel)? {
+                        end = Some(result.size);
+                        kind = result.kind;
+                        checked = result.validation;
+                    }
+                    rejected |= large::seek_only(fmt.ext);
+                    file.seek(SeekFrom::Start(offset))?;
+                }
+                while !rejected
                     && end.is_none()
                     && candidate.len() < candidate_limit
                     && !cancel.load(Ordering::Relaxed)
@@ -1063,8 +1097,6 @@ pub(crate) fn scan_reader_with_filter(
                             }
                             Err(state) => state,
                         }
-                    } else if fmt.ext == "ogg" {
-                        ogg.push(&candidate, cancel)
                     } else if fmt.ext == "gz" {
                         gzip.push(&candidate, cancel)
                     } else {
@@ -1072,13 +1104,8 @@ pub(crate) fn scan_reader_with_filter(
                     };
                     match boundary {
                         CandidateEnd::Complete(size) => {
-                            kind = xar_kind.unwrap_or_else(|| {
-                                if fmt.ext == "ogg" {
-                                    ogg.kind()
-                                } else {
-                                    candidate_kind(fmt, &candidate[..size])
-                                }
-                            });
+                            kind =
+                                xar_kind.unwrap_or_else(|| candidate_kind(fmt, &candidate[..size]));
                             event(Event::Checking {
                                 offset,
                                 kind,
@@ -1092,7 +1119,7 @@ pub(crate) fn scan_reader_with_filter(
                             };
                             if let Some(validation) = validation {
                                 checked = validation;
-                                end = Some(size);
+                                end = Some(size as u64);
                             }
                             break;
                         }
@@ -1115,18 +1142,18 @@ pub(crate) fn scan_reader_with_filter(
                     next_format = Some(&TAR_FORMAT);
                 }
                 if let Some(size) = end
-                    && readable(offset, size as u64)
+                    && readable(offset, size)
                 {
                     if matches!(
                         checked,
                         Validation::ImageDecoded | Validation::StructureChecked
                     ) || fmt.ext == "zip"
                     {
-                        skip_until = offset + size as u64;
+                        skip_until = offset + size;
                     }
                     event(Event::Found(Found {
                         offset,
-                        size: size as u64,
+                        size,
                         kind,
                         selected: true,
                         validation: checked,
@@ -1295,7 +1322,8 @@ fn stage_recovery(
     if (found.size == 0 && found.resident_data.is_none())
         || (found.size > LIMIT as u64
             && found.extents.is_none()
-            && !(found.kind == "zip" && found.size <= u64::from(u32::MAX) + 65557))
+            && !(found.kind == "zip" && found.size <= u64::from(u32::MAX) + 65557)
+            && !large::supports_result(found.kind))
         || found
             .resident_data
             .as_ref()
@@ -1323,7 +1351,23 @@ fn stage_recovery(
             "Source changed or candidate is truncated",
         ));
     }
-    if found.extents.is_some()
+    if (found.size > LIMIT as u64 || large::seek_only(found.kind))
+        && large::supports_result(found.kind)
+        && (found.extents.is_none() || matches!(found.validation, Validation::StructureChecked))
+    {
+        let cancel = AtomicBool::new(false);
+        let actual = large::inspect(output.as_file_mut(), 0, found.kind, &cancel)?;
+        if !actual.is_some_and(|result| {
+            result.size == found.size
+                && result.kind == found.kind
+                && result.validation == found.validation
+        }) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Recovered file failed format checks. The source may have changed since scanning.",
+            ));
+        }
+    } else if found.extents.is_some()
         && !matches!(
             found.validation,
             Validation::ImageDecoded | Validation::StructureChecked

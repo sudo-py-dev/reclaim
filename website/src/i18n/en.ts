@@ -109,7 +109,7 @@ const en = {
       { name: 'Documents and ebooks', list: 'PDF, Word, Excel, PowerPoint, OpenDocument, EPUB' },
       { name: 'Archives', list: 'ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK' },
       { name: 'Programs and installers', list: 'EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG' },
-      { name: 'Audio and video', list: 'WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
+      { name: 'Audio and video', list: 'WAV, RF64, BW64, AIFF, AU, MIDI, AVI, MKV, WebM, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
       { name: 'Databases', list: 'SQLite' },
     ],
     more: 'Full format coverage',
@@ -121,7 +121,7 @@ const en = {
     items: [
       'Overwritten data, or data erased by an SSD’s TRIM, cannot be brought back.',
       'Original file names and folders are not restored; files get generated names.',
-      'Most files are limited to 64 MiB, and fragmented files may come back incomplete.',
+      'Some formats can be recovered above 64 MiB. Fragmented files may come back incomplete.',
       'Mac built-in drives (APFS), Linux partitions using Btrfs or XFS, and whole-disk images with partition tables can’t be scanned yet.',
       'Scan results are not kept after you quit, so save what you need first.',
     ],

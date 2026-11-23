@@ -339,12 +339,16 @@ fn elf(b: &[u8]) -> Probe {
     Ok(end)
 }
 
+pub(crate) fn seven_header_valid(b: &[u8]) -> bool {
+    b.len() >= 32
+        && b.starts_with(b"7z\xbc\xaf\x27\x1c")
+        && b[6] == 0
+        && crc32fast::hash(&b[12..32]) == crate::bytes::u32_le(b, 8)
+}
+
 fn seven(b: &[u8]) -> Probe {
     need(b, 32)?;
-    if !b.starts_with(b"7z\xbc\xaf\x27\x1c")
-        || b[6] != 0
-        || crc32fast::hash(&b[12..32]) != crate::bytes::u32_le(b, 8)
-    {
+    if !seven_header_valid(b) {
         return Err(CandidateEnd::Invalid);
     }
     let start = span(32, le64(b, 12))?;

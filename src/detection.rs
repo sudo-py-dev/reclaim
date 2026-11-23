@@ -24,12 +24,20 @@ use std::{
 };
 
 pub(crate) fn sqlite_end(bytes: &[u8]) -> CandidateEnd {
-    use CandidateEnd::{Complete, Invalid, More};
+    match sqlite_size(bytes) {
+        Ok(size) if size <= bytes.len() as u64 => CandidateEnd::Complete(to_usize(size)),
+        Ok(_) => CandidateEnd::More,
+        Err(state) => state,
+    }
+}
+
+pub(crate) fn sqlite_size(bytes: &[u8]) -> Result<u64, CandidateEnd> {
+    use CandidateEnd::{Invalid, More};
     if bytes.len() < 100 {
-        return More;
+        return Err(More);
     }
     if !bytes.starts_with(b"SQLite format 3\0") {
-        return Invalid;
+        return Err(Invalid);
     }
     let short = |p| u16::from_be_bytes([bytes[p], bytes[p + 1]]) as usize;
     let long = |p| crate::bytes::u32_be(bytes, p);
@@ -56,23 +64,17 @@ pub(crate) fn sqlite_end(bytes: &[u8]) -> CandidateEnd {
         || long(36) >= pages
         || long(52) > pages
     {
-        return Invalid;
+        return Err(Invalid);
     }
-    let Some(size) = u64::from(pages)
-        .checked_mul(page as u64)
-        .filter(|n| *n <= LIMIT as u64)
-    else {
-        return Invalid;
-    };
     if bytes.len() < 108 {
-        return More;
+        return Err(More);
     }
     // Page one contains the sqlite_schema table, so its root must be a table
     // b-tree. Check its cell directory before accepting the declared file size.
     let header = match bytes[100] {
         5 => 12,
         13 => 8,
-        _ => return Invalid,
+        _ => return Err(Invalid),
     };
     let usable = page - usize::from(bytes[20]);
     let cells_end = 100 + header + short(103) * 2;
@@ -86,25 +88,21 @@ pub(crate) fn sqlite_end(bytes: &[u8]) -> CandidateEnd {
         || bytes[107] > 60
         || (free != 0 && (free < cells_end || free + 4 > usable))
     {
-        return Invalid;
+        return Err(Invalid);
     }
     if bytes.len() < page {
-        return More;
+        return Err(More);
     }
     if header == 12 && (long(108) == 0 || long(108) > pages) {
-        return Invalid;
+        return Err(Invalid);
     }
     for at in (100 + header..cells_end).step_by(2) {
         let cell = short(at);
         if cell < content || cell >= usable {
-            return Invalid;
+            return Err(Invalid);
         }
     }
-    if bytes.len() < to_usize(size) {
-        More
-    } else {
-        Complete(to_usize(size))
-    }
+    Ok(u64::from(pages) * page as u64)
 }
 
 const fn crc_table() -> [u32; 256] {
@@ -152,6 +150,11 @@ impl Ogg {
         } else {
             self.kind
         }
+    }
+
+    pub(crate) fn push_page(&mut self, page: &[u8], cancel: &AtomicBool) -> CandidateEnd {
+        self.cursor = 0;
+        self.push(page, cancel)
     }
 
     pub(crate) fn push(&mut self, bytes: &[u8], cancel: &AtomicBool) -> CandidateEnd {

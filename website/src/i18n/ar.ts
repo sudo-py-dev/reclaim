@@ -111,7 +111,7 @@ const ar: Dict = {
       { name: 'المستندات والكتب الإلكترونية', list: 'PDF, Word, Excel, PowerPoint, OpenDocument, EPUB' },
       { name: 'الملفات المضغوطة', list: 'ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK' },
       { name: 'البرامج وملفات التثبيت', list: 'EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG' },
-      { name: 'الصوت والفيديو', list: 'WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
+      { name: 'الصوت والفيديو', list: 'WAV, RF64, BW64, AIFF, AU, MIDI, AVI, MKV, WebM, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
       { name: 'قواعد البيانات', list: 'SQLite' },
     ],
     more: 'قائمة الصيغ الكاملة',
@@ -123,7 +123,7 @@ const ar: Dict = {
     items: [
       'لا يمكن استعادة البيانات التي كُتب فوقها أو مسحتها ميزة TRIM في أقراص SSD.',
       'لا تُستعاد أسماء الملفات والمجلدات الأصلية، بل تحصل الملفات على أسماء مولّدة.',
-      'حجم معظم الملفات محدود بـ 64 MiB، وقد تُستعاد الملفات المجزأة ناقصة.',
+      'يمكن استرداد بعض التنسيقات بأحجام تتجاوز 64 MiB. قد تُستعاد الملفات المجزأة ناقصة.',
       'لا يمكن بعد فحص الأقراص الداخلية لأجهزة Mac ‏(APFS) ولا أقسام Linux بنظام Btrfs أو XFS ولا صور الأقراص الكاملة التي تحتوي على جدول أقسام.',
       'لا تُحفظ النتائج بعد إغلاق التطبيق، فاحفظ ما تحتاجه أولًا.',
     ],

@@ -111,7 +111,7 @@ const es: Dict = {
       { name: 'Documentos y libros electrónicos', list: 'PDF, Word, Excel, PowerPoint, OpenDocument, EPUB' },
       { name: 'Archivos comprimidos', list: 'ZIP, 7z, RAR5, CAB, TAR, GZIP, XAR, JAR, APK' },
       { name: 'Programas e instaladores', list: 'EXE, DLL, ELF, MSI, DEB, RPM, DEX, PKG' },
-      { name: 'Audio y vídeo', list: 'WAV, AIFF, AU, MIDI, AVI, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
+      { name: 'Audio y vídeo', list: 'WAV, RF64, BW64, AIFF, AU, MIDI, AVI, MKV, WebM, Ogg Vorbis, Opus, Theora, Flash (SWF)' },
       { name: 'Bases de datos', list: 'SQLite' },
     ],
     more: 'Cobertura completa de formatos',
@@ -123,7 +123,7 @@ const es: Dict = {
     items: [
       'Los datos sobrescritos, o borrados por el TRIM de un SSD, no se pueden recuperar.',
       'No se restauran los nombres ni las carpetas originales; los archivos reciben nombres generados.',
-      'La mayoría de los archivos están limitados a 64 MiB, y los fragmentados pueden quedar incompletos.',
+      'Algunos formatos se pueden recuperar por encima de 64 MiB. Los archivos fragmentados pueden quedar incompletos.',
       'Aún no se pueden analizar los discos internos de Mac (APFS), las particiones de Linux con Btrfs o XFS ni las imágenes de disco completo con tabla de particiones.',
       'Los resultados no se conservan al cerrar la aplicación: guarda primero lo que necesites.',
     ],
