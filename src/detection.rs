@@ -25,6 +25,7 @@ use std::{
 
 pub(crate) fn sqlite_end(bytes: &[u8]) -> CandidateEnd {
     match sqlite_size(bytes) {
+        Ok(size) if size > LIMIT as u64 => CandidateEnd::Invalid,
         Ok(size) if size <= bytes.len() as u64 => CandidateEnd::Complete(to_usize(size)),
         Ok(_) => CandidateEnd::More,
         Err(state) => state,

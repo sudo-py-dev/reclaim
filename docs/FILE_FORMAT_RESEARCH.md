@@ -86,8 +86,9 @@ and content independently of signature carving.
   can discover and export larger files. Loops, table counts, inflated output and XML
   depth have limits. These bounds do not establish a wall-clock deadline for a
   blocked drive read.
-- MKV and WebM use finite EBML segment lengths and verify top-level element
-  framing, including Info, Tracks, and Cluster.
+- MKV and WebM require a finite EBML Segment and finite sizes for its direct children.
+  The probe checks Segment framing and the elements directly inside Info, Tracks,
+  and Cluster.
   [EBML](https://www.rfc-editor.org/rfc/rfc8794.html) and
   [Matroska](https://www.rfc-editor.org/rfc/rfc9559.html).
 - RF64 and BW64 require a table-free `ds64` chunk and use its 64-bit lengths

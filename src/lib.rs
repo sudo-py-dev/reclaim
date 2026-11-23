@@ -950,7 +950,7 @@ pub(crate) fn scan_reader_with_buffer(
     event: impl FnMut(Event),
     buffer_size: usize,
 ) -> io::Result<()> {
-    scan_reader_with_filter(file, cancel, event, buffer_size, |_, _| true)
+    scan_reader_with_filter(file, cancel, event, buffer_size, None)
 }
 
 pub(crate) fn scan_reader_with_filter(
@@ -958,7 +958,7 @@ pub(crate) fn scan_reader_with_filter(
     cancel: &AtomicBool,
     mut event: impl FnMut(Event),
     buffer_size: usize,
-    mut readable: impl FnMut(u64, u64) -> bool,
+    readable: Option<&dyn Fn(u64, u64) -> bool>,
 ) -> io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
     let mut buffer = vec![0; buffer_size.clamp(262, 1024 * 1024)];
@@ -1011,7 +1011,7 @@ pub(crate) fn scan_reader_with_filter(
                 let result = ntfs::read_record(file, offset, cancel);
                 file.seek(SeekFrom::Start(position))?;
                 if let Some((found, record_size)) = result?
-                    && readable(offset, record_size as u64)
+                    && readable.is_none_or(|check| check(offset, record_size as u64))
                 {
                     skip_until = offset + record_size as u64;
                     resident_bytes += to_usize(found.size);
@@ -1056,7 +1056,19 @@ pub(crate) fn scan_reader_with_filter(
                     file.seek(SeekFrom::Start(offset))?;
                 }
                 if large::supports(fmt.ext) {
-                    if let Some(result) = large::inspect(file, offset, fmt.ext, cancel)? {
+                    let progress = |bytes| {
+                        if last_progress.elapsed() >= std::time::Duration::from_millis(250) {
+                            event(Event::Checking {
+                                offset,
+                                kind: fmt.ext,
+                                bytes: to_usize(bytes),
+                            });
+                            last_progress = std::time::Instant::now();
+                        }
+                    };
+                    if let Some(result) =
+                        large::inspect_with_progress(file, offset, fmt.ext, cancel, progress)?
+                    {
                         end = Some(result.size);
                         kind = result.kind;
                         checked = result.validation;
@@ -1131,19 +1143,38 @@ pub(crate) fn scan_reader_with_filter(
                         }
                     }
                 }
+                // Seek probes can skip payloads. On tolerant sources, check the
+                // span beyond the sequential read before publishing a result.
+                if let (Some(size), Some(check)) = (end, readable) {
+                    if let Some(stop) = offset.checked_add(size).filter(|_| check(offset, size)) {
+                        let mut at = position.max(offset);
+                        if candidate.is_empty() && at < stop {
+                            file.seek(SeekFrom::Start(at))?;
+                            while at < stop {
+                                let count = to_usize((stop - at).min(buffer.len() as u64));
+                                let n = read_chunk(file, &mut buffer[..count], cancel)?;
+                                if n == 0 || !check(at, n as u64) {
+                                    end = None;
+                                    break;
+                                }
+                                at += n as u64;
+                            }
+                        }
+                    } else {
+                        end = None;
+                    }
+                }
                 file.seek(SeekFrom::Start(position))?;
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(());
                 }
                 if end.is_none()
-                    && fmt.ext == "bmp"
+                    && matches!(fmt.ext, "bmp" | "rf64" | "bw64")
                     && carry.get(i + 257..i + 262) == Some(b"ustar".as_slice())
                 {
                     next_format = Some(&TAR_FORMAT);
                 }
-                if let Some(size) = end
-                    && readable(offset, size)
-                {
+                if let Some(size) = end {
                     if matches!(
                         checked,
                         Validation::ImageDecoded | Validation::StructureChecked
@@ -1351,15 +1382,19 @@ fn stage_recovery(
             "Source changed or candidate is truncated",
         ));
     }
+    let filesystem_record = found.original_name.is_some() || found.ntfs.is_some();
     if (found.size > LIMIT as u64 || large::seek_only(found.kind))
         && large::supports_result(found.kind)
-        && (found.extents.is_none() || matches!(found.validation, Validation::StructureChecked))
+        && (!filesystem_record || found.validation == Validation::StructureChecked)
     {
         let cancel = AtomicBool::new(false);
         let actual = large::inspect(output.as_file_mut(), 0, found.kind, &cancel)?;
         if !actual.is_some_and(|result| {
             result.size == found.size
-                && result.kind == found.kind
+                && (result.kind == found.kind
+                    || (found.resident_data.is_some()
+                        && matches!(found.kind, "ogg" | "opus" | "ogv")
+                        && matches!(result.kind, "ogg" | "opus" | "ogv")))
                 && result.validation == found.validation
         }) {
             return Err(io::Error::new(
@@ -1367,7 +1402,8 @@ fn stage_recovery(
                 "Recovered file failed format checks. The source may have changed since scanning.",
             ));
         }
-    } else if found.extents.is_some()
+    } else if filesystem_record
+        && found.extents.is_some()
         && !matches!(
             found.validation,
             Validation::ImageDecoded | Validation::StructureChecked
@@ -1518,24 +1554,46 @@ mod tests {
     }
 
     #[test]
-    fn tar_is_carved_when_its_first_name_looks_like_bmp() {
-        let mut tar = include_bytes!("../tests/fixtures/formats/sample.tar").to_vec();
-        tar[..10].copy_from_slice(b"BM-file.tx");
-        tar[148..156].fill(b' ');
-        let sum: usize = tar[..512].iter().copied().map(usize::from).sum();
-        tar[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
-        let mut found = Vec::new();
-        scan_reader(
-            &mut io::Cursor::new(tar),
-            &AtomicBool::new(false),
-            |event| {
-                if let Event::Found(file) = event {
-                    found.push((file.offset, file.kind));
-                }
-            },
-        )
-        .unwrap();
-        assert_eq!(found, [(0, "tar")]);
+    fn tar_is_carved_when_its_first_name_looks_like_another_format() {
+        for name in [b"BM-file.tx", b"RF64-notes", b"BW64-notes"] {
+            let mut tar = include_bytes!("../tests/fixtures/formats/sample.tar").to_vec();
+            tar[..10].copy_from_slice(name);
+            tar[148..156].fill(b' ');
+            let sum: usize = tar[..512].iter().copied().map(usize::from).sum();
+            tar[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+            let mut found = Vec::new();
+            scan_reader(
+                &mut io::Cursor::new(tar),
+                &AtomicBool::new(false),
+                |event| {
+                    if let Event::Found(file) = event {
+                        found.push((file.offset, file.kind));
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(found, [(0, "tar")]);
+        }
+    }
+
+    #[test]
+    fn resident_ogg_export_preserves_the_extension_kind() {
+        let bytes = include_bytes!("../tests/fixtures/real.opus");
+        let found = Found {
+            offset: 0,
+            size: bytes.len() as u64,
+            kind: "ogg",
+            selected: true,
+            validation: Validation::StructureChecked,
+            original_name: Some("clip.ogg".into()),
+            resident_data: Some(std::sync::Arc::from(bytes.as_slice())),
+            ntfs: None,
+            extents: None,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("clip.ogg");
+        recover_reader(&mut io::Cursor::new([]), &output, &found).unwrap();
+        assert_eq!(std::fs::read(output).unwrap(), bytes.as_slice());
     }
 
     #[test]

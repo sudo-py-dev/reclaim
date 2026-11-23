@@ -144,14 +144,15 @@ pub(crate) fn scan(
             event(e);
         },
         buffer_size,
-        |offset, bytes| {
+        Some(&|offset, bytes| {
             let end = offset.saturating_add(bytes);
-            !damage
+            damage
                 .borrow()
                 .ranges
-                .iter()
-                .any(|(&start, &stop)| offset < stop && start < end)
-        },
+                .range(..end)
+                .next_back()
+                .is_none_or(|(_, &stop)| offset >= stop)
+        }),
     );
     for (offset, bytes) in damage.borrow_mut().pending.drain(..) {
         event(Event::Unreadable { offset, bytes });
@@ -221,6 +222,40 @@ mod tests {
             assert_eq!(skipped, vec![(8192, 4096)]);
         }
     }
+    #[test]
+    fn seek_probe_checks_unread_payload_before_publishing_or_skipping() {
+        let mut source = device();
+        let size = 32768u64;
+        let data = source.data.get_mut();
+        data[..48].fill(0);
+        data[..20].copy_from_slice(b"RF64\xff\xff\xff\xffWAVEds64\x1c\0\0\0");
+        data[20..28].copy_from_slice(&(size - 8).to_le_bytes());
+        data[28..36].copy_from_slice(&(size - 80).to_le_bytes());
+        data[48..80].copy_from_slice(
+            b"fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x40\x1f\0\0\x01\0\x08\0data\xff\xff\xff\xff",
+        );
+
+        let results = |source: &mut Faulty| {
+            let mut found = Vec::new();
+            scan(
+                source,
+                &AtomicBool::new(false),
+                |event| {
+                    if let Event::Found(file) = event {
+                        found.push((file.offset, file.kind));
+                    }
+                },
+                4096,
+                &|_| u64::MAX,
+            )
+            .unwrap();
+            found
+        };
+        assert_eq!(results(&mut source), [(12288, "pdf"), (28672, "pdf")]);
+        source.bad = size..size;
+        assert_eq!(results(&mut source), [(0, "rf64")]);
+    }
+
     #[test]
     fn permission_errors_remain_fatal_and_cancellation_does_not_probe() {
         let mut source = device();

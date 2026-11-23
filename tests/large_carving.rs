@@ -54,6 +54,12 @@ fn large_wav_is_exported_and_truncated_or_changed_candidates_are_rejected() {
     let output = dir.path().join("changed.wav");
     assert!(recover_reader(&mut disk, &output, found).is_err());
     assert!(!output.exists());
+
+    let mut fragmented = found.clone();
+    fragmented.extents = Some(vec![(offset, 512), (offset + 512, size - 512)].into());
+    let output = dir.path().join("changed-with-extents.wav");
+    assert!(recover_reader(&mut disk, &output, &fragmented).is_err());
+    assert!(!output.exists());
 }
 
 #[test]
@@ -106,6 +112,8 @@ fn matroska_and_webm_carve_only_finite_segments_with_media() {
     for (doc_type, kind) in [
         (b"matroska".as_slice(), "mkv"),
         (b"webm".as_slice(), "webm"),
+        (b"matroska\0".as_slice(), "mkv"),
+        (b"webm\0ignored".as_slice(), "webm"),
     ] {
         let mut data = vec![
             0x1a,
@@ -118,11 +126,26 @@ fn matroska_and_webm_carve_only_finite_segments_with_media() {
         data.extend_from_slice(doc_type);
         data.extend_from_slice(&[0x18, 0x53, 0x80, 0x67]);
         let segment_size = data.len();
-        data.push(0x92);
-        for id in [0x1549_a966u32, 0x1654_ae6b, 0x1f43_b675] {
+        data.push(0x80);
+        // Info with TimestampScale, Tracks with an Opus TrackEntry, and a
+        // Cluster with a Timestamp and SimpleBlock.
+        let elements = [
+            (0x1549_a966u32, b"\x2a\xd7\xb1\x83\x0f\x42\x40".as_slice()),
+            (
+                0x1654_ae6b,
+                b"\xae\x92\xd7\x81\x01\x73\xc5\x81\x01\x83\x81\x02\x86\x86A_OPUS",
+            ),
+            (
+                0x1f43_b675,
+                b"\xe7\x81\x00\xa3\x87\x81\x00\x00\x80\xf8\xff\xfe",
+            ),
+        ];
+        for (id, payload) in elements {
             data.extend_from_slice(&id.to_be_bytes());
-            data.extend_from_slice(&[0x81, 0]);
+            data.push(0x80 + u8::try_from(payload.len()).unwrap());
+            data.extend_from_slice(payload);
         }
+        data[segment_size] += u8::try_from(data.len() - segment_size - 1).unwrap();
 
         let scan = |bytes: &[u8]| {
             let mut candidates = Vec::new();
@@ -148,6 +171,20 @@ fn matroska_and_webm_carve_only_finite_segments_with_media() {
         recover_reader(&mut std::io::Cursor::new(&data), &output, &files[0]).unwrap();
         assert_eq!(std::fs::read(output).unwrap(), data);
         assert!(scan(&data[..data.len() - 1]).is_empty());
+        let mut malformed = data.clone();
+        malformed.truncate(segment_size + 1);
+        malformed[segment_size] = 0x92;
+        for (id, _) in elements {
+            malformed.extend_from_slice(&id.to_be_bytes());
+            malformed.extend_from_slice(&[0x81, 0]);
+        }
+        assert!(scan(&malformed).is_empty());
+
+        let cluster_size = data.len() - elements[2].1.len() - 1;
+        let original_size = data[cluster_size];
+        data[cluster_size] = 0xff;
+        assert!(scan(&data).is_empty());
+        data[cluster_size] = original_size;
         data[segment_size] = 0xff;
         assert!(scan(&data).is_empty());
     }

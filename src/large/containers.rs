@@ -6,6 +6,8 @@ use std::{
     sync::atomic::AtomicBool,
 };
 
+const MAX_EBML_HEADER: usize = 4096;
+
 struct Element {
     id: u32,
     data: u64,
@@ -70,7 +72,7 @@ pub(super) fn matroska(
     let Some(header) = element(input, start, u64::MAX, cancel)? else {
         return Ok(None);
     };
-    if header.id != 0x1a45_dfa3 || header.end - header.data > 4096 {
+    if header.id != 0x1a45_dfa3 || header.end - header.data > MAX_EBML_HEADER as u64 {
         return Ok(None);
     }
     let mut at = header.data;
@@ -83,16 +85,16 @@ pub(super) fn matroska(
             if kind.is_some() {
                 return Ok(None);
             }
-            let mut name = [0; 8];
+            let mut name = [0; MAX_EBML_HEADER];
             let Some(name) = name.get_mut(..bytes::to_usize(child.end - child.data)) else {
                 return Ok(None);
             };
             if !read_at(input, child.data, name, cancel)? {
                 return Ok(None);
             }
-            kind = match &*name {
-                b"matroska" => Some("mkv"),
-                b"webm" => Some("webm"),
+            kind = match name.split(|&byte| byte == 0).next() {
+                Some(b"matroska") => Some("mkv"),
+                Some(b"webm") => Some("webm"),
                 _ => return Ok(None),
             };
         }
@@ -108,27 +110,45 @@ pub(super) fn matroska(
         return Ok(None);
     }
 
-    // Require actual media framing before skipping payloads on the main scan.
+    // The Segment and each direct child must have finite sizes.
+    // Share the element budget across all inspected levels.
     at = segment.data;
     let mut seen = 0;
-    for _ in 0..1_000_000 {
-        if at == segment.end {
-            return Ok((seen == 7).then_some((at - start, kind)));
+    let mut budget = 1_000_000;
+    while at < segment.end {
+        if budget == 0 {
+            return Ok(None);
         }
+        budget -= 1;
         let Some(child) = element(input, at, segment.end, cancel)? else {
-            break;
+            return Ok(None);
         };
-        if child.data < child.end {
-            seen |= match child.id {
-                0x1549_a966 => 1, // Info
-                0x1654_ae6b => 2, // Tracks
-                0x1f43_b675 => 4, // Cluster
-                _ => 0,
-            };
+        let bit = match child.id {
+            0x1549_a966 => 1, // Info
+            0x1654_ae6b => 2, // Tracks
+            0x1f43_b675 => 4, // Cluster
+            _ => 0,
+        };
+        if bit != 0 {
+            let mut nested_at = child.data;
+            if nested_at == child.end {
+                return Ok(None);
+            }
+            while nested_at < child.end {
+                if budget == 0 {
+                    return Ok(None);
+                }
+                budget -= 1;
+                let Some(nested) = element(input, nested_at, child.end, cancel)? else {
+                    return Ok(None);
+                };
+                nested_at = nested.end;
+            }
+            seen |= bit;
         }
         at = child.end;
     }
-    Ok(None)
+    Ok((seen == 7).then_some((at - start, kind)))
 }
 
 pub(super) fn wave64(

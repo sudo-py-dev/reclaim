@@ -39,6 +39,16 @@ pub(crate) fn inspect(
     kind: &str,
     cancel: &AtomicBool,
 ) -> io::Result<Option<Candidate>> {
+    inspect_with_progress(input, start, kind, cancel, |_| {})
+}
+
+pub(crate) fn inspect_with_progress(
+    input: &mut (impl Read + Seek),
+    start: u64,
+    kind: &str,
+    cancel: &AtomicBool,
+    progress: impl FnMut(u64),
+) -> io::Result<Option<Candidate>> {
     let (size, kind, validation) = match kind {
         "riff" | "wav" | "avi" | "aiff" | "aifc" | "au" => {
             let mut header = [0; 24];
@@ -69,7 +79,7 @@ pub(crate) fn inspect(
             (size, "sqlite", Validation::StructureChecked)
         }
         "ogg" | "opus" | "ogv" => {
-            return ogg(input, start, cancel);
+            return ogg(input, start, cancel, progress);
         }
         "ebml" | "mkv" | "webm" => {
             let Some((size, kind)) = containers::matroska(input, start, cancel)? else {
@@ -218,6 +228,7 @@ fn ogg(
     input: &mut (impl Read + Seek),
     start: u64,
     cancel: &AtomicBool,
+    mut progress: impl FnMut(u64),
 ) -> io::Result<Option<Candidate>> {
     let mut ogg = detection::Ogg::default();
     // One maximum-size page: fixed header, lacing table and packet data.
@@ -225,6 +236,7 @@ fn ogg(
     input.seek(SeekFrom::Start(start))?;
     let mut offset = start;
     loop {
+        progress(offset - start);
         let Some((header, body)) = page.split_at_mut_checked(27) else {
             return Ok(None);
         };
