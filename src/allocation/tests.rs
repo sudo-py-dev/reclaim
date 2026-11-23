@@ -585,7 +585,7 @@ fn malformed_ext_and_hfs_headers_do_not_panic() {
 
 /// A deleted MFT record in the NTFS 3.0 layout Linux's ntfs3 driver writes:
 /// update array at 42, attributes from 48, and no file name left behind.
-fn ntfs3_deleted_record(runs: &[u8], size: u64) -> Vec<u8> {
+pub(super) fn ntfs3_deleted_record(runs: &[u8], size: u64) -> Vec<u8> {
     let mut b = vec![0; 1024];
     b[..4].copy_from_slice(b"FILE");
     put16(&mut b, 4, 42);
