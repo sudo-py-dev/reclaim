@@ -324,14 +324,24 @@ pub(super) fn plan(
         clusters,
     };
     plan.files = files_or_none(
-        deleted_files(input, &mft, record_size, geometry, &bitmap, total, cancel),
+        deleted_files(input, &mft, record_size, geometry, &bitmap, total, cancel).map(
+            |(files, skipped)| {
+                if skipped != 0 {
+                    log::warn!(
+                        "NTFS MFT result limit ({MAX_DELETED}) reached: {skipped} eligible deleted records skipped"
+                    );
+                }
+                files
+            },
+        ),
         "MFT",
         cancel,
     )?;
     Ok(plan)
 }
 
-/// Most deleted files taken from one MFT; the scan's own limit is 100,000.
+/// Bound the reconstruction data held in memory before carving begins. Each
+/// entry may retain a filename, resident bytes, or a list of physical extents.
 const MAX_DELETED: usize = 50_000;
 
 /// Physical byte position of `logical` within a nonresident stream.
@@ -363,7 +373,8 @@ fn all_free(bitmap: &[u8], at: u64, length: u64, cluster_size: u64) -> bool {
 
 /// Deleted files whose MFT records survive and whose data clusters are all
 /// still unused, so their bytes cannot have been overwritten by another file.
-/// Fragmented files come back whole, with their original names.
+/// Return the retained files and the number of otherwise eligible records
+/// beyond the retention limit. Fragmented files retain their original names.
 fn deleted_files(
     input: &mut (impl Read + Seek),
     mft: &Stream,
@@ -372,12 +383,13 @@ fn deleted_files(
     bitmap: &[u8],
     total: u64,
     cancel: &AtomicBool,
-) -> io::Result<Vec<crate::Found>> {
+) -> io::Result<(Vec<crate::Found>, u64)> {
     let records = mft.initialized.min(mft.size) / record_size;
     let batch = (1024 * 1024 / record_size).max(1);
     let mut files = Vec::new();
+    let mut skipped = 0;
     let mut index = 16;
-    while index < records && files.len() < MAX_DELETED {
+    while index < records {
         check(cancel)?;
         let count = batch.min(records - index);
         let bytes = match stream_read(
@@ -398,6 +410,7 @@ fn deleted_files(
             }
         };
         for (number, raw) in (index..).zip(bytes.chunks_exact(to_usize(record_size))) {
+            check(cancel)?;
             // Only deleted (flags 0) file records are candidates.
             if raw.get(..4) != Some(b"FILE".as_slice()) || u16at(raw, 22) != 0 {
                 continue;
@@ -418,12 +431,56 @@ fn deleted_files(
                 };
                 file.offset = at;
             }
-            files.push(file);
-            if files.len() >= MAX_DELETED {
-                break;
+            if files.len() < MAX_DELETED {
+                files.push(file);
+            } else {
+                skipped += 1;
             }
         }
         index += count;
     }
-    Ok(files)
+    Ok((files, skipped))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn counts_only_eligible_deleted_records_past_retention_limit() {
+        let geometry = crate::ntfs::Geometry {
+            cluster_size: 4096,
+            clusters: 20_000,
+        };
+        // One cluster at 18,000 is free. The neighboring cluster is occupied.
+        let eligible = super::super::tests::ntfs3_deleted_record(&[0x21, 1, 0x50, 0x46, 0], 4096);
+        let occupied = super::super::tests::ntfs3_deleted_record(&[0x21, 1, 0x51, 0x46, 0], 4096);
+        let mut bitmap = vec![0xff; 2500];
+        bitmap[18_000 / 8] &= !1;
+        let mut bytes = vec![0; 16 * 1024];
+        bytes.extend(eligible.repeat(MAX_DELETED + 1));
+        bytes.extend(occupied);
+        // Keep searching across batches after the cap.
+        bytes.resize(bytes.len() + 1024 * 1024, 0);
+        bytes.extend(eligible);
+        let size = bytes.len() as u64;
+        let mft = Stream {
+            runs: vec![(0, size.div_ceil(geometry.cluster_size))],
+            size,
+            initialized: size,
+        };
+        let (files, skipped) = deleted_files(
+            &mut Cursor::new(bytes),
+            &mft,
+            1024,
+            geometry,
+            &bitmap,
+            size,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(files.len(), MAX_DELETED);
+        assert_eq!(skipped, 2);
+    }
 }

@@ -1620,6 +1620,103 @@ fn about_links_open_only_fixed_project_pages() {
 }
 
 #[test]
+fn language_picker_keeps_country_flags_aligned_with_native_names() {
+    use i_slint_backend_testing::ElementHandle;
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.set_page(2);
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    i18n::with_language(i18n::Language::English, || ui_text::apply(&ui));
+    let names = ui.get_language_names();
+    let icons = ui.get_language_flags();
+    let flags = ui.global::<LanguageFlags<'_>>();
+    assert_eq!(icons.row_count(), names.row_count());
+    assert_eq!(icons.row_data(0), Some(flags.get_system()));
+    for (name, expected) in [
+        ("English", flags.get_gb()),
+        ("עברית", flags.get_il()),
+        ("Español", flags.get_es()),
+        ("Français", flags.get_fr()),
+        ("Deutsch", flags.get_de()),
+        ("العربية", flags.get_sa()),
+        ("Русский", flags.get_ru()),
+        ("Português", flags.get_pt()),
+        ("Italiano", flags.get_it()),
+        ("Nederlands", flags.get_nl()),
+    ] {
+        let index = names.iter().position(|label| label == name).unwrap();
+        assert_eq!(icons.row_data(index), Some(expected));
+    }
+    let picker = ElementHandle::find_by_accessible_label(&ui, "System language")
+        .next()
+        .unwrap();
+    picker.invoke_accessible_default_action();
+    assert_eq!(picker.accessible_expanded(), Some(true));
+    ui.window().take_snapshot().unwrap();
+}
+
+#[test]
+fn settings_debug_logging_exposes_toggle_and_log_folder() {
+    use i_slint_backend_testing::ElementHandle;
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.set_page(2);
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    let weak = ui.as_weak();
+    ui.on_toggle_debug_logging(move || {
+        let ui = weak.upgrade().unwrap();
+        ui.set_debug_logging(!ui.get_debug_logging());
+        ui.set_debug_log_ready(true);
+    });
+    let opened = Rc::new(std::cell::Cell::new(false));
+    let capture = Rc::clone(&opened);
+    ui.on_open_debug_log_folder(move || capture.set(true));
+    for language in [
+        i18n::Language::English,
+        i18n::Language::German,
+        i18n::Language::Hebrew,
+    ] {
+        i18n::with_language(language, || {
+            ui_text::apply(&ui);
+            let strings = ui.global::<Strings<'_>>();
+            ui.window().take_snapshot().unwrap();
+            ElementHandle::find_by_accessible_label(&ui, strings.get_enable_logging().as_str())
+                .next()
+                .unwrap()
+                .invoke_accessible_default_action();
+            assert!(ui.get_debug_logging());
+            ui.window().take_snapshot().unwrap();
+            layout_checks::assert_controls_clear(&ui, (900.0, 640.0), "debug logging enabled");
+            ElementHandle::find_by_accessible_label(&ui, strings.get_disable_logging().as_str())
+                .next()
+                .unwrap()
+                .invoke_accessible_default_action();
+            assert!(!ui.get_debug_logging());
+            opened.set(false);
+            ElementHandle::find_by_accessible_label(&ui, strings.get_open_folder().as_str())
+                .next()
+                .unwrap()
+                .invoke_accessible_default_action();
+            assert!(opened.get());
+        });
+    }
+}
+
+#[test]
 fn about_rows_are_keyboard_buttons_with_descriptions() {
     slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
         i_slint_backend_testing::TestingBackendOptions {

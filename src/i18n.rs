@@ -37,6 +37,8 @@ macro_rules! define_languages {
 
         /// Native names in menu order, excluding the localized System entry.
         pub const LANGUAGE_NAMES: &[&str] = &[$($name,)*];
+        /// Locale codes in the same order as the native names.
+        pub const LANGUAGE_CODES: &[&str] = &[$($code,)*];
 
         fn catalog(language: Language) -> &'static BTreeMap<String, String> {
             match language {

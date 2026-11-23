@@ -4,7 +4,7 @@
     not(test),
     deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
 )]
-use crate::{AppWindow, Locale, Strings};
+use crate::{AppWindow, LanguageFlags, Locale, Strings};
 use reclaim::i18n;
 use slint::ComponentHandle;
 const WINDOW_TITLE: &str = "Reclaim - File Recovery";
@@ -112,6 +112,12 @@ ui_strings! {
     set_phones_and_cameras_connect_for => "Phones and cameras connect for file transfer only, so Reclaim can’t search them for deleted files. If yours has a memory card, put the card in a card reader and scan it here. Also check its Trash or Recently deleted folder.",
     set_language => "Language",
     set_appearance => "Appearance",
+    set_debug_logging => "Debug logging",
+    set_debug_log_description => "Records scan and recovery checkpoints in reclaim-debug.log.",
+    set_enable_logging => "Enable logging",
+    set_disable_logging => "Disable logging",
+    set_diagnostic_write_error => "The diagnostic log could not be written.",
+    set_diagnostic_open_error => "The diagnostic log folder could not be opened.",
 }
 
 pub fn apply(ui: &AppWindow) {
@@ -122,6 +128,23 @@ pub fn apply(ui: &AppWindow) {
         .chain(i18n::LANGUAGE_NAMES.iter().copied().map(Into::into))
         .collect();
     ui.set_language_names(slint::ModelRc::new(slint::VecModel::from(language_names)));
+    let flags = ui.global::<LanguageFlags<'_>>();
+    let language_flags: Vec<_> = std::iter::once(flags.get_system())
+        .chain(i18n::LANGUAGE_CODES.iter().map(|&code| match code {
+            "en" => flags.get_gb(),
+            "he" => flags.get_il(),
+            "es" => flags.get_es(),
+            "fr" => flags.get_fr(),
+            "de" => flags.get_de(),
+            "ar" => flags.get_sa(),
+            "ru" => flags.get_ru(),
+            "pt" => flags.get_pt(),
+            "it" => flags.get_it(),
+            "nl" => flags.get_nl(),
+            _ => flags.get_system(),
+        }))
+        .collect();
+    ui.set_language_flags(slint::ModelRc::new(slint::VecModel::from(language_flags)));
     strings.set_photos_documents_archives_audio_video(
         // Not `message`: it would merge the separately isolated names back into one run.
         i18n::t(SUPPORTED_FORMATS)
