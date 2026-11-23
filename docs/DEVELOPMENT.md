@@ -11,7 +11,7 @@ A Rust desktop app for recovering file candidates from drives and raw disk image
 - **Live scan results:** unused-byte progress, cancellation, and recoverable partial results.
 - **Filtered recovery:** search by filename, extension, or source offset; filter by file category. Recovery saves only selected files matching the active filters.
 - **Safe output naming:** original NTFS leaf names when available, generated names otherwise, and numeric suffixes to avoid replacing existing files.
-- **Localization:** saved language preference, seven matching translation catalogs, mirrored Hebrew/Arabic layouts, and isolated mixed-direction filenames and paths.
+- **Localization:** saved language preference, ten matching translation catalogs, mirrored Hebrew/Arabic layouts, and isolated mixed-direction filenames and paths.
 - **Desktop interface:** Slint with light/dark appearance, SVG icons, animated controls and progress, a scrollable drive list, and an integrated recovery guide.
 
 ## Build and run
@@ -75,7 +75,7 @@ See [file-format research and coverage](FILE_FORMAT_RESEARCH.md) for primary sou
 
 Reclaim is not a complete filesystem recovery suite. A signature match does not establish that a file was deleted or that all its contents are usable. Overwritten or TRIM-erased data cannot be reconstructed by the scanner.
 
-- Most candidates are limited to 64 MiB each, with a maximum of 100,000 results. Classic ZIP archives with known local entry sizes can exceed 64 MiB (up to the classic ZIP offset range) using bounded-memory directory checks; large ZIP-based packages are reported as ZIP. ZIP entry payloads are not decompressed or CRC-verified. Captured NTFS resident data has a separate 64 MiB memory budget.
+- Most candidates are limited to 64 MiB each. Carving streams results without a fixed result count. Classic ZIP archives with known local entry sizes can exceed 64 MiB (up to the classic ZIP offset range) using bounded-memory directory checks; large ZIP-based packages are reported as ZIP. ZIP entry payloads are not decompressed or CRC-verified. Captured NTFS resident data has a separate 64 MiB memory budget.
 - Original folder reconstruction, restoring timestamps, fragmented-file reconstruction, and APFS allocation maps are not implemented. NTFS runlists are read for the MFT/$Bitmap allocation map only, not general deleted-file reconstruction. Split NTFS attributes needing ATTRIBUTE_LIST extents and whole-disk MBR/GPT sources are rejected; select a formatted volume instead.
 - `scan_unused_reader` is the desktop entry point. `scan_reader` remains a full-source API for tests and explicit lower-level use. Deleted resident NTFS recovery inside allocated MFT clusters is excluded from the desktop unused-space mode.
 - ZIP64/multipart archives, ZIP archives over 64 MiB that require data descriptors, unknown-length AU streams, and multi-segment OpenDML AVI are unsupported.

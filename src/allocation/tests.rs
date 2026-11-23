@@ -176,6 +176,41 @@ fn run(b: &[u8]) -> (Vec<crate::Found>, u64, u64) {
     (files, free, progress)
 }
 #[test]
+fn scans_past_one_hundred_thousand_candidates() {
+    let (mut image, heap) = fat12();
+    // Use two sectors per cluster and mark the data area free.
+    image.resize(4 * 1024 * 1024, 0);
+    image[13] = 2;
+    put16(&mut image, 19, 8192);
+    for table in [512, 13 * 512] {
+        for cluster in 2..2 + (image.len() - heap) / 1024 {
+            fat12_entry(&mut image, table, cluster, 0);
+        }
+    }
+    let pdf = b"%PDF-1.7\nhello\n%%EOF\n";
+    let count = 100_001;
+    for bytes in image[heap..heap + count * pdf.len()].chunks_exact_mut(pdf.len()) {
+        bytes.copy_from_slice(pdf);
+    }
+    let last_offset = (heap + (count - 1) * pdf.len()) as u64;
+
+    let mut offsets = Vec::new();
+    crate::scan_reader(&mut Cursor::new(&image), &AtomicBool::new(false), |event| {
+        if let crate::Event::Found(file) = event {
+            offsets.push(file.offset);
+        }
+    })
+    .unwrap();
+    assert_eq!(offsets.len(), count);
+    assert_eq!(offsets.last(), Some(&last_offset));
+
+    let (files, free, progress) = run(&image);
+    assert_eq!(files.len(), count);
+    assert_eq!(files.last().unwrap().offset, last_offset);
+    assert_eq!(progress, free);
+}
+
+#[test]
 fn occupied_files_are_not_read_or_found_and_free_offsets_export_correctly() {
     struct Audit {
         input: Cursor<Vec<u8>>,

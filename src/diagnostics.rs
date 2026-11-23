@@ -5,17 +5,31 @@
     deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)
 )]
 use std::{
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+static DEBUG_LOG: Mutex<Option<File>> = Mutex::new(None);
+static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
+const DEBUG_LOG_LIMIT: u64 = 1024 * 1024;
+pub const DEBUG_LOG_NAME: &str = "reclaim-debug.log";
 struct FileLogger;
 static LOGGER: FileLogger = FileLogger;
 
 fn append(path: &Path, message: &str) -> std::io::Result<()> {
+    let mut file = open_log(path)?;
+    writeln!(file, "{} {message}", jiff::Timestamp::now())?;
+    file.sync_data()
+}
+
+fn open_log(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     // Never follow a symlink planted where the log should be (CWE-59).
@@ -24,9 +38,153 @@ fn append(path: &Path, message: &str) -> std::io::Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
     }
-    let mut file = options.open(path)?;
-    writeln!(file, "{} {message}", jiff::Timestamp::now())?;
-    file.sync_data()
+    options.open(path)
+}
+
+pub fn log_folder() -> Option<&'static Path> {
+    LOG_PATH.get().and_then(|path| path.parent())
+}
+
+pub fn set_debug_logging(enabled: bool) -> std::io::Result<()> {
+    let mut log = DEBUG_LOG
+        .lock()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    *log = if enabled {
+        let directory = log_folder().ok_or_else(|| std::io::Error::other("No log folder"))?;
+        Some(open_debug_log(directory)?)
+    } else {
+        None
+    };
+    DEBUG_ENABLED.store(enabled, Ordering::Relaxed);
+    Ok(())
+}
+
+fn open_debug_log(directory: &Path) -> std::io::Result<File> {
+    let mut file = open_log(&directory.join(DEBUG_LOG_NAME))?;
+    if file.metadata()?.len() >= DEBUG_LOG_LIMIT {
+        file.set_len(0)?;
+    }
+    writeln!(
+        file,
+        "{} debug.enabled version={} os={} arch={}",
+        jiff::Timestamp::now(),
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )?;
+    Ok(file)
+}
+
+/// Use only fixed event names and structured data that excludes user files and paths.
+pub fn checkpoint(message: std::fmt::Arguments<'_>) {
+    if debug_enabled()
+        && let Ok(mut log) = DEBUG_LOG.lock()
+    {
+        write_checkpoint(log.as_mut(), message);
+    }
+}
+
+pub fn debug_enabled() -> bool {
+    DEBUG_ENABLED.load(Ordering::Relaxed)
+}
+
+pub struct ScanTrace {
+    started: Instant,
+    last_progress: Instant,
+    scanned: u64,
+    candidates: u64,
+    unreadable: u64,
+}
+
+impl ScanTrace {
+    pub fn start(source_size: Option<u64>, alignment: usize) -> Option<Self> {
+        debug_enabled().then(|| {
+            checkpoint(format_args!(
+                "scan.start source_size={source_size:?} alignment={alignment}"
+            ));
+            let started = Instant::now();
+            Self {
+                started,
+                last_progress: started,
+                scanned: 0,
+                candidates: 0,
+                unreadable: 0,
+            }
+        })
+    }
+
+    pub fn event(&mut self, event: &reclaim::Event) {
+        use reclaim::Event;
+        let Self {
+            last_progress,
+            scanned,
+            candidates,
+            unreadable,
+            ..
+        } = self;
+        match event {
+            Event::UnusedSpace { bytes, filesystem } => {
+                checkpoint(format_args!(
+                    "scan.allocation_ready filesystem={filesystem} bytes={bytes}"
+                ));
+            }
+            Event::Progress(bytes) => {
+                *scanned = *bytes;
+                if last_progress.elapsed() >= Duration::from_secs(30) {
+                    checkpoint(format_args!(
+                        "scan.progress bytes={scanned} candidates={candidates} unreadable_bytes={unreadable}"
+                    ));
+                    *last_progress = Instant::now();
+                }
+            }
+            Event::Found(_) => {
+                *candidates = candidates.saturating_add(1);
+                if candidates.is_multiple_of(10_000) || *candidates == 100_001 {
+                    checkpoint(format_args!(
+                        "scan.candidates count={candidates} bytes={scanned}"
+                    ));
+                }
+            }
+            Event::Unreadable { bytes, .. } => {
+                if *unreadable == 0 {
+                    checkpoint(format_args!("scan.unreadable bytes={bytes}"));
+                }
+                *unreadable = unreadable.saturating_add(*bytes);
+            }
+            Event::Checking { kind, bytes, .. } => {
+                if last_progress.elapsed() >= Duration::from_secs(30) {
+                    checkpoint(format_args!(
+                        "scan.checking format={kind} candidate_bytes={bytes} scanned={scanned} candidates={candidates}"
+                    ));
+                    *last_progress = Instant::now();
+                }
+            }
+        }
+    }
+
+    pub fn finish(&self, cancelled: bool, result: &std::io::Result<()>) {
+        if debug_enabled() {
+            checkpoint(format_args!(
+                "scan.finish cancelled={cancelled} error_kind={:?} os_error={:?} bytes={} candidates={} unreadable_bytes={} elapsed_ms={}",
+                result.as_ref().err().map(std::io::Error::kind),
+                result.as_ref().err().and_then(std::io::Error::raw_os_error),
+                self.scanned,
+                self.candidates,
+                self.unreadable,
+                self.started.elapsed().as_millis()
+            ));
+        }
+    }
+}
+
+fn write_checkpoint(file: Option<&mut File>, message: std::fmt::Arguments<'_>) {
+    if let Some(file) = file
+        && file
+            .metadata()
+            .is_ok_and(|info| info.len() < DEBUG_LOG_LIMIT)
+    {
+        writeln!(file, "{} {message}", jiff::Timestamp::now()).ok();
+    }
 }
 
 impl log::Log for FileLogger {
@@ -250,6 +408,29 @@ unsafe extern "system" fn native_exception(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn debug_log_records_checkpoints_only_while_enabled() {
+        assert!(super::ScanTrace::start(Some(1024), 512).is_none());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(super::DEBUG_LOG_NAME);
+        super::write_checkpoint(None, format_args!("before_enable"));
+        assert!(!path.exists());
+
+        let mut log = super::open_debug_log(directory.path()).unwrap();
+        super::write_checkpoint(
+            Some(&mut log),
+            format_args!("scan.progress candidates=100001"),
+        );
+        drop(log);
+        super::write_checkpoint(None, format_args!("after_disable"));
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("debug.enabled"));
+        assert!(log.contains("scan.progress candidates=100001"));
+        assert!(!log.contains("before_enable"));
+        assert!(!log.contains("after_disable"));
+    }
+
     // Run the real panic hook in a separate process so other tests keep their
     // panic handlers and a genuine hook failure cannot take down this suite.
     #[cfg(not(windows))]

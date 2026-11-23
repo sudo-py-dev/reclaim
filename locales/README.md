@@ -1,8 +1,9 @@
 # Translations and text direction
 
 English message IDs live in `en.json`, with complete matching catalogs for Hebrew
-(`he`), Arabic (`ar`), Spanish (`es`), French (`fr`), German (`de`), and Russian
-(`ru`). `ui/app.slint` exposes named localized properties; `src/ui_text.rs` fills
+(`he`), Arabic (`ar`), Spanish (`es`), French (`fr`), German (`de`), Russian
+(`ru`), Portuguese (`pt`), Italian (`it`), and Dutch (`nl`).
+`ui/app.slint` exposes named localized properties; `src/ui_text.rs` fills
 them when the language changes. Status messages, file details, previews, drive
 metadata, and recovery warnings are localized at their presentation boundaries.
 Release notes and operating-system error details retain their original language.
@@ -20,7 +21,9 @@ and dates for display. Stored paths, original names, search queries, scan result
 and recovered bytes remain unchanged. Brand names, format identifiers, and binary
 size units remain language-neutral.
 
-Settings offers System and each supported language, using their native names.
+Settings offers System and each supported language using its native name. The
+language picker pairs native names with representative country flags and uses
+a globe for System.
 System recognizes regional prefixes such as `es-MX`, `fr-CA`, and `ar-SA`, plus
 legacy Hebrew `iw`. Unsupported locales fall back to English. The preference is
 saved in `reclaim/language.json` in the platform configuration directory. Native

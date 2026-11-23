@@ -403,7 +403,6 @@ pub(crate) fn scan(
         bytes: plan.unused,
         filesystem: plan.filesystem,
     });
-    let mut found_count = 0;
     let mut resident_bytes = 0usize;
     // Files rebuilt from records come first; carving must not list them again.
     let mut known = std::collections::HashSet::new();
@@ -413,7 +412,6 @@ pub(crate) fn scan(
         if file.validation != crate::Validation::Unverified {
             known.insert(file.offset);
         }
-        found_count += 1;
         resident_bytes += file.resident_data.as_ref().map_or(0, |data| data.len());
         event(crate::Event::Found(file));
     }
@@ -464,9 +462,8 @@ pub(crate) fn scan(
         cancel,
         |e| match e {
             crate::Event::Found(mut file) => {
-                found_count += 1;
                 resident_bytes += file.resident_data.as_ref().map_or(0, |data| data.len());
-                if found_count > 100_000 || resident_bytes > MAX_MAP {
+                if resident_bytes > MAX_MAP {
                     limited = true;
                     return;
                 }
@@ -513,7 +510,7 @@ pub(crate) fn scan(
     )?;
     if limited {
         return Err(invalid(
-            "Candidate limit reached (100,000). Recover available results.",
+            "NTFS resident data limit reached (64 MiB). Available results can still be exported.",
         ));
     }
     event(crate::Event::Progress(length));

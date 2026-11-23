@@ -5,6 +5,12 @@ export global Strings {
     in-out property <string> window-title: "Reclaim - File Recovery";
     in-out property <string> language: "Language";
     in-out property <string> appearance: "Appearance";
+    in-out property <string> debug-logging: "Debug logging";
+    in-out property <string> debug-log-description: "Records scan and recovery checkpoints in reclaim-debug.log.";
+    in-out property <string> enable-logging: "Enable logging";
+    in-out property <string> disable-logging: "Disable logging";
+    in-out property <string> diagnostic-write-error: "The diagnostic log could not be written.";
+    in-out property <string> diagnostic-open-error: "The diagnostic log folder could not be opened.";
 
     in-out property <string> no-source-selected: "No source selected";
     in-out property <string> select-a-file-to-inspect: "Select a file to inspect its details.";
@@ -498,8 +504,24 @@ component ThemePicker inherits Rectangle {
     }
 }
 
+export global LanguageFlags {
+    out property <image> system: @image-url("icons/globe.svg");
+    out property <image> gb: @image-url("flags/gb.svg");
+    out property <image> il: @image-url("flags/il.svg");
+    out property <image> es: @image-url("flags/es.svg");
+    out property <image> fr: @image-url("flags/fr.svg");
+    out property <image> de: @image-url("flags/de.svg");
+    out property <image> sa: @image-url("flags/sa.svg");
+    out property <image> ru: @image-url("flags/ru.svg");
+    out property <image> pt: @image-url("flags/pt.svg");
+    out property <image> it: @image-url("flags/it.svg");
+    out property <image> nl: @image-url("flags/nl.svg");
+}
+
 component Choice inherits Rectangle {
     in property <[string]> model;
+    in property <[image]> icons;
+    in property <bool> tint-first-icon;
     in-out property <int> current-index;
     callback selected(int);
     height: Metrics.control; min-width: 150px; horizontal-stretch: 1;
@@ -511,6 +533,9 @@ component Choice inherits Rectangle {
     accessible-expanded: popup.is-open;
     accessible-action-default => { focus.focus(); if popup.is-open { popup.close(); } else { popup.show(); } }
     Row { padding-left: 12px; padding-right: 10px; spacing: 8px;
+        if root.icons.length > root.current-index : Image { source: root.icons[root.current-index]; width: 20px; height: 15px; image-fit: contain;
+            colorize: root.tint-first-icon && root.current-index == 0 ? Palette.ink : transparent;
+        }
         Label { text: root.model[root.current-index]; font-size: 13px; color: Palette.ink; overflow: elide; vertical-alignment: center; min-width: 0px; horizontal-stretch: 1; }
         Image { source: @image-url("icons/chevron.svg"); colorize: Palette.muted; width: 16px; height: 16px; }
     }
@@ -541,7 +566,12 @@ component Choice inherits Rectangle {
                 content-y: -clamp(root.current-index * 36px - (self.visible-height - 36px) / 2, 0px, max(0px, root.model.length * 36px - self.visible-height));
                 for value[index] in root.model : Rectangle {
                     height: 36px; border-radius: 6px; background: index == root.current-index ? Palette.selected : option.has-hover ? Palette.subtle : transparent;
-                    Label { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; text: value; font-size: 13px; color: Palette.ink; overflow: elide; }
+                    Row { width: parent.width; height: parent.height; padding: 10px; spacing: 8px;
+                        if root.icons.length > index : Image { source: root.icons[index]; width: 20px; height: 15px; image-fit: contain;
+                            colorize: root.tint-first-icon && index == 0 ? Palette.ink : transparent;
+                        }
+                        Label { vertical-alignment: center; text: value; font-size: 13px; color: Palette.ink; overflow: elide; min-width: 0px; horizontal-stretch: 1; }
+                    }
                     option := TouchArea { mouse-cursor: pointer; clicked => { root.current-index = index; root.selected(index); popup.close(); } }
                 }
             }
@@ -832,7 +862,14 @@ export component AppWindow inherits Window {
     private property <bool> update-blocked: root.update-available && !root.update-installing && (root.busy || root.recovering);
     in-out property <int> language;
     in property <[string]> language-names: [Strings.system-language];
+    in property <[image]> language-flags: [LanguageFlags.system];
     callback change-language(int);
+    in property <bool> debug-logging;
+    in property <bool> debug-log-ready;
+    in property <bool> debug-log-write-error;
+    in property <bool> debug-log-open-error;
+    callback toggle-debug-logging();
+    callback open-debug-log-folder();
     callback open-link(AboutLink);
     callback apply-update();
     callback dismiss-update();
@@ -1188,11 +1225,24 @@ export component AppWindow inherits Window {
                 GroupTitle { text: Strings.general; }
                 Card { VerticalLayout {
                     SettingRow { icon: @image-url("icons/globe.svg"); title: Strings.language;
-                        VerticalLayout { horizontal-stretch: 0; width: 220px; alignment: center; Choice { model: root.language-names; current-index <=> root.language; selected(i) => { root.change-language(i); } } }
+                        VerticalLayout { horizontal-stretch: 0; width: 220px; alignment: center; Choice { model: root.language-names; icons: root.language-flags; tint-first-icon: true; current-index <=> root.language; selected(i) => { root.change-language(i); } } }
                     }
                     RowDivider { }
                     SettingRow { icon: @image-url("icons/contrast.svg"); title: Strings.appearance;
                         ThemePicker { accessible-role: radio-group; accessible-label: Strings.appearance; }
+                    }
+                    RowDivider { }
+                    SettingRow { icon: @image-url("icons/bug.svg"); title: Strings.debug-logging;
+                        detail: root.debug-log-write-error ? Strings.diagnostic-write-error : root.debug-log-open-error ? Strings.diagnostic-open-error : Strings.debug-log-description;
+                        if root.debug-log-ready : Action {
+                            text: Strings.open-folder;
+                            quiet: true;
+                            clicked => { root.open-debug-log-folder(); }
+                        }
+                        Action {
+                            text: root.debug-logging ? Strings.disable-logging : Strings.enable-logging;
+                            clicked => { root.toggle-debug-logging(); }
+                        }
                     }
                 } }
                 Rectangle { height: 8px; }

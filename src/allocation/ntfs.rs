@@ -331,7 +331,7 @@ pub(super) fn plan(
     Ok(plan)
 }
 
-/// Most deleted files taken from one MFT; the scan's own limit is 100,000.
+/// Most deleted files retained from one MFT during allocation planning.
 const MAX_DELETED: usize = 50_000;
 
 /// Physical byte position of `logical` within a nonresident stream.

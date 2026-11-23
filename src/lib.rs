@@ -944,7 +944,6 @@ pub(crate) fn scan_reader_with_filter(
         .unwrap_or(1)
         .max(262);
     let mut base = 0u64;
-    let mut found_count = 0usize;
     let mut skip_until = 0u64;
     let mut resident_bytes = 0usize;
     let mut last_progress = std::time::Instant::now();
@@ -990,10 +989,9 @@ pub(crate) fn scan_reader_with_filter(
                 {
                     skip_until = offset + record_size as u64;
                     resident_bytes += to_usize(found.size);
-                    found_count += 1;
-                    if resident_bytes > LIMIT || found_count > 100_000 {
+                    if resident_bytes > LIMIT {
                         return Err(io::Error::other(
-                            "Recovery result limit reached. Available results can still be exported.",
+                            "NTFS resident data limit reached (64 MiB). Available results can still be exported.",
                         ));
                     }
                     event(Event::Found(found));
@@ -1125,12 +1123,6 @@ pub(crate) fn scan_reader_with_filter(
                     ) || fmt.ext == "zip"
                     {
                         skip_until = offset + size as u64;
-                    }
-                    found_count += 1;
-                    if found_count > 100_000 {
-                        return Err(io::Error::other(
-                            "Candidate limit reached (100,000). Recover available results or scan a smaller image.",
-                        ));
                     }
                     event(Event::Found(Found {
                         offset,

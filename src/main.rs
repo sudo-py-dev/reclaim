@@ -262,11 +262,21 @@ impl Reclaim {
         let (tx, rx) = mpsc::sync_channel(256);
         self.receiver = Some(rx);
         std::thread::spawn(move || {
+            let mut trace = diagnostics::ScanTrace::start(source_size, alignment);
             let result = (|| {
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(());
                 }
                 let opened = drives::open_source(&path);
+                if trace.is_some()
+                    && let Err(error) = &opened
+                {
+                    diagnostics::checkpoint(format_args!(
+                        "scan.open_failed kind={:?} os_error={:?}",
+                        error.kind(),
+                        error.raw_os_error()
+                    ));
+                }
                 if windows_drive
                     && opened
                         .as_ref()
@@ -275,6 +285,9 @@ impl Reclaim {
                     tx.send(Message::SourceAccessDenied).ok();
                 }
                 let handle = Arc::new(opened?);
+                if trace.is_some() {
+                    diagnostics::checkpoint(format_args!("scan.source_opened"));
+                }
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(());
                 }
@@ -295,14 +308,30 @@ impl Reclaim {
                         "The volume size is unknown; unused-space scanning cannot start.",
                     )
                 })?;
-                reclaim::scan_unused_reader(&mut input, size, &cancel, |e| {
+                let forward_event = |event| {
                     // A closed window drops the receiver; stop scanning for it.
-                    if tx.send(Message::Scan(e)).is_err() {
+                    if tx.send(Message::Scan(event)).is_err() {
                         cancel.store(true, Ordering::Relaxed);
                     }
+                };
+                if trace.is_none() {
+                    return reclaim::scan_unused_reader(&mut input, size, &cancel, forward_event);
+                }
+                reclaim::scan_unused_reader(&mut input, size, &cancel, |event| {
+                    if let Some(active) = &mut trace {
+                        if diagnostics::debug_enabled() {
+                            active.event(&event);
+                        } else {
+                            trace = None;
+                        }
+                    }
+                    forward_event(event);
                 })
-            })()
-            .map_err(|e: std::io::Error| e.to_string());
+            })();
+            if let Some(trace) = trace {
+                trace.finish(cancel.load(Ordering::Relaxed), &result);
+            }
+            let result = result.map_err(|e| e.to_string());
             // Nobody is waiting for the result once the window has closed.
             tx.send(Message::Done(result)).ok();
         });
@@ -453,6 +482,7 @@ impl Reclaim {
         // Recheck after the dialog: a mount or drive may have changed while it
         // was open. Never allow an affirmative click to write onto the source.
         if drives::destination(&source, &directory) == drives::Destination::SameDrive {
+            diagnostics::checkpoint(format_args!("recovery.blocked reason=same_drive"));
             // Short: it shares a two-line row with Open folder and Recover.
             self.recovery_status = "Not saved: that folder is on the drive you scanned.".into();
             return;
@@ -465,6 +495,7 @@ impl Reclaim {
         if needs_source_bytes
             && source.metadata().ok().map(|m| (m.len(), m.modified().ok())) != self.source_stamp
         {
+            diagnostics::checkpoint(format_args!("recovery.blocked reason=source_changed"));
             self.recovery_status =
                 "Source changed since scanning. Scan it again before recovering.".into();
             return;
@@ -483,6 +514,9 @@ impl Reclaim {
         let alignment = self.source_alignment;
         let source_size = self.source_size;
         std::thread::spawn(move || {
+            let started = diagnostics::debug_enabled().then(std::time::Instant::now);
+            let mut count = 0usize;
+            diagnostics::checkpoint(format_args!("recovery.start selected={}", files.len()));
             let result = (|| {
                 // Never a cloned handle: it would share the running scan's cursor.
                 let input = preview::Input::new(handle)
@@ -495,7 +529,6 @@ impl Reclaim {
                     inner: input,
                     stop: Arc::clone(&cancel),
                 };
-                let mut count = 0usize;
                 let stopped = |count: usize| {
                     if count == 1 {
                         format!("Recovery stopped. {count} file saved.")
@@ -508,6 +541,11 @@ impl Reclaim {
                         return Err(stopped(count));
                     }
                     reclaim::recover_unique(&mut input, &directory, &f, number).map_err(|e| {
+                        diagnostics::checkpoint(format_args!(
+                            "recovery.write_failed kind={:?} os_error={:?}",
+                            e.kind(),
+                            e.raw_os_error()
+                        ));
                         if cancel.load(Ordering::Relaxed) {
                             stopped(count)
                         } else if count == 1 {
@@ -520,6 +558,16 @@ impl Reclaim {
                 }
                 Ok(count)
             })();
+            if let Some(started) = started
+                && diagnostics::debug_enabled()
+            {
+                diagnostics::checkpoint(format_args!(
+                    "recovery.finish success={} cancelled={} saved={count} elapsed_ms={}",
+                    result.is_ok(),
+                    cancel.load(Ordering::Relaxed),
+                    started.elapsed().as_millis()
+                ));
+            }
             tx.send(result).ok();
         });
     }
@@ -1233,6 +1281,38 @@ fn run() -> Result<(), slint::PlatformError> {
         });
     });
     let state = Rc::new(RefCell::new(Reclaim::default()));
+    if let Some(folder) = diagnostics::log_folder() {
+        ui.set_debug_log_ready(folder.join(diagnostics::DEBUG_LOG_NAME).is_file());
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_toggle_debug_logging(move || {
+            if let Some(ui) = weak.upgrade() {
+                let enabled = !ui.get_debug_logging();
+                let result = diagnostics::set_debug_logging(enabled);
+                ui.set_debug_log_write_error(result.is_err());
+                ui.set_debug_log_open_error(false);
+                if result.is_ok() {
+                    ui.set_debug_logging(enabled);
+                    ui.set_debug_log_ready(true);
+                }
+            }
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_open_debug_log_folder(move || {
+            let Some(folder) = diagnostics::log_folder() else {
+                return;
+            };
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let failed = installer::open_folder(folder).is_err();
+                weak.upgrade_in_event_loop(move |ui| ui.set_debug_log_open_error(failed))
+                    .ok();
+            });
+        });
+    }
     {
         let state = Rc::clone(&state);
         ui.on_open_saved_folder(move || {

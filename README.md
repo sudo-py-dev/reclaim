@@ -127,6 +127,7 @@ No. Everything stays on your computer. Reclaim only contacts GitHub to check for
 | **Scan finished with unreadable areas, or the drive stopped responding** | Check the cable and try once more. If it happens again, the drive may be failing: recover the files already found and stop using it. |
 | **A recovered file won't open** | It may be incomplete or overwritten. Try other results of the same type. |
 | **Windows: Reclaim won't start** | An error message explains why. A log is saved at `%LOCALAPPDATA%\Reclaim\logs\reclaim.log`; attach it when you [report a problem](https://github.com/sudo-py-dev/reclaim/issues). |
+| **A scan or recovery is failing** | In **Settings & help → General → Debug logging**, choose **Enable logging** and reproduce the issue. Choose **Open folder** to find `reclaim-debug.log` and attach it to your report. Debug logging turns off when you quit Reclaim. |
 
 Still stuck? [Open an issue](https://github.com/sudo-py-dev/reclaim/issues) and tell us your system, the drive type and what you see.
 
