@@ -2197,3 +2197,53 @@ fn destination_review_keeps_tab_inside_the_dialog() {
     ui.window().take_snapshot().unwrap();
     assert!(later(&ui), "the update notice shows once the review closes");
 }
+
+#[test]
+fn inspector_scrollbar_keeps_rtl_and_ltr_metadata_clear() {
+    use i_slint_backend_testing::ElementHandle;
+
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.set_page(1);
+    ui.set_has_results(true);
+    ui.set_inspected(0);
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+
+    for (rtl, offset_label) in [(false, "Source offset"), (true, "מיקום במקור")] {
+        ui.global::<Locale<'_>>().set_rtl(rtl);
+        ui.set_details(ModelRc::new(VecModel::from(
+            (0..24)
+                .map(|index| DetailLine {
+                    kind: if index == 0 { 2 } else { 1 },
+                    label: if index == 0 {
+                        offset_label
+                    } else {
+                        "File type"
+                    }
+                    .into(),
+                    value: if index == 0 { "0x6BC4000" } else { "JPG" }.into(),
+                })
+                .collect::<Vec<_>>(),
+        )));
+        ui.window().take_snapshot().unwrap();
+        let inspector = ElementHandle::find_by_element_id(&ui, "AppWindow::inspector-scroll")
+            .next()
+            .expect("file inspector scroll view");
+        let offset = ElementHandle::find_by_accessible_label(&ui, offset_label)
+            .next()
+            .expect("selectable file offset");
+        let inspector_right = inspector.absolute_position().x + inspector.size().width;
+        let offset_right = offset.absolute_position().x + offset.size().width;
+        assert!(
+            inspector_right - offset_right >= 23.0,
+            "inspector must reserve space for its right-hand scrollbar (RTL: {rtl})"
+        );
+    }
+}

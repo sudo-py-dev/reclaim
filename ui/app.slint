@@ -1141,9 +1141,11 @@ export component AppWindow inherits Window {
                         }
                         if root.inspected < 0 : EmptyState { vertical-stretch: 1; padding: 8px; text: root.detail; icon: @image-url("icons/files.svg"); }
                         // The name, then each fact as a small label over its value, then notes.
-                        if root.inspected >= 0 : ScrollView { vertical-stretch: 1;
+                        if root.inspected >= 0 : inspector-scroll := ScrollView { vertical-stretch: 1;
+                            horizontal-scrollbar-policy: always-off;
                             VerticalLayout { spacing: 10px; alignment: start;
-                                padding-left: Locale.rtl ? 12px : 0px; padding-right: Locale.rtl ? 0px : 12px;
+                                // Leave room for the standard scrollbar, including its wider hover state.
+                                padding-right: 24px;
                                 for line in root.details : VerticalLayout { spacing: 2px;
                                     if line.kind == 0 : Label { text: line.value; color: Palette.ink; font-size: 14px; font-weight: 600; wrap: word-wrap; }
                                     if line.kind == 1 || line.kind == 2 : Label { text: line.label; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
