@@ -145,6 +145,10 @@ fn product(file: &File) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 pub fn discover() -> Result<Vec<Drive>, String> {
+    inventory(false)
+}
+
+pub(crate) fn inventory(all: bool) -> Result<Vec<Drive>, String> {
     let mut names = vec![0u16; 65536];
     // SAFETY: writable UTF-16 buffer, null name requests the device namespace.
     let count = unsafe { QueryDosDeviceW(ptr::null(), names.as_mut_ptr(), win32_len(names.len())) }
@@ -292,7 +296,10 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             sector_size,
             phone: false,
             unlocked: false,
-            parent: None,
+            parent: all
+                .then(|| u32_at(&extents, extent_offset))
+                .flatten()
+                .map(|n| format!(r"\\.\PhysicalDrive{n}").into()),
             // The volume Windows runs from, such as C:.
             system: std::env::var("SystemDrive")
                 .is_ok_and(|drive| drive.eq_ignore_ascii_case(&format!("{letter}:"))),
@@ -305,6 +312,9 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             rows[index].mounted = true;
             rows[index].location = "Contains mounted volumes".into();
         }
+    }
+    if all {
+        return Ok(rows);
     }
     let hidden: HashSet<_> = represented_disks
         .iter()
@@ -373,6 +383,38 @@ pub fn destination(source: &Path, folder: &Path) -> Destination {
 /// which is always safe, instead of a wrapped size.
 fn win32_len(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
+}
+
+pub(crate) fn health(path: &Path) -> Option<(String, String)> {
+    use windows_sys::Win32::System::Ioctl::IOCTL_STORAGE_PREDICT_FAILURE;
+    let file = open(path.to_str()?)?;
+    // STORAGE_PROPERTY_QUERY + STORAGE_PROTOCOL_SPECIFIC_DATA, NVMe SMART log page 2.
+    let words = [50u32, 0, 3, 2, 2, 0, 40, 512, 0, 0, 0, 0];
+    let input: Vec<_> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+    if let Some(reply) = query(&file, IOCTL_STORAGE_QUERY_PROPERTY, &input)
+        && u32_at(&reply, 0) == Some(48)
+        && u32_at(&reply, 4) == Some(48)
+        && u32_at(&reply, 8) == Some(3)
+        && u32_at(&reply, 12) == Some(2)
+        && let Some(offset) = u32_at(&reply, 24).filter(|n| *n >= 40)
+        && u32_at(&reply, 28).is_some_and(|len| len >= 512)
+        && let Some(data) = reply
+            .get(8 + offset as usize..)
+            .and_then(|log| log.get(..512))
+    {
+        return super::nvme_health(data);
+    }
+    let data = query(&file, IOCTL_STORAGE_PREDICT_FAILURE, &[])?;
+    let code = u32_at(&data, 0)?;
+    Some((
+        if code == 0 {
+            "SMART · no failure predicted"
+        } else {
+            "SMART · drive predicts failure"
+        }
+        .into(),
+        format!("PredictFailure={code}"),
+    ))
 }
 
 #[cfg(test)]

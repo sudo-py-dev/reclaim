@@ -142,10 +142,16 @@ mod macos;
 mod windows;
 #[cfg(target_os = "linux")]
 pub use linux::{destination, discover};
+#[cfg(target_os = "linux")]
+pub(crate) use linux::{health, inventory};
 #[cfg(target_os = "macos")]
 pub use macos::{destination, discover};
+#[cfg(target_os = "macos")]
+pub(crate) use macos::{health, inventory};
 #[cfg(target_os = "windows")]
 pub use windows::{destination, discover};
+#[cfg(target_os = "windows")]
+pub(crate) use windows::{health, inventory};
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 pub fn discover() -> Result<Vec<Drive>, String> {
     Ok(Vec::new())
@@ -237,6 +243,52 @@ fn open_via_desktop(path: &Path) -> io::Result<File> {
         Ok(File::from(owned))
     };
     request().map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, format!("Could not get read-only drive access: {e}. Allow the desktop authentication prompt and try again. If no prompt appears, check that UDisks2 and a polkit authentication agent are installed, or open a disk image.")))
+}
+
+/// Decode a complete `NVMe` SMART/Health log page (log identifier 02h).
+#[cfg(any(windows, target_os = "macos", test))]
+fn nvme_health(data: &[u8]) -> Option<(String, String)> {
+    use crate::drive_check::field;
+    let data = data.get(..512)?;
+    let &[warning, low, high, spare, threshold, used, ..] = data else {
+        return None;
+    };
+    let temp = u16::from_le_bytes([low, high]);
+    let errors = u128::from_le_bytes(data.get(160..176)?.try_into().ok()?);
+    let mut summary = vec![if warning == 0 {
+        reclaim::i18n::t("NVMe · no critical warnings reported")
+    } else {
+        reclaim::i18n::t(&format!("NVMe critical warning · 0x{warning:02x}"))
+    }];
+    if temp > 0 {
+        summary.push(field(
+            "Temperature",
+            format!("{:.0} °C", f64::from(temp) - 273.15),
+        ));
+    }
+    summary.push(field("Estimated endurance used", format!("{used}%")));
+    summary.push(field("Media errors", errors));
+    Some((
+        summary.join("\n"),
+        format!(
+            "CriticalWarning=0x{warning:02x}  Temperature={temp} K  AvailableSpare={spare}%  SpareThreshold={threshold}%"
+        ),
+    ))
+}
+
+#[cfg(test)]
+mod health_tests {
+    #[test]
+    fn nvme_counters_preserve_all_128_bits_and_reject_short_logs() {
+        let mut page = [0; 512];
+        page[..6].copy_from_slice(&[4, 0x30, 1, 99, 10, 101]);
+        let errors = (1u128 << 80) + 5;
+        page[160..176].copy_from_slice(&errors.to_le_bytes());
+        let (report, raw) = super::nvme_health(&page).unwrap();
+        assert!(report.contains("31 °C") && report.contains("101%"));
+        assert!(report.contains(&errors.to_string()) && raw.contains("0x04"));
+        assert!(super::nvme_health(&page[..511]).is_none());
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -356,4 +408,14 @@ mod nest_tests {
         ]);
         assert!(tail.iter().all(|d| depth(&tail, d) == 0));
     }
+}
+
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+pub(crate) fn inventory(_: bool) -> Result<Vec<Drive>, String> {
+    discover()
+}
+
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+pub(crate) fn health(_: &Path) -> Option<(String, String)> {
+    None
 }

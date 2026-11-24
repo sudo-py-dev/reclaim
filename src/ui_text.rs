@@ -27,6 +27,22 @@ macro_rules! ui_strings {
 }
 
 ui_strings! {
+    set_sector_viewer => "Sector viewer",
+    set_view_bytes => "View bytes",
+    set_partition_bytes => "View partition bytes",
+    set_compare_image => "Compare image",
+    set_close_comparison => "Close comparison",
+    set_viewer_address => "Byte offset or LBA",
+    set_jump => "Go",
+    set_previous => "Previous",
+    set_next => "Next",
+    set_byte_legend => "Source on the left, comparison on the right. ^^ marks differences and -- marks missing bytes.",
+    set_checking_drive => "Reading drive information…",
+    set_health_details => "Device readings",
+    set_inspect_partition => "Inspect partition",
+    set_partition_table => "Partition table",
+    set_drive_health => "SMART and NVMe health",
+    set_quick_check => "Quick Drive Check",
     set_no_source_selected => "No source selected",
     set_select_a_file_to_inspect => "Select a file to inspect its details.",
     set_reclaim => "Reclaim",

@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 mod diagnostics;
+mod drive_check;
 mod drives;
 mod installer;
 mod legacy_install;
@@ -10,6 +11,7 @@ mod motion;
 #[cfg(any(target_os = "linux", windows))]
 mod native_process;
 mod preview;
+mod sector_view;
 mod ui_text;
 mod update_runtime;
 mod updates;
@@ -56,7 +58,15 @@ enum Message {
     Opened(Arc<std::fs::File>),
     Done(Result<(), String>),
 }
+enum CheckResult {
+    Source(Box<drive_check::Report>),
+    Partition(std::io::Result<String>),
+    Sector(std::io::Result<sector_view::Page>),
+}
 struct Reclaim {
+    check_receiver: Option<mpsc::Receiver<CheckResult>>,
+    check_report: Option<drive_check::Report>,
+    viewer: sector_view::Viewer,
     inspected: Option<usize>,
     source: Option<PathBuf>,
     source_handle: Option<Arc<std::fs::File>>,
@@ -149,6 +159,9 @@ struct ShownFiles {
 impl Default for Reclaim {
     fn default() -> Self {
         Self {
+            check_receiver: None,
+            check_report: None,
+            viewer: sector_view::Viewer::default(),
             inspected: None,
             source: None,
             source_handle: None,
@@ -632,6 +645,82 @@ impl Reclaim {
             Err(e) => self.drives_error = Some(e),
         }
     }
+    fn poll_check(&mut self, ui: &AppWindow) {
+        let Some(receiver) = &self.check_receiver else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(CheckResult::Source(report)) => {
+                ui.set_check_overview(report.overview.as_str().into());
+                ui.set_check_health(report.health.as_str().into());
+                ui.set_check_raw(report.raw.as_str().into());
+                ui.set_check_layout(report.layout.as_str().into());
+                ui.set_check_partitions(ModelRc::new(VecModel::from(
+                    report
+                        .choices
+                        .iter()
+                        .map(|s| s.as_str().into())
+                        .collect::<Vec<_>>(),
+                )));
+                ui.set_check_findings(ModelRc::new(VecModel::from(
+                    report
+                        .findings
+                        .iter()
+                        .map(|(_, note)| i18n::t(note).into())
+                        .collect::<Vec<_>>(),
+                )));
+                ui.set_can_view_sectors(report.size > 0);
+                ui.set_sector_source(report.viewer_path.display().to_string().into());
+                self.check_report = Some(*report);
+            }
+            Ok(CheckResult::Sector(Ok(page))) => {
+                let offset = page.viewer.offset;
+                ui.set_sector_address(format!("0x{offset:X}").into());
+                ui.set_sector_status(
+                    format!(
+                        "0x{offset:X} – 0x{:X}   ·   LBA {}",
+                        page.last,
+                        offset / self.check_report.as_ref().map_or(512, |r| r.sector.max(1))
+                    )
+                    .into(),
+                );
+                ui.set_sector_dump(page.dump.into());
+                ui.set_sector_compare(
+                    page.viewer
+                        .image
+                        .as_ref()
+                        .map_or_default(|i| i.path.display().to_string())
+                        .into(),
+                );
+                ui.set_sector_prev(offset > 0);
+                ui.set_sector_next(page.more);
+                self.viewer = page.viewer;
+            }
+            Ok(CheckResult::Sector(Err(e))) => ui.set_sector_error(e.to_string().into()),
+            Err(mpsc::TryRecvError::Disconnected) if ui.get_sector_loading() => {
+                ui.set_sector_error(i18n::t("Drive check interrupted").into());
+            }
+            Ok(CheckResult::Partition(result)) => {
+                let detail =
+                    result.unwrap_or_else(|e| i18n::t(&format!("Partition read incomplete · {e}")));
+                ui.set_partition_detail(detail.into());
+            }
+            Err(mpsc::TryRecvError::Disconnected) if ui.get_partition_loading() => {
+                ui.set_partition_detail(i18n::t("Drive check interrupted").into());
+            }
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                ui.set_check_layout(i18n::t("Drive check interrupted").into());
+                ui.set_check_health("".into());
+                ui.set_check_raw("".into());
+                ui.set_check_partitions(ModelRc::default());
+            }
+        }
+        self.check_receiver = None;
+        ui.set_sector_loading(false);
+        ui.set_partition_loading(false);
+        ui.set_check_running(false);
+    }
     fn poll(&mut self) -> bool {
         let mut changed = false;
         if let Some(result) = self
@@ -849,7 +938,16 @@ impl Reclaim {
         );
         ui.set_busy(self.busy);
         ui.set_drives_refreshing(self.drives_loading);
-        ui.set_can_scan(!self.working() && self.source.is_some());
+        let can_check = !self.working() && self.source.is_some();
+        ui.set_can_check(can_check);
+        ui.set_can_scan(
+            can_check
+                && self
+                    .drives
+                    .iter()
+                    .find(|d| Some(&d.path) == self.source.as_ref())
+                    .is_none_or(drives::Drive::scannable),
+        );
         // While recovering, the same button stops the recovery.
         ui.set_can_recover(self.exporting || selected > 0);
         ui.set_recovering(self.exporting);
@@ -1393,11 +1491,12 @@ fn run() -> Result<(), slint::PlatformError> {
             s.choose_source();
         }
     });
+    register_drive_checks(&ui, &state);
     action!(on_refresh, |s: &mut Reclaim, _: &AppWindow| {
         s.refresh_drives();
     });
     action!(on_scan, |s: &mut Reclaim, ui: &AppWindow| {
-        if !s.working() {
+        if ui.get_can_scan() && !s.working() {
             s.start();
             ui.set_page(1);
             ui.set_query("".into());
@@ -1437,7 +1536,7 @@ fn run() -> Result<(), slint::PlatformError> {
     action_with!(on_select_drive, |s, i: i32| {
         if !s.working()
             && let Ok(i) = usize::try_from(i)
-            && let Some(d) = s.drives.get(i).filter(|d| d.scannable())
+            && let Some(d) = s.drives.get(i).filter(|d| !d.phone)
         {
             s.source = Some(d.path.clone());
             s.needs_administrator = false;
@@ -1549,6 +1648,7 @@ fn run() -> Result<(), slint::PlatformError> {
                     let mut s = state.borrow_mut();
                     let changed_language =
                         last_language.replace(i18n::preference()) != i18n::preference();
+                    s.poll_check(&ui);
                     if s.poll() || changed_language {
                         s.sync_ui(&ui);
                     }
@@ -1606,6 +1706,201 @@ fn run() -> Result<(), slint::PlatformError> {
     state.borrow().cancel.store(true, Ordering::Relaxed);
     result
 }
+enum SectorAction {
+    Open(u64),
+    Jump,
+    Previous,
+    Next,
+    Compare(PathBuf),
+    Clear,
+}
+fn show_sectors(state: &mut Reclaim, ui: &AppWindow, action: SectorAction) {
+    if ui.get_check_running() {
+        return;
+    }
+    let Some(report) = &state.check_report else {
+        return;
+    };
+    let offset = match &action {
+        SectorAction::Open(at) => *at,
+        SectorAction::Jump => {
+            let Some(at) = sector_view::address(&ui.get_sector_address(), report.sector) else {
+                ui.set_sector_error(
+                    i18n::t("Enter a byte offset or LBA, for example 0x200 or LBA 1.").into(),
+                );
+                return;
+            };
+            at
+        }
+        SectorAction::Previous => state.viewer.offset.saturating_sub(sector_view::WINDOW),
+        SectorAction::Next => state.viewer.offset.saturating_add(sector_view::WINDOW),
+        SectorAction::Clear => state.viewer.offset.min(report.size.saturating_sub(1)),
+        SectorAction::Compare(_) => state.viewer.offset,
+    };
+    let reader = report.reader();
+    let size = report.size;
+    let current = state.viewer.image.clone();
+    ui.set_sector_error("".into());
+    ui.set_sector_loading(true);
+    ui.set_check_running(true);
+    ui.set_page(4);
+    let (sender, receiver) = mpsc::channel();
+    state.check_receiver = Some(receiver);
+    std::thread::spawn(move || {
+        let result = reader.and_then(|reader| {
+            let image = match action {
+                SectorAction::Compare(path) => Some(sector_view::Image::open(path)?),
+                SectorAction::Clear => None,
+                SectorAction::Open(_)
+                | SectorAction::Jump
+                | SectorAction::Previous
+                | SectorAction::Next => current,
+            };
+            sector_view::read(reader, size, offset, image)
+        });
+        sender.send(CheckResult::Sector(result)).ok();
+    });
+}
+fn register_drive_checks(ui: &AppWindow, state: &Rc<RefCell<Reclaim>>) {
+    {
+        let state = Rc::clone(state);
+        let weak = ui.as_weak();
+        ui.on_view_sectors(move |kind, index| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            let Some(report) = &state.check_report else {
+                return;
+            };
+            let index = usize::try_from(index).ok();
+            let at = match kind {
+                1 => index.and_then(|n| report.region_offset(n)),
+                2 => index
+                    .and_then(|n| report.findings.get(n))
+                    .map(|(at, _)| *at),
+                _ => Some(0),
+            };
+            if let Some(at) = at {
+                show_sectors(&mut state, &ui, SectorAction::Open(at));
+            }
+        });
+    }
+    {
+        let state = Rc::clone(state);
+        let weak = ui.as_weak();
+        ui.on_sector_navigate(move |direction| {
+            if let Some(ui) = weak.upgrade() {
+                let action = match direction {
+                    -1 => SectorAction::Previous,
+                    1 => SectorAction::Next,
+                    _ => SectorAction::Jump,
+                };
+                show_sectors(&mut state.borrow_mut(), &ui, action);
+            }
+        });
+    }
+    {
+        let state = Rc::clone(state);
+        let weak = ui.as_weak();
+        ui.on_sector_comparison(move |choose| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if ui.get_check_running() {
+                return;
+            }
+            let action = if choose {
+                let Some(path) = rfd::FileDialog::new()
+                    .set_title(i18n::t("Compare image"))
+                    .pick_file()
+                else {
+                    return;
+                };
+                SectorAction::Compare(path)
+            } else {
+                SectorAction::Clear
+            };
+            show_sectors(&mut state.borrow_mut(), &ui, action);
+        });
+    }
+    {
+        let state = Rc::clone(state);
+        let weak = ui.as_weak();
+        ui.on_check_drive(move || {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            let Some(path) = state.source.clone() else {
+                return;
+            };
+            if state.working() || ui.get_check_running() {
+                return;
+            }
+            let drive = state.drives.iter().find(|d| d.path == path).cloned();
+            ui.set_check_running(true);
+            ui.set_check_overview(path.display().to_string().into());
+            ui.set_partition_detail("".into());
+            ui.set_show_raw(false);
+            ui.set_check_index(0);
+            ui.set_page(3);
+            let (sender, receiver) = mpsc::channel();
+            state.check_receiver = Some(receiver);
+            state.check_report = None;
+            state.viewer = sector_view::Viewer::default();
+            ui.set_sector_compare("".into());
+            ui.set_sector_dump("".into());
+            ui.set_sector_status("".into());
+            ui.set_sector_prev(false);
+            ui.set_sector_next(false);
+            ui.set_can_view_sectors(false);
+            std::thread::spawn(move || {
+                let report = drive_check::check(&path, drive.as_ref());
+                sender.send(CheckResult::Source(Box::new(report))).ok();
+            });
+        });
+    }
+    {
+        let state = Rc::clone(state);
+        let weak = ui.as_weak();
+        let clear = weak.clone();
+        ui.on_clear_partition(move || {
+            if let Some(ui) = clear.upgrade() {
+                ui.set_partition_detail("".into());
+            }
+        });
+        ui.on_open_partition(move |index| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if ui.get_check_running() {
+                return;
+            }
+            let mut state = state.borrow_mut();
+            let Some(report) = &state.check_report else {
+                return;
+            };
+            let Ok(index) = usize::try_from(index) else {
+                return;
+            };
+            let source = report.open_partition(index);
+            ui.set_partition_detail("".into());
+            ui.set_partition_loading(true);
+            ui.set_check_running(true);
+            let (sender, receiver) = mpsc::channel();
+            state.check_receiver = Some(receiver);
+            std::thread::spawn(move || {
+                let result = source.and_then(|(mut reader, offset, len)| {
+                    let fs = reclaim::partition::filesystem(&mut reader, offset, len)?;
+                    Ok(drive_check::partition_detail(offset, len, fs))
+                });
+                sender.send(CheckResult::Partition(result)).ok();
+            });
+        });
+    }
+}
+
 fn main() {
     // Velopack runs the app with a hook command during install, update and
     // uninstall; it must exit at once without opening a window.

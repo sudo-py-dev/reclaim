@@ -12,6 +12,7 @@ use core_foundation_sys::{
         CFStringGetMaximumSizeForEncoding, CFStringGetTypeID, CFStringRef, kCFStringEncodingUTF8,
     },
     url::{CFURLCopyFileSystemPath, CFURLGetTypeID, kCFURLPOSIXPathStyle},
+    uuid::{CFUUIDBytes, CFUUIDCreateFromString, CFUUIDGetUUIDBytes, CFUUIDRef},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -21,6 +22,14 @@ use std::{
 
 #[link(name = "IOKit", kind = "framework")]
 unsafe extern "C" {
+    fn IOCreatePlugInInterfaceForService(
+        entry: u32,
+        client: CFUUIDRef,
+        interface_id: CFUUIDRef,
+        plugin: *mut *mut *const ComInterface,
+        score: *mut i32,
+    ) -> i32;
+    fn IODestroyPlugInInterface(plugin: *mut *const ComInterface) -> i32;
     fn IOServiceMatching(name: *const std::ffi::c_char) -> CFMutableDictionaryRef;
     fn IOServiceGetMatchingServices(
         port: u32,
@@ -50,6 +59,7 @@ unsafe extern "C" {
         session: CFTypeRef,
         name: *const std::ffi::c_char,
     ) -> CFTypeRef;
+    fn DADiskCopyIOMedia(disk: CFTypeRef) -> u32;
     fn DADiskCopyDescription(disk: CFTypeRef) -> CFDictionaryRef;
 }
 
@@ -349,7 +359,11 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             },
             mounted: in_use,
             encrypted: locked,
-            sector_size: 1,
+            // audit-allow(I18N-MISSING): IOKit property key.
+            sector_size: number(property(entry.0, "Preferred Block Size").0)
+                .and_then(|n| usize::try_from(n).ok())
+                .filter(|n| n.is_power_of_two() && (512..=65536).contains(n))
+                .unwrap_or(1),
             phone: false,
             unlocked: false,
             parent: None,
@@ -416,6 +430,144 @@ pub fn destination(source: &std::path::Path, folder: &std::path::Path) -> Destin
     } else {
         Destination::Unknown
     }
+}
+
+pub(crate) fn inventory(_: bool) -> Result<Vec<Drive>, String> {
+    let mut rows = discover()?;
+    for row in &mut rows {
+        if row.kind == "Volume" {
+            row.parent = row
+                .path
+                .to_str()
+                .and_then(whole_disk)
+                .map(|id| format!("/dev/{id}").into());
+        }
+    }
+    Ok(rows)
+}
+
+// Prefixes of the IOKit C interfaces in IOCFPlugIn.h and NVMeSMARTLibExternal.h.
+// QueryInterface selects the exact NVMe interface before its method is called.
+#[repr(C)]
+struct ComInterface {
+    reserved: *mut std::ffi::c_void,
+    query:
+        unsafe extern "C" fn(*mut std::ffi::c_void, CFUUIDBytes, *mut *mut std::ffi::c_void) -> i32,
+    add_ref: unsafe extern "C" fn(*mut std::ffi::c_void) -> u32,
+    release: unsafe extern "C" fn(*mut std::ffi::c_void) -> u32,
+}
+
+#[repr(C)]
+struct NvmeInterface {
+    base: ComInterface,
+    version: u16,
+    revision: u16,
+    read_data: unsafe extern "C" fn(*mut std::ffi::c_void, *mut [u8; 512]) -> i32,
+}
+
+fn uuid(text: &str) -> Option<Cf> {
+    let string = cf_string(text);
+    if string.0.is_null() {
+        return None;
+    }
+    // SAFETY: the CFString is live and the null allocator selects the default.
+    let value = Cf(unsafe { CFUUIDCreateFromString(ptr::null(), string.0.cast()) }.cast());
+    (!value.0.is_null()).then_some(value)
+}
+
+fn nvme_log(entry: u32) -> Option<[u8; 512]> {
+    let client = uuid("AA0FA6F9-C2D6-457F-B10B-59A13253292F")?;
+    let plugin_id = uuid("C244E858-109C-11D4-91D4-0050E4C6426F")?;
+    let interface_id = uuid("CCD1DB19-FD9A-4DAF-BF95-12454B230AB6")?;
+    let mut plugin = ptr::null_mut();
+    let mut score = 0;
+    // SAFETY: entry belongs to the live registry walk, both UUIDs are live,
+    // and the two output pointers refer to initialized local storage.
+    let status = unsafe {
+        IOCreatePlugInInterfaceForService(
+            entry,
+            client.0.cast(),
+            plugin_id.0.cast(),
+            &raw mut plugin,
+            &raw mut score,
+        )
+    };
+    if status != 0 || plugin.is_null() {
+        return None;
+    }
+    // SAFETY: this is the Core Foundation UUID created above.
+    let id = unsafe { CFUUIDGetUUIDBytes(interface_id.0.cast()) };
+    let mut interface = ptr::null_mut();
+    // SAFETY: successful creation returns a live IOCFPlugInInterface** whose
+    // first table members are the COM prefix. QueryInterface fills the output.
+    let plugin_table = unsafe { *plugin };
+    // SAFETY: the live plugin owns its COM table until destruction below.
+    let query = unsafe { (*plugin_table).query };
+    // SAFETY: plugin is live, id identifies IONVMeSMARTInterface, and interface is writable.
+    let status = unsafe { query(plugin.cast(), id, &raw mut interface) };
+    let result = if status == 0 && !interface.is_null() {
+        let handle = interface.cast::<*const NvmeInterface>();
+        // SAFETY: a successful query for this UUID supplies that exact vtable,
+        // which remains owned by this function until Release below.
+        let table = unsafe { *handle };
+        // SAFETY: the queried interface owns a live NVMe method table.
+        let methods = unsafe { &*table };
+        let mut page = [0; 512];
+        // SAFETY: SMARTReadData writes one complete 512-byte NVMe health page.
+        let read = unsafe { (methods.read_data)(interface, &raw mut page) };
+        // SAFETY: balance the single successful QueryInterface before plugin destruction.
+        unsafe { (methods.base.release)(interface) };
+        (read == 0).then_some(page)
+    } else {
+        None
+    };
+    // SAFETY: plugin is the owned interface from IOCreatePlugInInterfaceForService.
+    unsafe { IODestroyPlugInInterface(plugin) };
+    result
+}
+
+pub(crate) fn health(path: &std::path::Path) -> Option<(String, String)> {
+    let name = CString::new(path.file_name()?.to_str()?).ok()?;
+    // SAFETY: the default allocator is selected with a null pointer.
+    let session = Cf(unsafe { DASessionCreate(ptr::null()) });
+    if session.0.is_null() {
+        return None;
+    }
+    // SAFETY: the session is live and name is NUL-terminated.
+    let disk = Cf(unsafe { DADiskCreateFromBSDName(ptr::null(), session.0, name.as_ptr()) });
+    if disk.0.is_null() {
+        return None;
+    }
+    // SAFETY: disk is live; the copy returns an owned IOMedia entry.
+    let media = unsafe { DADiskCopyIOMedia(disk.0) };
+    if media == 0 {
+        return None;
+    }
+    let mut entry = Object(media);
+    for _ in 0..64 {
+        // audit-allow(I18N-MISSING): IOKit property key.
+        if boolean(property(entry.0, "NVMe SMART Capable").0)
+            && let Some(page) = nvme_log(entry.0)
+        {
+            return super::nvme_health(&page);
+        }
+        // audit-allow(I18N-MISSING): IOKit property key.
+        if let Some(status) = string(property(entry.0, "SMART Status").0) {
+            return Some((
+                format!("SMART · {status}"),
+                format!("IOKit SMART Status={status}"),
+            ));
+        }
+        let mut parent = 0;
+        // SAFETY: entry owns a live registry entry; parent is a writable output.
+        if unsafe { IORegistryEntryGetParentEntry(entry.0, c"IOService".as_ptr(), &raw mut parent) }
+            != 0
+        {
+            break;
+        }
+        entry = Object(parent);
+    }
+    None
 }
 
 #[cfg(test)]

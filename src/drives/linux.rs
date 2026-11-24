@@ -14,15 +14,20 @@ use std::{
 };
 
 pub fn discover() -> Result<Vec<Drive>, String> {
+    inventory(false)
+}
+
+pub(crate) fn inventory(all: bool) -> Result<Vec<Drive>, String> {
     // The sandbox exposes disk images through the file portal, not host drives.
     if Path::new("/.flatpak-info").exists() {
         return Ok(Vec::new());
     }
-    let mut drives = discover_at(
+    let mut drives = inventory_at(
         Path::new("/sys/class/block"),
         Path::new("/dev"),
         Path::new("/proc/self/mountinfo"),
         Path::new("/run/udev/data"),
+        all,
     )
     .map_err(|error| format!("Could not list drives: {error}. You can still open a disk image."))?;
     drives.extend(phones_at(Path::new("/sys/bus/usb/devices")));
@@ -163,7 +168,18 @@ struct Node {
     partition: bool,
 }
 
+#[cfg(test)]
 fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::Result<Vec<Drive>> {
+    inventory_at(sys, dev, mounts, udev, false)
+}
+
+fn inventory_at(
+    sys: &Path,
+    dev: &Path,
+    mounts: &Path,
+    udev: &Path,
+    all: bool,
+) -> std::io::Result<Vec<Drive>> {
     // Missing namespace metadata must not silently mark active drives unmounted.
     let mount_text = read_system_file(mounts)?;
     let mut mounted = HashMap::<String, String>::new();
@@ -369,12 +385,15 @@ fn discover_at(sys: &Path, dev: &Path, mounts: &Path, udev: &Path) -> std::io::R
             phone: false,
             unlocked: opened,
             // Device-mapper layers (dm-crypt, LVM) nest under what they were opened from.
-            parent: (!node.partition)
+            parent: ((!node.partition || all) && node.parents.len() == 1)
                 .then(|| node.parents.first())
                 .flatten()
                 .map(|parent| dev.join(parent)),
             system: mount.is_some_and(|m| m == "/"),
         });
+    }
+    if all {
+        return Ok(drives);
     }
     // Prefer named volumes over their parent disk. The volume retains its
     // filesystem label and is the source the user selected before deduplication.
@@ -453,6 +472,150 @@ fn whole_disks(node: &Path) -> Option<HashSet<PathBuf>> {
     let mut disks = HashSet::new();
     visit(node, &mut disks, 0)?;
     (!disks.is_empty()).then_some(disks)
+}
+
+pub(crate) fn health(path: &Path) -> Option<(String, String)> {
+    use std::fmt::Write as _;
+    use zbus::{
+        blocking::{Connection, Proxy},
+        zvariant::{OwnedObjectPath, OwnedValue, Value},
+    };
+    type Attribute = (
+        u8,
+        String,
+        u16,
+        i32,
+        i32,
+        i32,
+        i64,
+        i32,
+        HashMap<String, OwnedValue>,
+    );
+    let bus = Connection::system().ok()?;
+    let service = "org.freedesktop.UDisks2";
+    let object = super::object_path(path).ok()?;
+    let block = Proxy::new(
+        &bus,
+        service,
+        object.as_str(),
+        "org.freedesktop.UDisks2.Block",
+    )
+    .ok()?;
+    let drive: OwnedObjectPath = block.get_property("Drive").ok()?;
+    let options = HashMap::<&str, Value<'_>>::new();
+    let nvme = Proxy::new(
+        &bus,
+        service,
+        drive.as_str(),
+        "org.freedesktop.UDisks2.NVMe.Controller",
+    )
+    .ok()?;
+    if let Ok(updated) = nvme.get_property::<u64>("SmartUpdated")
+        && updated > 0
+    {
+        let warnings = nvme
+            .get_property::<Vec<String>>("SmartCriticalWarning")
+            .ok()?;
+        let mut summary = if warnings.is_empty() {
+            "NVMe · no critical warnings reported".into()
+        } else {
+            format!("NVMe warning · {}", warnings.join(", "))
+        };
+        if let Ok(t) = nvme.get_property::<u16>("SmartTemperature")
+            && t > 0
+        {
+            write!(
+                summary,
+                "\n{}",
+                crate::drive_check::field(
+                    "Temperature",
+                    format!("{:.0} °C", f64::from(t) - 273.15)
+                )
+            )
+            .ok();
+        }
+        let mut raw = format!("SmartUpdated={updated} (Unix time)");
+        if let Ok(attrs) = nvme.call::<_, _, std::collections::BTreeMap<String, OwnedValue>>(
+            "SmartGetAttributes",
+            &(options,),
+        ) {
+            for (key, v) in attrs {
+                match key.as_str() {
+                    "percent_used" => {
+                        if let Ok(n) = u8::try_from(&v) {
+                            write!(
+                                summary,
+                                "\n{}",
+                                crate::drive_check::field(
+                                    "Estimated endurance used",
+                                    format!("{n}%")
+                                )
+                            )
+                            .ok();
+                        }
+                    }
+                    "media_errors" => {
+                        if let Ok(n) = u64::try_from(&v) {
+                            write!(
+                                summary,
+                                "\n{}",
+                                crate::drive_check::field("Media errors", n)
+                            )
+                            .ok();
+                        }
+                    }
+                    _ => {}
+                }
+                write!(raw, "\n{key} · {v:?}").ok();
+            }
+        }
+        return Some((summary, raw));
+    }
+    let ata = Proxy::new(
+        &bus,
+        service,
+        drive.as_str(),
+        "org.freedesktop.UDisks2.Drive.Ata",
+    )
+    .ok()?;
+    if !ata.get_property::<bool>("SmartEnabled").ok()? {
+        return None;
+    }
+    let updated = ata.get_property::<u64>("SmartUpdated").ok()?;
+    if updated == 0 {
+        return None;
+    }
+    let mut summary = if ata.get_property::<bool>("SmartFailing").ok()? {
+        "SMART · drive predicts failure".to_owned()
+    } else {
+        "SMART · no failure predicted".to_owned()
+    };
+    if let Ok(t) = ata.get_property::<f64>("SmartTemperature")
+        && t > 0.0
+    {
+        write!(
+            summary,
+            "\n{}",
+            crate::drive_check::field("Temperature", format!("{:.0} °C", t - 273.15))
+        )
+        .ok();
+    }
+    if let Ok(n) = ata.get_property::<i64>("SmartNumBadSectors")
+        && n >= 0
+    {
+        write!(summary, "\n{}", crate::drive_check::field("Bad sectors", n)).ok();
+    }
+    let mut raw = format!("SmartUpdated={updated} (Unix time)");
+    if let Ok(attrs) = ata.call::<_, _, Vec<Attribute>>("SmartGetAttributes", &(options,)) {
+        for (id, name, _, value, worst, threshold, _, _, _) in attrs {
+            write!(
+                raw,
+                "\n{id} {name} · {value} / worst {worst} / threshold {threshold}"
+            )
+            .ok();
+        }
+    }
+    Some((summary, raw))
 }
 
 #[cfg(test)]
