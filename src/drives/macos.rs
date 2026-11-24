@@ -49,6 +49,12 @@ unsafe extern "C" {
         plane: *const std::ffi::c_char,
         parent: *mut u32,
     ) -> i32;
+    fn IORegistryEntryGetParentIterator(
+        entry: u32,
+        plane: *const std::ffi::c_char,
+        iterator: *mut u32,
+    ) -> i32;
+    fn IOObjectConformsTo(object: u32, class: *const std::ffi::c_char) -> libc::boolean_t;
     fn IORegistryEntryGetRegistryEntryID(entry: u32, id: *mut u64) -> i32;
 }
 #[link(name = "DiskArbitration", kind = "framework")]
@@ -187,10 +193,49 @@ fn registry_id(object: u32) -> Option<u64> {
     // SAFETY: object is a live registry entry and id a valid out-pointer.
     (unsafe { IORegistryEntryGetRegistryEntryID(object, &raw mut id) } == 0).then_some(id)
 }
-fn ancestors(object: u32) -> Vec<u64> {
+fn bsd_name(object: u32) -> Option<String> {
+    // audit-allow(I18N-MISSING): an IOKit registry property name.
+    string(property(object, "BSD Name").0).filter(|id| valid_id(id))
+}
+
+/// The APFS container scheme has one `IOMedia` parent per physical store.
+fn apfs_backing_disk(scheme: u32) -> Option<std::path::PathBuf> {
+    let mut iterator = 0;
+    // SAFETY: scheme is live, the plane is static, and iterator is an out-pointer.
+    if unsafe { IORegistryEntryGetParentIterator(scheme, c"IOService".as_ptr(), &raw mut iterator) }
+        != 0
+    {
+        return None;
+    }
+    let iterator = Object(iterator);
+    let mut backing = None;
+    for _ in 0..128 {
+        // SAFETY: iterator owns a live parent iterator.
+        let parent = unsafe { IOIteratorNext(iterator.0) };
+        if parent == 0 {
+            return backing.map(Into::into);
+        }
+        let parent = Object(parent);
+        let path = format!("/dev/{}", bsd_name(parent.0)?);
+        let disk = format!("/dev/{}", whole_disk(&path)?);
+        if backing.as_ref().is_some_and(|other| other != &disk) {
+            return None;
+        }
+        backing = Some(disk);
+    }
+    None
+}
+
+enum Backing {
+    Ordinary,
+    Apfs(Option<std::path::PathBuf>),
+}
+
+fn ancestors(object: u32, inspect_backing: bool) -> (Vec<u64>, Backing) {
     let mut ids = Vec::new();
     let mut current = object;
     let mut owned = None;
+    let mut backing = Backing::Ordinary;
     for _ in 0..128 {
         let mut parent = 0;
         // SAFETY: current is a live entry, the plane name is a static C string, parent is an out-pointer.
@@ -200,6 +245,12 @@ fn ancestors(object: u32) -> Vec<u64> {
             break;
         }
         let next = Object(parent);
+        if inspect_backing && matches!(backing, Backing::Ordinary)
+            // SAFETY: parent is live and the class name is static.
+            && unsafe { IOObjectConformsTo(parent, c"AppleAPFSContainerScheme".as_ptr()) } != 0
+        {
+            backing = Backing::Apfs(apfs_backing_disk(parent));
+        }
         if let Some(id) = registry_id(parent) {
             ids.push(id);
         }
@@ -207,10 +258,14 @@ fn ancestors(object: u32) -> Vec<u64> {
         owned = Some(next);
     }
     drop(owned);
-    ids
+    (ids, backing)
 }
 
 pub fn discover() -> Result<Vec<Drive>, String> {
+    discover_with_topology(false)
+}
+
+fn discover_with_topology(inspect_backing: bool) -> Result<Vec<Drive>, String> {
     // Own the mount snapshot; getmntinfo's process-global buffer is unsafe
     // to retain while other desktop libraries may query mounts concurrently.
     let mut capacity = 64usize;
@@ -285,8 +340,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             break;
         }
         let entry = Object(entry);
-        // audit-allow(I18N-MISSING): an IOKit registry property name.
-        let Some(id) = string(property(entry.0, "BSD Name").0).filter(|id| valid_id(id)) else {
+        let Some(id) = bsd_name(entry.0) else {
             continue;
         };
         let Some(size) = number(property(entry.0, "Size").0).filter(|n| *n > 0) else {
@@ -339,7 +393,16 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             mount = string(value.0);
         }
         let in_use = mount.is_some() || boolean(property(entry.0, "Open").0);
-        topology.push((registry_id(entry.0), ancestors(entry.0)));
+        let (ancestors, backing) = ancestors(entry.0, inspect_backing);
+        topology.push((registry_id(entry.0), ancestors));
+        let physical_whole = whole && matches!(backing, Backing::Ordinary);
+        let parent = match backing {
+            Backing::Apfs(physical) => physical,
+            Backing::Ordinary if inspect_backing && !whole => {
+                whole_disk(&path).map(|id| format!("/dev/{id}").into())
+            }
+            Backing::Ordinary => None,
+        };
         // The volume macOS runs from; read before `mount` moves into the location.
         let system = mount.as_deref() == Some("/");
         rows.push(Drive {
@@ -347,7 +410,12 @@ pub fn discover() -> Result<Vec<Drive>, String> {
             name,
             name_is_message: false,
             size,
-            kind: if whole { "Entire drive" } else { "Volume" }.into(),
+            kind: if physical_whole {
+                "Entire drive"
+            } else {
+                "Volume"
+            }
+            .into(),
             location: if locked {
                 "Locked: unlock in Disk Utility first".into()
             } else if let Some(point) = mount {
@@ -366,7 +434,7 @@ pub fn discover() -> Result<Vec<Drive>, String> {
                 .unwrap_or(1),
             phone: false,
             unlocked: false,
-            parent: None,
+            parent,
             system,
         });
     }
@@ -433,17 +501,7 @@ pub fn destination(source: &std::path::Path, folder: &std::path::Path) -> Destin
 }
 
 pub(crate) fn inventory(_: bool) -> Result<Vec<Drive>, String> {
-    let mut rows = discover()?;
-    for row in &mut rows {
-        if row.kind == "Volume" {
-            row.parent = row
-                .path
-                .to_str()
-                .and_then(whole_disk)
-                .map(|id| format!("/dev/{id}").into());
-        }
-    }
-    Ok(rows)
+    discover_with_topology(true)
 }
 
 // Prefixes of the IOKit C interfaces in IOCFPlugIn.h and NVMeSMARTLibExternal.h.

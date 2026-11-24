@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "نطاق سجل MBR الوقائي غير صالح",
+  "The comparison image changed. Select Compare image to reload it.": "تغيّرت صورة المقارنة. اختر «مقارنة صورة» لإعادة تحميلها.",
   "Sector viewer": "عارض القطاعات",
   "View bytes": "عرض البايتات",
   "View partition bytes": "عرض بايتات القسم",

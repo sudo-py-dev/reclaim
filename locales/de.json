@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "Ungültiger Bereich im Schutz-MBR",
+  "The comparison image changed. Select Compare image to reload it.": "Das Vergleichsabbild wurde geändert. Wählen Sie „Abbild vergleichen“, um es neu zu laden.",
   "Sector viewer": "Sektoransicht",
   "View bytes": "Bytes anzeigen",
   "View partition bytes": "Partitionsbytes anzeigen",

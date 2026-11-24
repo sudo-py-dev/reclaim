@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "Intervallo non valido nel MBR protettivo",
+  "The comparison image changed. Select Compare image to reload it.": "L’immagine di confronto è cambiata. Seleziona «Confronta immagine» per ricaricarla.",
   "Sector viewer": "Visualizzatore settori",
   "View bytes": "Mostra byte",
   "View partition bytes": "Mostra byte della partizione",

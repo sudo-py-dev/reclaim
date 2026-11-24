@@ -14,7 +14,6 @@ pub const WINDOW: u64 = 512;
 pub struct Image {
     pub path: PathBuf,
     file: File,
-    size: u64,
 }
 impl Image {
     pub fn open(path: PathBuf) -> io::Result<Arc<Self>> {
@@ -31,11 +30,7 @@ impl Image {
         if !meta.is_file() {
             return Err(io::Error::other(i18n::t("Choose a raw disk image")));
         }
-        Ok(Arc::new(Self {
-            path,
-            file,
-            size: meta.len(),
-        }))
+        Ok(Arc::new(Self { path, file }))
     }
 }
 
@@ -153,19 +148,38 @@ fn dump(offset: u64, source: &[u8], comparison: Option<&[u8]>) -> String {
 pub fn read(
     mut reader: impl Read + Seek,
     size: u64,
-    offset: u64,
+    mut offset: u64,
     image: Option<Arc<Image>>,
+    previous_offset: Option<u64>,
 ) -> io::Result<Page> {
-    let end = size.max(image.as_ref().map_or(0, |i| i.size));
+    let comparison = image.as_ref().map(|i| &i.file);
+    let before = comparison.map(File::metadata).transpose()?;
+    let comparison_size = before.as_ref().map_or(0, std::fs::Metadata::len);
+    let end = size.max(comparison_size);
+    if offset >= end
+        && end > 0
+        && let Some(previous) = previous_offset
+    {
+        offset = previous.min(end - 1);
+    }
     if offset >= end {
         return Err(io::Error::other(i18n::t(
             "Address outside the image or drive.",
         )));
     }
     let left = read_at(&mut reader, offset, size)?;
-    let right = image
-        .as_ref()
-        .map(|i| read_at(&mut i.file.try_clone()?, offset, i.size))
+    let right = comparison
+        .zip(before)
+        .map(|(mut file, before)| {
+            let bytes = read_at(&mut file, offset, comparison_size);
+            let after = file.metadata()?;
+            if after.len() != comparison_size || after.modified().ok() != before.modified().ok() {
+                return Err(io::Error::other(i18n::t(
+                    "The comparison image changed. Select Compare image to reload it.",
+                )));
+            }
+            bytes
+        })
         .transpose()?;
     let last = offset + end.saturating_sub(offset).min(WINDOW) - 1;
     Ok(Page {
@@ -191,21 +205,38 @@ mod tests {
     }
 
     #[test]
+    fn next_refreshes_the_page_if_the_comparison_was_truncated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("second.img");
+        let file = File::create(&path).unwrap();
+        file.set_len(1024).unwrap();
+        let image = Image::open(path).unwrap();
+        let source = [0; 512];
+        let page = read(Cursor::new(source), 512, 0, Some(Arc::clone(&image)), None).unwrap();
+        assert!(page.more);
+        file.set_len(128).unwrap();
+        let page = read(Cursor::new(source), 512, 512, Some(image), Some(0)).unwrap();
+        assert_eq!(page.viewer.offset, 0);
+        assert!(!page.more);
+        assert!(page.dump.contains("--"));
+    }
+
+    #[test]
     fn comparison_covers_both_files_and_marks_only_different_bytes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("second.img");
         std::fs::write(&path, b"axcd!").unwrap();
         let image = Image::open(path).unwrap();
-        let page = read(Cursor::new(b"abcd"), 4, 0, Some(Arc::clone(&image))).unwrap();
+        let page = read(Cursor::new(b"abcd"), 4, 0, Some(Arc::clone(&image)), None).unwrap();
         let mut lines = page.dump.lines();
         let row = lines.next().unwrap();
         let markers = lines.next().unwrap();
         assert!(row.contains("61 62 63 64 --") && row.contains("61 78 63 64 21"));
         assert_eq!(markers.find("^^"), row.find("78"));
         assert_eq!(markers.rfind("^^"), row.find("21"));
-        let tail = read(Cursor::new(b"abcd"), 4, 4, Some(image)).unwrap();
+        let tail = read(Cursor::new(b"abcd"), 4, 4, Some(image), None).unwrap();
         assert_eq!(tail.last, 4);
         assert!(!tail.more);
-        assert!(read(Cursor::new(b"abcd"), 4, 4, None).is_err());
+        assert!(read(Cursor::new(b"abcd"), 4, 4, None, None).is_err());
     }
 }

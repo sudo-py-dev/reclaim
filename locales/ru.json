@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "Недопустимый диапазон в защитной MBR",
+  "The comparison image changed. Select Compare image to reload it.": "Образ для сравнения изменился. Выберите «Сравнить образ», чтобы загрузить его заново.",
   "Sector viewer": "Просмотр секторов",
   "View bytes": "Показать байты",
   "View partition bytes": "Показать байты раздела",

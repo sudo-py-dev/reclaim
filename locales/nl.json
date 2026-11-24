@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "Ongeldig bereik in de beschermende MBR",
+  "The comparison image changed. Select Compare image to reload it.": "De vergelijkingskopie is gewijzigd. Kies ‘Schijfkopie vergelijken’ om deze opnieuw te laden.",
   "Sector viewer": "Sectorweergave",
   "View bytes": "Bytes bekijken",
   "View partition bytes": "Partitiebytes bekijken",

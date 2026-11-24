@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "טווח לא תקין ב־MBR המגן",
+  "The comparison image changed. Select Compare image to reload it.": "תמונת ההשוואה השתנתה. יש לבחור באפשרות ״השוואת קובץ דמות״ כדי לטעון אותה מחדש.",
   "Sector viewer": "מציג סקטורים",
   "View bytes": "הצגת בתים",
   "View partition bytes": "הצגת בתי המחיצה",

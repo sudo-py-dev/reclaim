@@ -1740,6 +1740,7 @@ fn show_sectors(state: &mut Reclaim, ui: &AppWindow, action: SectorAction) {
     let reader = report.reader();
     let size = report.size;
     let current = state.viewer.image.clone();
+    let previous_offset = matches!(action, SectorAction::Next).then_some(state.viewer.offset);
     ui.set_sector_error("".into());
     ui.set_sector_loading(true);
     ui.set_check_running(true);
@@ -1756,7 +1757,7 @@ fn show_sectors(state: &mut Reclaim, ui: &AppWindow, action: SectorAction) {
                 | SectorAction::Previous
                 | SectorAction::Next => current,
             };
-            sector_view::read(reader, size, offset, image)
+            sector_view::read(reader, size, offset, image, previous_offset)
         });
         sender.send(CheckResult::Sector(result)).ok();
     });

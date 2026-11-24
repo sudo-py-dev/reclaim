@@ -95,7 +95,8 @@ impl Report {
                 p.last
                     .checked_add(1)
                     .and_then(|n| n.checked_mul(table.sector)),
-            ) && start < end
+            ) && p.within_usable_bounds
+                && start < end
                 && end <= size
             {
                 self.choices.push(label);

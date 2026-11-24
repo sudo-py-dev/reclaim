@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "Plage non valide dans le MBR protecteur",
+  "The comparison image changed. Select Compare image to reload it.": "L’image de comparaison a changé. Sélectionnez « Comparer une image » pour la recharger.",
   "Sector viewer": "Vue des secteurs",
   "View bytes": "Voir les octets",
   "View partition bytes": "Voir les octets de la partition",

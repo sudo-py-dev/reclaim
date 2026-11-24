@@ -10,6 +10,8 @@ pub struct Partition {
     pub kind: String,
     /// Absolute byte offset of the entry that describes this partition.
     pub entry_offset: u64,
+    /// Whether the complete LBA range is ordered and inside the usable area.
+    pub within_usable_bounds: bool,
 }
 
 #[derive(Debug, Default)]
@@ -38,19 +40,17 @@ pub fn filesystem(
         data.get_mut(..len)
             .ok_or_else(|| invalid("invalid probe length"))?,
     )?;
+    let data = data.get(..len).unwrap_or_default();
     Ok(match () {
         () if data.starts_with(b"LUKS\xba\xbe") => "LUKS",
         () if data.get(3..11) == Some(b"-FVE-FS-") => "BitLocker",
         () if data.get(3..11) == Some(b"NTFS    ") => "NTFS",
         () if data.get(3..11) == Some(b"EXFAT   ") => "exFAT",
-        () if data.get(82..90) == Some(b"FAT32   ") => "FAT32",
-        () if data.get(54..62) == Some(b"FAT16   ") => "FAT16",
-        () if data.get(54..62) == Some(b"FAT12   ") => "FAT12",
-        () if u16_le(&data, 1080) == 0xef53 => "ext2/3/4",
+        () if u16_le(data, 1080) == 0xef53 => "ext2/3/4",
         () if matches!(data.get(1024..1026), Some(b"H+" | b"HX")) => "HFS+",
         () if data.get(32..36) == Some(b"NXSB") => "APFS",
         () if data.starts_with(b"XFSB") => "XFS",
-        () => "Unrecognized",
+        () => crate::allocation::fat_signature(data, size).unwrap_or("Unrecognized"),
     })
 }
 
@@ -154,6 +154,7 @@ fn gpt(
                 first: u64_le(e, 32),
                 last: u64_le(e, 40),
                 kind,
+                within_usable_bounds: false,
             }
         })
         .collect();
@@ -187,25 +188,42 @@ pub fn inspect(
         return Err(invalid("unknown logical sector size"));
     }
     let slots = mbr.get(446..510).unwrap_or_default();
-    let protective = slots
+    let protective: Vec<_> = slots
         .as_chunks::<16>()
         .0
         .iter()
-        .any(|e| e.get(4).copied().unwrap_or(0) == 0xee);
+        .enumerate()
+        .filter(|(_, entry)| entry.get(4) == Some(&0xee))
+        .collect();
+    let widths = [sector, 4096];
+    let widths = if known_sector.is_some() {
+        widths.get(..1).unwrap_or_default()
+    } else {
+        &widths
+    };
+    let mut copies = None;
+    let mut detected_signature = false;
     let mut magic = [0; 8];
-    let mut is_gpt = protective;
-    for width in [sector, 4096] {
-        if known_sector.is_some() && width != sector {
+    for &width in widths {
+        let blocks = size / width as u64;
+        if blocks < 3 {
             continue;
         }
-        let blocks = size / width as u64;
-        if blocks >= 3
-            && [1, blocks - 1].iter().any(|n| {
-                read_at(input, n * width as u64, &mut magic).is_ok() && &magic == b"EFI PART"
-            })
-        {
+        let has_signature = [1, blocks - 1]
+            .iter()
+            .any(|n| read_at(input, n * width as u64, &mut magic).is_ok() && &magic == b"EFI PART");
+        if !has_signature && protective.is_empty() {
+            continue;
+        }
+        let primary = gpt(input, width, blocks, false);
+        let backup = gpt(input, width, blocks, true);
+        let valid = primary.is_ok() || backup.is_ok();
+        if valid || copies.is_none() || (has_signature && !detected_signature) {
+            copies = Some((width, primary, backup));
+            detected_signature = has_signature;
+        }
+        if valid {
             sector = width;
-            is_gpt = true;
             break;
         }
     }
@@ -215,18 +233,27 @@ pub fn inspect(
         ..Layout::default()
     };
     let mut bounds = (1, blocks.saturating_sub(1));
-    if is_gpt && blocks >= 3 {
-        if !protective || u16_le(&mbr, 510) != 0xaa55 {
+    if let Some((width, primary, backup)) = copies {
+        let blocks = size / width as u64;
+        if protective.is_empty() || u16_le(&mbr, 510) != 0xaa55 {
             report.notes.push((0, "Missing protective MBR".into()));
         }
-        let primary = gpt(input, sector, blocks, false);
-        let backup = gpt(input, sector, blocks, true);
+        for (slot, entry) in protective {
+            if u32_le(entry, 8) != 1
+                || u64::from(u32_le(entry, 12)) != (blocks - 1).min(u64::from(u32::MAX))
+            {
+                report.notes.push((
+                    446 + slot as u64 * 16,
+                    "Invalid protective MBR range".into(),
+                ));
+            }
+        }
         for (at, name, copy) in [
             (1, "Primary GPT", &primary),
             (blocks - 1, "Backup GPT", &backup),
         ] {
             report.notes.push((
-                at * sector as u64,
+                at * width as u64,
                 match copy {
                     Ok(_) => format!(
                         "{} · {}",
@@ -280,6 +307,7 @@ pub fn inspect(
                 first,
                 last: first + u64::from(length) - 1,
                 kind,
+                within_usable_bounds: false,
             });
         }
     } else {
@@ -291,9 +319,11 @@ pub fn inspect(
     }
     report.partitions.sort_by_key(|p| p.first);
     let mut previous_end = None;
-    for p in &report.partitions {
+    for p in &mut report.partitions {
         let usable = bounds.0..=bounds.1;
-        if p.first > p.last || !usable.contains(&p.first) || !usable.contains(&p.last) {
+        p.within_usable_bounds =
+            p.first <= p.last && usable.contains(&p.first) && usable.contains(&p.last);
+        if !p.within_usable_bounds {
             report.notes.push((
                 p.entry_offset,
                 format!("Entry {} exceeds usable bounds or is reversed", p.slot),
@@ -318,6 +348,8 @@ mod tests {
     fn fixture(sector: usize) -> Vec<u8> {
         let mut disk = vec![0; 128 * sector];
         disk[450] = 0xee;
+        disk[454..458].copy_from_slice(&1u32.to_le_bytes());
+        disk[458..462].copy_from_slice(&127u32.to_le_bytes());
         disk[510..512].copy_from_slice(&[0x55, 0xaa]);
         let mut entry = [0u8; 128];
         entry[0] = 1;
@@ -360,6 +392,13 @@ mod tests {
             assert_eq!(good.partitions[0].last, 60);
             assert!(good.notes.iter().all(|(_, s)| s.contains("verified")));
             disk[sector] = 0;
+            if sector == 4096 {
+                disk[512..520].copy_from_slice(b"EFI PART");
+                let size = disk.len() as u64;
+                let native = inspect(&mut Cursor::new(&disk), size, Some(512)).unwrap();
+                assert_eq!(native.sector, 512);
+                assert_eq!(native.partitions, Vec::new());
+            }
             let backup = layout(disk);
             assert_eq!(backup.sector, sector as u64);
             assert_eq!(backup.partitions[0].first, good.partitions[0].first);
@@ -373,6 +412,61 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn damaged_protective_mbr_and_outside_entry_keep_the_gpt_findings() {
+        let mut disk = fixture(512);
+        disk[454..462].fill(0);
+        let table = &mut disk[1024..1152];
+        table[32..40].copy_from_slice(&2u64.to_le_bytes());
+        let table_crc = crc32fast::hash(table);
+        let header = &mut disk[512..604];
+        header[88..92].copy_from_slice(&table_crc.to_le_bytes());
+        header[16..20].fill(0);
+        let header_crc = crc32fast::hash(header);
+        header[16..20].copy_from_slice(&header_crc.to_le_bytes());
+
+        let result = layout(disk);
+        let entry = &result.partitions[0];
+        assert!(!entry.within_usable_bounds);
+        assert_eq!(entry.entry_offset, 1024);
+        assert!(
+            result
+                .notes
+                .contains(&(446, "Invalid protective MBR range".into()))
+        );
+        assert!(
+            result
+                .notes
+                .iter()
+                .any(|(at, note)| *at == 1024 && note.contains("bounds"))
+        );
+    }
+
+    #[test]
+    fn fat_variant_comes_from_valid_boot_geometry() {
+        let mut boot = [0; 2048];
+        boot[..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
+        boot[11..13].copy_from_slice(&512u16.to_le_bytes());
+        boot[13] = 1;
+        boot[14] = 1;
+        boot[16] = 2;
+        boot[17..19].copy_from_slice(&512u16.to_le_bytes());
+        boot[19..21].copy_from_slice(&8192u16.to_le_bytes());
+        boot[21] = 0xf8;
+        boot[22..24].copy_from_slice(&32u16.to_le_bytes());
+        boot[54..62].copy_from_slice(b"FAT12   ");
+        boot[510..512].copy_from_slice(b"\x55\xaa");
+        assert_eq!(
+            filesystem(&mut Cursor::new(boot), 0, 8192 * 512).unwrap(),
+            "FAT16"
+        );
+        boot[13] = 3;
+        assert_eq!(
+            filesystem(&mut Cursor::new(boot), 0, 8192 * 512).unwrap(),
+            "Unrecognized"
+        );
+    }
+
     #[test]
     fn checksum_damage_and_valid_but_conflicting_copies_are_distinct() {
         let mut disk = fixture(512);

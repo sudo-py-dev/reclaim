@@ -1,4 +1,6 @@
 {
+  "Invalid protective MBR range": "Invalid protective MBR range",
+  "The comparison image changed. Select Compare image to reload it.": "The comparison image changed. Select Compare image to reload it.",
   "Sector viewer": "Sector viewer",
   "View bytes": "View bytes",
   "View partition bytes": "View partition bytes",
