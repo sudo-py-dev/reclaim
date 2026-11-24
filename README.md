@@ -60,6 +60,16 @@ Pick the file for your computer from the **[latest release](https://github.com/s
   ```
 - **Portable ZIP:** unzip it into a folder (or onto a USB stick) and run the `reclaim` program inside. On Mac and Linux you may first need to run `chmod +x reclaim-*` in that folder.
 
+## Check a drive or disk image
+
+In **Sources**, select a drive or open a raw image and choose **Quick Drive Check**. The report reads the source header, identifies recognized filesystem signatures, and shows the backing disk and its volumes when the operating system can resolve them. Locked volumes can be selected for diagnostics.
+
+**SMART and NVMe health** shows readings exposed by the device and operating system. Linux uses UDisks2's most recent readings, Windows queries the storage driver, and macOS reads the NVMe health log through IOKit or displays the SMART status exposed by the driver. Open **Device readings** for the available technical values. A disk image has no live health readings.
+
+**Partition table** lists primary MBR entries or compares the primary and backup GPT headers and entry arrays, including their checksums, usable bounds, and overlapping entries. Select an entry and choose **Inspect partition** to read its filesystem signature at the indicated offset. Image inspection detects 512-byte and 4096-byte GPT sectors and assumes 512-byte sectors for MBR images. Extended MBR containers are listed at the primary level. All three checks use read-only access.
+
+**Sector viewer** opens the disk at byte zero. **View bytes** beside a finding jumps to its metadata, and **View partition bytes** jumps to the start of the selected partition. Enter an absolute byte offset such as `1024` or `0x400`, or a logical sector such as `LBA 2`. Previous and Next move through 512-byte windows. **Compare image** shows the same absolute byte range in a second raw image, with differing bytes marked `^^` and missing bytes marked `--`.
+
 ## How to recover your files
 
 1. **Choose the drive** where the files were. Connected drives appear on their own; click **Refresh** after plugging one in. If the drive is encrypted (BitLocker, FileVault, LUKS), unlock it first.

@@ -7,6 +7,7 @@ use std::{
 mod directory;
 mod ext;
 mod fat;
+pub(crate) use fat::signature as fat_signature;
 mod hfs;
 mod indirect;
 mod journal;

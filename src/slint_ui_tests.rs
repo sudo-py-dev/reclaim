@@ -2247,3 +2247,100 @@ fn inspector_scrollbar_keeps_rtl_and_ltr_metadata_clear() {
         );
     }
 }
+
+#[test]
+fn quick_check_opens_a_read_only_image_report_from_sources() {
+    use i_slint_backend_testing::ElementHandle;
+    slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
+        i_slint_backend_testing::TestingBackendOptions {
+            renderer_name: Some("software".into()),
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("volume.img");
+    let mut data = [0; 4096];
+    data[510..512].copy_from_slice(&[0x55, 0xaa]);
+    data[450] = 7;
+    data[454] = 2;
+    data[458] = 4;
+    data[1027..1035].copy_from_slice(b"NTFS    ");
+    std::fs::write(&path, data).unwrap();
+    let ui = AppWindow::new().unwrap();
+    let state = Rc::new(RefCell::new(Reclaim::default()));
+    state.borrow_mut().source = Some(path.clone());
+    state.borrow_mut().opened_image = Some((path, 4096));
+    register_drive_checks(&ui, &state);
+    state.borrow_mut().sync_ui(&ui);
+    ui.show().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(900, 640));
+    ElementHandle::find_by_accessible_label(&ui, "Quick Drive Check")
+        .next()
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert_eq!(ui.get_page(), 3);
+    let wait_for_check = || {
+        let start = std::time::Instant::now();
+        while ui.get_check_running() {
+            state.borrow_mut().poll_check(&ui);
+            assert!(start.elapsed() < Duration::from_secs(5));
+            std::thread::yield_now();
+        }
+    };
+    wait_for_check();
+    assert!(ui.get_check_findings().iter().any(|s| s.contains("MBR")));
+    assert!(ui.get_check_health().contains("Disk images"));
+    assert_eq!(ui.get_check_partitions().row_count(), 1);
+    ElementHandle::find_by_accessible_label(&ui, "Inspect partition")
+        .next()
+        .unwrap()
+        .invoke_accessible_default_action();
+    wait_for_check();
+    assert!(ui.get_partition_detail().contains("NTFS"));
+    assert!(ui.get_partition_detail().contains("1024"));
+    ui.window().take_snapshot().unwrap();
+    layout_checks::assert_controls_clear(&ui, (900., 640.), "image report");
+    ElementHandle::find_by_accessible_label(&ui, "View bytes")
+        .next()
+        .unwrap()
+        .invoke_accessible_default_action();
+    wait_for_check();
+    assert_eq!(ui.get_page(), 4);
+    assert_eq!(ui.get_sector_address(), "0x0");
+    ui.set_page(3);
+    ElementHandle::find_by_accessible_label(&ui, "View partition bytes")
+        .next()
+        .unwrap()
+        .invoke_accessible_default_action();
+    wait_for_check();
+    assert_eq!(ui.get_sector_address(), "0x400");
+    assert!(ui.get_sector_dump().contains("NTFS"));
+    ui.set_sector_address("LBA 3".into());
+    ui.invoke_sector_navigate(0);
+    wait_for_check();
+    assert_eq!(ui.get_sector_address(), "0x600");
+    let image = folder.path().join("comparison.img");
+    std::fs::write(&image, [b'A'; 1550]).unwrap();
+    show_sectors(&mut state.borrow_mut(), &ui, SectorAction::Compare(image));
+    wait_for_check();
+    assert!(ui.get_sector_dump().contains("^^"));
+    assert!(ui.get_sector_dump().contains("--"));
+    let snapshot = ui.window().take_snapshot().unwrap();
+    if let Ok(directory) = std::env::var("RECLAIM_PREVIEW_DIR") {
+        std::fs::create_dir_all(&directory).unwrap();
+        image::save_buffer(
+            std::path::Path::new(&directory).join("sector-comparison.png"),
+            snapshot.as_bytes(),
+            snapshot.width(),
+            snapshot.height(),
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+    }
+    layout_checks::assert_controls_clear(&ui, (900., 640.), "sector comparison");
+    ui.invoke_sector_comparison(false);
+    wait_for_check();
+    assert!(ui.get_sector_compare().is_empty());
+    ui.hide().unwrap();
+}

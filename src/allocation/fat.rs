@@ -67,12 +67,21 @@ impl Table {
         })
     }
 }
-pub(super) fn classic(
-    input: &mut (impl Read + Seek),
-    b: &[u8],
-    total: u64,
-    cancel: &AtomicBool,
-) -> io::Result<Plan> {
+struct Geometry {
+    sector: u64,
+    per: u64,
+    reserved: u64,
+    fats: u64,
+    roots: u64,
+    first: u64,
+    clusters: u64,
+    bits: u32,
+    name: &'static str,
+    fat_sectors: u64,
+    fat_length: u64,
+}
+
+fn geometry(b: &[u8], total: u64) -> io::Result<Geometry> {
     let sector = u16at(b, 11);
     let per = u64::from(b[13]);
     let reserved = u16at(b, 14);
@@ -122,6 +131,57 @@ pub(super) fn classic(
     if required > fat_length {
         return Err(invalid("FAT cannot describe every data cluster"));
     }
+    Ok(Geometry {
+        sector,
+        per,
+        reserved,
+        fats,
+        roots,
+        first,
+        clusters,
+        bits,
+        name,
+        fat_sectors,
+        fat_length,
+    })
+}
+
+pub(crate) fn signature(b: &[u8], total: u64) -> Option<&'static str> {
+    if b.len() < 512
+        || u16at(b, 510) != 0xaa55
+        || !(b.first() == Some(&0xe9) || (b.first() == Some(&0xeb) && b.get(2) == Some(&0x90)))
+        || !matches!(u16at(b, 11), 512 | 1024 | 2048 | 4096)
+        || !b.get(13).is_some_and(|n| n.is_power_of_two())
+        || !matches!(b.get(21), Some(0xf0 | 0xf8..=0xff))
+    {
+        return None;
+    }
+    let g = geometry(b, total).ok()?;
+    if g.bits == 32 && !(2..=g.clusters + 1).contains(&u32at(b, 44)) {
+        return None;
+    }
+    Some(g.name)
+}
+
+pub(super) fn classic(
+    input: &mut (impl Read + Seek),
+    b: &[u8],
+    total: u64,
+    cancel: &AtomicBool,
+) -> io::Result<Plan> {
+    let Geometry {
+        sector,
+        per,
+        reserved,
+        fats,
+        roots,
+        first,
+        clusters,
+        bits,
+        name,
+        fat_sectors,
+        fat_length,
+    } = geometry(b, total)?;
     let flags = if bits == 32 { u16at(b, 40) } else { 0 };
     let active = if flags & 0x80 != 0 { flags & 15 } else { 0 };
     if active >= fats {

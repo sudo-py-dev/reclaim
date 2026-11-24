@@ -2,6 +2,22 @@ import "../assets/fonts/DejaVuSans.ttf";
 import "../assets/fonts/DejaVuSans-Bold.ttf";
 import "../assets/fonts/DejaVuSansMono.ttf";
 export global Strings {
+    in-out property <string> sector-viewer: "Sector viewer";
+    in-out property <string> view-bytes: "View bytes";
+    in-out property <string> partition-bytes: "View partition bytes";
+    in-out property <string> compare-image: "Compare image";
+    in-out property <string> close-comparison: "Close comparison";
+    in-out property <string> viewer-address: "Byte offset or LBA";
+    in-out property <string> jump: "Go";
+    in-out property <string> previous: "Previous";
+    in-out property <string> next: "Next";
+    in-out property <string> byte-legend: "Source on the left, comparison on the right. ^^ marks differences and -- marks missing bytes.";
+    in-out property <string> checking-drive: "Reading drive information…";
+    in-out property <string> health-details: "Device readings";
+    in-out property <string> inspect-partition: "Inspect partition";
+    in-out property <string> partition-table: "Partition table";
+    in-out property <string> drive-health: "SMART and NVMe health";
+    in-out property <string> quick-check: "Quick Drive Check";
     in-out property <string> window-title: "Reclaim - File Recovery";
     in-out property <string> language: "Language";
     in-out property <string> appearance: "Appearance";
@@ -873,6 +889,32 @@ export component AppWindow inherits Window {
     callback open-link(AboutLink);
     callback apply-update();
     callback dismiss-update();
+    callback view-sectors(int, int);
+    callback sector-navigate(int);
+    callback sector-comparison(bool);
+    in property <bool> can-view-sectors;
+    in property <[string]> check-findings;
+    in property <string> sector-source;
+    in-out property <string> sector-address;
+    in property <string> sector-compare;
+    in property <string> sector-dump;
+    in property <string> sector-status;
+    in property <string> sector-error;
+    in property <bool> sector-prev;
+    in property <bool> sector-next;
+    in property <bool> sector-loading;
+    callback check-drive(); callback open-partition(int); callback clear-partition();
+    in property <bool> can-check;
+    in property <bool> check-running;
+    in property <bool> partition-loading;
+    in property <string> check-overview;
+    in property <string> check-health;
+    in property <string> check-raw;
+    in property <string> check-layout;
+    in property <[string]> check-partitions;
+    in-out property <int> check-index;
+    in property <string> partition-detail;
+    in-out property <bool> show-raw;
     callback open-image(); callback refresh(); callback select-drive(int); callback scan(); callback stop();
     // A recovery folder that may share a drive with the scanned source waits here
     // for the user's decision. A same-drive folder can only be replaced, never accepted.
@@ -895,6 +937,7 @@ export component AppWindow inherits Window {
                 }
                 Rectangle { height: 20px; }
                 NavItem { text: Strings.sources; icon: @image-url("icons/drive.svg"); current: root.page == 0; clicked => { root.page = 0; } }
+                if root.check-overview != "" : NavItem { text: Strings.quick-check; icon: @image-url("icons/shield.svg"); current: root.page == 3 || root.page == 4; clicked => { root.page = 3; } }
                 NavItem { text: Strings.recovered-files; icon: @image-url("icons/files.svg"); current: root.page == 1; clicked => { root.page = 1; } }
                 NavItem { text: Strings.settings-help; icon: @image-url("icons/settings.svg"); current: root.page == 2; clicked => { root.page = 2; } }
                 Rectangle { vertical-stretch: 1; min-height: 24px; }
@@ -919,8 +962,8 @@ export component AppWindow inherits Window {
         // ── Page ────────────────────────────────────────────────
         VerticalLayout { horizontal-stretch: 1; padding: 24px; padding-top: root.custom-frame ? 40px : 20px; spacing: 16px;
             VerticalLayout { spacing: 4px; vertical-stretch: 0;
-                Label { text: root.page == 0 ? Strings.sources : root.page == 1 ? Strings.recovered-files : Strings.settings-help; color: Palette.ink; font-size: 24px; font-weight: 700; }
-                Body { text: root.page == 0 ? Strings.choose-a-drive-or-disk : root.page == 1 ? Strings.inspect-candidates-choose-your-files : Strings.appearance-updates-and-a-little; }
+                Label { text: root.page == 0 ? Strings.sources : root.page == 1 ? Strings.recovered-files : root.page == 3 ? Strings.quick-check : root.page == 4 ? Strings.sector-viewer : Strings.settings-help; color: Palette.ink; font-size: 24px; font-weight: 700; }
+                if root.page < 3 : Body { text: root.page == 0 ? Strings.choose-a-drive-or-disk : root.page == 1 ? Strings.inspect-candidates-choose-your-files : Strings.appearance-updates-and-a-little; }
             }
             // Sources: pick a drive, then start the scan.
             if root.page == 0 : VerticalLayout { vertical-stretch: 1; spacing: 12px;
@@ -982,7 +1025,7 @@ export component AppWindow inherits Window {
                                 }
                                 VerticalLayout { horizontal-stretch: 1; min-width: 0px; spacing: 1px; alignment: center;
                                     Row { spacing: 6px;
-                                        Label { text: drive.name; color: drive.available ? Palette.ink : Palette.muted; font-size: 14px; font-weight: 500; overflow: elide; min-width: 0px; horizontal-stretch: 0; }
+                                        Label { text: drive.name; color: drive.icon != DriveIcon.phone ? Palette.ink : Palette.muted; font-size: 14px; font-weight: 500; overflow: elide; min-width: 0px; horizontal-stretch: 0; }
                                         if drive.device != "" : DeviceTag { text: drive.device; }
                                         Rectangle { horizontal-stretch: 1; }
                                     }
@@ -995,19 +1038,19 @@ export component AppWindow inherits Window {
                                 Label { text: drive.size; color: Palette.muted; font-size: 13px; vertical-alignment: center; }
                             }
                             forward-focus: drive-focus;
-                            // Unavailable rows (locked volumes, phones) still take focus, so keyboard and
+                            // Phones still take focus, so keyboard and
                             // screen reader users reach the line that says why they cannot be scanned.
                             accessible-role: radio-button; accessible-label: drive.name;
                             accessible-description: drive.warning != "" ? drive.detail + Strings.separator + drive.warning : drive.detail;
                             accessible-checkable: true;
                             accessible-checked: root.selected-drive == i;
-                            accessible-enabled: !root.busy && drive.available;
-                            accessible-action-default => { if !root.busy && drive.available { root.select-drive(i); } }
+                            accessible-enabled: !root.busy && drive.icon != DriveIcon.phone;
+                            accessible-action-default => { if !root.busy && drive.icon != DriveIcon.phone { root.select-drive(i); } }
                             border-width: drive-focus.ring ? 2px : 0px; border-color: Palette.accent;
                             drive-focus := KeyFocus { enabled: !root.busy;
-                                key-pressed(event) => { if (event.text == Key.Space || event.text == Key.Return) && drive.available { root.select-drive(i); return accept; } return reject; }
+                                key-pressed(event) => { if (event.text == Key.Space || event.text == Key.Return) && drive.icon != DriveIcon.phone { root.select-drive(i); return accept; } return reject; }
                             }
-                            area := TouchArea { enabled: !root.busy && drive.available; mouse-cursor: pointer; clicked => { drive-focus.focus(); root.select-drive(i); } }
+                            area := TouchArea { enabled: !root.busy && drive.icon != DriveIcon.phone; mouse-cursor: pointer; clicked => { drive-focus.focus(); root.select-drive(i); } }
                         }
                     } }
                 }
@@ -1030,6 +1073,7 @@ export component AppWindow inherits Window {
                             // Why Start scanning is unavailable, next to it.
                             if !root.has-source : scan-hint := Label { text: Strings.choose-a-source-above; color: Palette.secondary; font-size: 13px; wrap: word-wrap; }
                         }
+                        Action { height: 40px; text: Strings.quick-check; enabled: root.can-check && !root.check-running; clicked => { root.check-drive(); } }
                         Action { height: 40px; text: Strings.start-scanning; icon: @image-url("icons/search.svg"); primary: true; enabled: root.can-scan; clicked => { root.scan(); } }
                     }
                     if root.has-source && root.selected-drive >= 0 && root.selected-drive < root.drives.length && root.drives[root.selected-drive].warning != "" : HorizontalLayout { spacing: 8px;
@@ -1041,6 +1085,68 @@ export component AppWindow inherits Window {
                     if root.busy || root.error != "" : ScanStatus { status: root.status; detail: root.scan-detail; error: root.error; needs-administrator: root.needs-administrator; restart-as-administrator => { root.restart-as-administrator(); } busy: root.busy; progress: root.progress; stop => { root.stop(); } }
                 } }
                 Rectangle { vertical-stretch: 1; }
+            }
+            if root.page == 3 : VerticalLayout { spacing: 12px;
+                Card { vertical-stretch: 1; ScrollView { VerticalLayout { padding: 16px; spacing: 12px; alignment: start;
+                    SectionLabel { text: Strings.selected-source; }
+                    Body { text: root.check-overview; color: Palette.ink; }
+                    if root.check-running : Body { text: Strings.checking-drive; }
+                    if !root.check-running || root.partition-loading : VerticalLayout { spacing: 10px;
+                        Divider {}
+                        SectionLabel { text: Strings.drive-health; }
+                        Body { text: root.check-health; color: Palette.ink; }
+                        if root.check-raw != "" : Action { text: Strings.health-details; clicked => { root.show-raw = !root.show-raw; } }
+                        if root.show-raw : Body { text: root.check-raw; }
+                        Divider {}
+                        SectionLabel { text: Strings.partition-table; }
+                        Body { text: root.check-layout; color: Palette.ink; }
+                        for finding[i] in root.check-findings : Row { spacing: 10px;
+                            Body { text: finding; horizontal-stretch: 1; min-width: 0px; }
+                            Action { text: Strings.view-bytes; enabled: !root.check-running; clicked => { root.view-sectors(2, i); } }
+                        }
+                        if root.check-partitions.length > 0 && !root.partition-loading : Choice { model: root.check-partitions; current-index <=> root.check-index; selected(i) => {root.check-index = i; root.clear-partition();} }
+                        if root.check-partitions.length > 0 : Action { enabled: !root.partition-loading; text: Strings.inspect-partition; clicked => { root.open-partition(root.check-index); } }
+                        if root.check-partitions.length > 0 : Action { text: Strings.partition-bytes; enabled: !root.check-running; clicked => { root.view-sectors(1, root.check-index); } }
+                        if root.partition-detail != "" : Body { text: root.partition-detail; color: Palette.ink; }
+                    }
+                } } }
+                Row { alignment: start; spacing: 8px;
+                    Action { text: Strings.sources; clicked => {root.page = 0;} }
+                    Action { text: Strings.sector-viewer; enabled: root.can-view-sectors && !root.check-running; clicked => {root.view-sectors(0,0);} }
+                }
+            }
+            if root.page == 4 : VerticalLayout { spacing: 10px;
+                Body { text: Strings.selected-source + "  " + root.sector-source; color: Palette.ink; }
+                if root.sector-compare != "" : Body { text: Strings.compare-image + "  " + root.sector-compare; }
+                Row { spacing: 8px; height: Metrics.control;
+                    Label { text: Strings.viewer-address; color: Palette.ink; vertical-alignment: center; }
+                    Rectangle { height: Metrics.control; min-width: 110px; border-radius: Metrics.radius; background: Palette.surface; border-color: address-input.has-focus ? Palette.accent : Palette.line; border-width: 1px; horizontal-stretch: 1;
+                        address-input := TextInput { x: 8px; width: parent.width - 16px; height: parent.height; single-line: true; enabled: !root.check-running;
+                            text <=> root.sector-address; accessible-label: Strings.viewer-address; color: Palette.ink; vertical-alignment: center;
+                            accepted => { root.sector-navigate(0); }
+                        }
+                    }
+                    Action { text: Strings.jump; enabled: !root.check-running; clicked => {root.sector-navigate(0);} }
+                }
+                Row { spacing: 8px; alignment: start;
+                    Action { text: Strings.compare-image; enabled: !root.check-running; clicked => { root.sector-comparison(true); } }
+                    if root.sector-compare != "" : Action { text: Strings.close-comparison; enabled: !root.check-running; clicked => { root.sector-comparison(false); } }
+                }
+                if root.sector-error != "" : Body { text: root.sector-error; color: Palette.danger; }
+                Body { text: root.sector-loading ? Strings.checking-drive : root.sector-status; }
+                if root.sector-compare != "" : Body { text: Strings.byte-legend; }
+                Card { vertical-stretch: 1;
+                    ScrollView { VerticalLayout { padding: 8px; alignment: start;
+                        Text { text: root.sector-dump; font-family: "DejaVu Sans Mono"; font-size: root.width < 980px && root.sector-compare != "" ? 11px : 12px; color: Palette.ink;
+                            horizontal-alignment: left; wrap: no-wrap; accessible-role: text; accessible-label: root.sector-dump;
+                        }
+                    } }
+                }
+                Row { spacing: 8px; alignment: start;
+                    Action { text: Strings.previous; enabled: root.sector-prev && !root.check-running; clicked => {root.sector-navigate(-1);} }
+                    Action { text: Strings.next; enabled: root.sector-next && !root.check-running; clicked => {root.sector-navigate(1);} }
+                    Action { text: Strings.quick-check; clicked => {root.page = 3;} }
+                }
             }
             // Recovered files: filter, inspect, select, recover.
             // Two columns all the way down: the list column (search, list, hint) and the

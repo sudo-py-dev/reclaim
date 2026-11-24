@@ -9,6 +9,7 @@ mod large;
 use detection::{CandidateEnd, LIMIT};
 pub mod i18n;
 mod ntfs;
+pub mod partition;
 mod resilient;
 mod source;
 pub mod updater;
