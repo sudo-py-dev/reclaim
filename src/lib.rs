@@ -1152,7 +1152,10 @@ pub(crate) fn scan_reader_with_filter(
                             file.seek(SeekFrom::Start(at))?;
                             while at < stop {
                                 let count = to_usize((stop - at).min(buffer.len() as u64));
-                                let n = read_chunk(file, &mut buffer[..count], cancel)?;
+                                let chunk = buffer.get_mut(..count).ok_or_else(|| {
+                                    io::Error::other("Invalid read buffer length")
+                                })?;
+                                let n = read_chunk(file, chunk, cancel)?;
                                 if n == 0 || !check(at, n as u64) {
                                     end = None;
                                     break;
