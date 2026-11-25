@@ -260,7 +260,11 @@ pub fn inspect(
                         crate::i18n::t(name),
                         crate::i18n::t("Header and array checksums verified")
                     ),
-                    Err(e) => format!("{} · {e}", crate::i18n::t(name)),
+                    Err(e) => format!(
+                        "{} · {}",
+                        crate::i18n::t(name),
+                        crate::i18n::t(&e.to_string())
+                    ),
                 },
             ));
         }

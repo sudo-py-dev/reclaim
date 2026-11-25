@@ -311,5 +311,17 @@
   "Open folder": "فتح المجلد",
   "Tick the files you want to recover.": "حدّد الملفات التي تريد استعادتها.",
   "Clear search": "مسح البحث",
-  "Not saved: that folder is on the drive you scanned.": "لم يتم الحفظ: هذا المجلد على القرص الذي تم فحصه."
+  "Not saved: that folder is on the drive you scanned.": "لم يتم الحفظ: هذا المجلد على القرص الذي تم فحصه.",
+  "missing signature": "التوقيع مفقود",
+  "short header": "الترويسة قصيرة جدًا",
+  "invalid header length or checksum": "طول الترويسة أو مجموعها الاختباري غير صالح",
+  "header locations or usable bounds disagree with disk size": "مواضع الترويسة أو الحدود القابلة للاستخدام لا تطابق حجم القرص",
+  "invalid or unsupported partition entry dimensions": "أبعاد مُدخلات الأقسام غير صالحة أو غير مدعومة",
+  "entry array exceeds inspection limit": "جدول المُدخلات يتجاوز حد الفحص",
+  "entry array overflow": "تجاوز في جدول المُدخلات",
+  "entry array outside metadata area": "جدول المُدخلات خارج منطقة البيانات الوصفية",
+  "partition array checksum mismatch": "المجموع الاختباري لجدول الأقسام غير مطابق",
+  "short disk GUID": "مُعرّف GUID للقرص قصير جدًا",
+  "invalid disk GUID": "مُعرّف GUID للقرص غير صالح",
+  "unknown logical sector size": "حجم القطاع المنطقي غير معروف"
 }

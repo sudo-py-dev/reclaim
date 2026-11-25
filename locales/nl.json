@@ -311,5 +311,17 @@
   "Open folder": "Map openen",
   "Tick the files you want to recover.": "Vink de bestanden aan die je wilt herstellen.",
   "Clear search": "Zoekopdracht wissen",
-  "Not saved: that folder is on the drive you scanned.": "Niet opgeslagen: de map staat op het station dat je hebt gescand."
+  "Not saved: that folder is on the drive you scanned.": "Niet opgeslagen: de map staat op het station dat je hebt gescand.",
+  "missing signature": "handtekening ontbreekt",
+  "short header": "header te kort",
+  "invalid header length or checksum": "ongeldige headerlengte of controlesom",
+  "header locations or usable bounds disagree with disk size": "headerposities of bruikbare grenzen komen niet overeen met de schijfgrootte",
+  "invalid or unsupported partition entry dimensions": "ongeldige of niet-ondersteunde afmetingen van partitie-items",
+  "entry array exceeds inspection limit": "itemtabel overschrijdt de inspectielimiet",
+  "entry array overflow": "overloop van de itemtabel",
+  "entry array outside metadata area": "itemtabel buiten het metadatagebied",
+  "partition array checksum mismatch": "controlesom van de partitietabel komt niet overeen",
+  "short disk GUID": "schijf-GUID te kort",
+  "invalid disk GUID": "ongeldige schijf-GUID",
+  "unknown logical sector size": "onbekende logische sectorgrootte"
 }

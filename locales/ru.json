@@ -311,5 +311,17 @@
   "Open folder": "Открыть папку",
   "Tick the files you want to recover.": "Отметьте файлы, которые нужно восстановить.",
   "Clear search": "Очистить поиск",
-  "Not saved: that folder is on the drive you scanned.": "Не сохранено: эта папка находится на сканируемом диске."
+  "Not saved: that folder is on the drive you scanned.": "Не сохранено: эта папка находится на сканируемом диске.",
+  "missing signature": "отсутствует сигнатура",
+  "short header": "слишком короткий заголовок",
+  "invalid header length or checksum": "недопустимая длина или контрольная сумма заголовка",
+  "header locations or usable bounds disagree with disk size": "положения заголовков или границы доступной области не соответствуют размеру диска",
+  "invalid or unsupported partition entry dimensions": "недопустимые или неподдерживаемые размеры записей разделов",
+  "entry array exceeds inspection limit": "таблица записей превышает предел проверки",
+  "entry array overflow": "переполнение таблицы записей",
+  "entry array outside metadata area": "таблица записей вне области метаданных",
+  "partition array checksum mismatch": "контрольная сумма таблицы разделов не совпадает",
+  "short disk GUID": "слишком короткий GUID диска",
+  "invalid disk GUID": "недопустимый GUID диска",
+  "unknown logical sector size": "неизвестный размер логического сектора"
 }

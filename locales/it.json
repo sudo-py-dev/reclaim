@@ -311,5 +311,17 @@
   "Open folder": "Apri cartella",
   "Tick the files you want to recover.": "Spunta i file da recuperare.",
   "Clear search": "Cancella ricerca",
-  "Not saved: that folder is on the drive you scanned.": "Salvataggio bloccato: la cartella si trova sull'unità scansionata."
+  "Not saved: that folder is on the drive you scanned.": "Salvataggio bloccato: la cartella si trova sull'unità scansionata.",
+  "missing signature": "firma mancante",
+  "short header": "intestazione troppo corta",
+  "invalid header length or checksum": "lunghezza o checksum dell’intestazione non validi",
+  "header locations or usable bounds disagree with disk size": "le posizioni dell’intestazione o i limiti utilizzabili non corrispondono alla dimensione del disco",
+  "invalid or unsupported partition entry dimensions": "dimensioni delle voci di partizione non valide o non supportate",
+  "entry array exceeds inspection limit": "la tabella delle voci supera il limite di ispezione",
+  "entry array overflow": "overflow della tabella delle voci",
+  "entry array outside metadata area": "tabella delle voci fuori dall’area dei metadati",
+  "partition array checksum mismatch": "checksum della tabella delle partizioni non corrispondente",
+  "short disk GUID": "GUID del disco troppo corto",
+  "invalid disk GUID": "GUID del disco non valido",
+  "unknown logical sector size": "dimensione del settore logico sconosciuta"
 }
