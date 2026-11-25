@@ -311,5 +311,17 @@
   "Open folder": "Ouvrir le dossier",
   "Tick the files you want to recover.": "Cochez les fichiers à récupérer.",
   "Clear search": "Effacer la recherche",
-  "Not saved: that folder is on the drive you scanned.": "Non enregistré : ce dossier se trouve sur le disque analysé."
+  "Not saved: that folder is on the drive you scanned.": "Non enregistré : ce dossier se trouve sur le disque analysé.",
+  "missing signature": "signature manquante",
+  "short header": "en-tête trop court",
+  "invalid header length or checksum": "longueur ou somme de contrôle de l’en-tête non valide",
+  "header locations or usable bounds disagree with disk size": "les positions de l’en-tête ou les limites utilisables ne correspondent pas à la taille du disque",
+  "invalid or unsupported partition entry dimensions": "dimensions des entrées de partition non valides ou non prises en charge",
+  "entry array exceeds inspection limit": "la table des entrées dépasse la limite d’inspection",
+  "entry array overflow": "dépassement de la table des entrées",
+  "entry array outside metadata area": "table des entrées hors de la zone de métadonnées",
+  "partition array checksum mismatch": "somme de contrôle de la table des partitions incorrecte",
+  "short disk GUID": "GUID du disque trop court",
+  "invalid disk GUID": "GUID du disque non valide",
+  "unknown logical sector size": "taille de secteur logique inconnue"
 }

@@ -311,5 +311,17 @@
   "Open folder": "Ordner öffnen",
   "Tick the files you want to recover.": "Wählen Sie die Dateien aus, die Sie wiederherstellen möchten.",
   "Clear search": "Suche löschen",
-  "Not saved: that folder is on the drive you scanned.": "Nicht gespeichert: Dieser Ordner liegt auf dem durchsuchten Laufwerk."
+  "Not saved: that folder is on the drive you scanned.": "Nicht gespeichert: Dieser Ordner liegt auf dem durchsuchten Laufwerk.",
+  "missing signature": "Signatur fehlt",
+  "short header": "Header zu kurz",
+  "invalid header length or checksum": "Ungültige Header-Länge oder Prüfsumme",
+  "header locations or usable bounds disagree with disk size": "Header-Positionen oder nutzbare Grenzen passen nicht zur Datenträgergröße",
+  "invalid or unsupported partition entry dimensions": "Ungültige oder nicht unterstützte Abmessungen der Partitionseinträge",
+  "entry array exceeds inspection limit": "Eintragstabelle überschreitet das Prüflimit",
+  "entry array overflow": "Überlauf der Eintragstabelle",
+  "entry array outside metadata area": "Eintragstabelle außerhalb des Metadatenbereichs",
+  "partition array checksum mismatch": "Prüfsumme der Partitionstabelle stimmt nicht",
+  "short disk GUID": "Datenträger-GUID zu kurz",
+  "invalid disk GUID": "Ungültige Datenträger-GUID",
+  "unknown logical sector size": "Unbekannte logische Sektorgröße"
 }

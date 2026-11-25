@@ -311,5 +311,17 @@
   "Open folder": "Abrir pasta",
   "Tick the files you want to recover.": "Marque os arquivos que deseja recuperar.",
   "Clear search": "Limpar a pesquisa",
-  "Not saved: that folder is on the drive you scanned.": "Não salvo: essa pasta está na unidade analisada."
+  "Not saved: that folder is on the drive you scanned.": "Não salvo: essa pasta está na unidade analisada.",
+  "missing signature": "assinatura ausente",
+  "short header": "cabeçalho curto demais",
+  "invalid header length or checksum": "comprimento ou soma de verificação do cabeçalho inválido",
+  "header locations or usable bounds disagree with disk size": "as posições do cabeçalho ou os limites utilizáveis não correspondem ao tamanho do disco",
+  "invalid or unsupported partition entry dimensions": "dimensões das entradas de partição inválidas ou não suportadas",
+  "entry array exceeds inspection limit": "a tabela de entradas excede o limite de inspeção",
+  "entry array overflow": "estouro da tabela de entradas",
+  "entry array outside metadata area": "tabela de entradas fora da área de metadados",
+  "partition array checksum mismatch": "a soma de verificação da tabela de partições não confere",
+  "short disk GUID": "GUID do disco curto demais",
+  "invalid disk GUID": "GUID do disco inválido",
+  "unknown logical sector size": "tamanho de setor lógico desconhecido"
 }

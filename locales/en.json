@@ -311,5 +311,17 @@
   "Open folder": "Open folder",
   "Tick the files you want to recover.": "Tick the files you want to recover.",
   "Clear search": "Clear search",
-  "Not saved: that folder is on the drive you scanned.": "Not saved: that folder is on the drive you scanned."
+  "Not saved: that folder is on the drive you scanned.": "Not saved: that folder is on the drive you scanned.",
+  "missing signature": "missing signature",
+  "short header": "short header",
+  "invalid header length or checksum": "invalid header length or checksum",
+  "header locations or usable bounds disagree with disk size": "header locations or usable bounds disagree with disk size",
+  "invalid or unsupported partition entry dimensions": "invalid or unsupported partition entry dimensions",
+  "entry array exceeds inspection limit": "entry array exceeds inspection limit",
+  "entry array overflow": "entry array overflow",
+  "entry array outside metadata area": "entry array outside metadata area",
+  "partition array checksum mismatch": "partition array checksum mismatch",
+  "short disk GUID": "short disk GUID",
+  "invalid disk GUID": "invalid disk GUID",
+  "unknown logical sector size": "unknown logical sector size"
 }

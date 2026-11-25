@@ -311,5 +311,17 @@
   "Open folder": "פתיחת התיקייה",
   "Tick the files you want to recover.": "סמנו את הקבצים שברצונכם לשחזר.",
   "Clear search": "ניקוי החיפוש",
-  "Not saved: that folder is on the drive you scanned.": "לא נשמר: התיקייה נמצאת בכונן שנסרק."
+  "Not saved: that folder is on the drive you scanned.": "לא נשמר: התיקייה נמצאת בכונן שנסרק.",
+  "missing signature": "חתימה חסרה",
+  "short header": "הכותרת קצרה מדי",
+  "invalid header length or checksum": "אורך הכותרת או סכום הביקורת שלה אינם תקינים",
+  "header locations or usable bounds disagree with disk size": "מיקומי הכותרות או הגבולות השמישים אינם תואמים לגודל הדיסק",
+  "invalid or unsupported partition entry dimensions": "ממדי רשומות המחיצות אינם תקינים או אינם נתמכים",
+  "entry array exceeds inspection limit": "טבלת הרשומות חורגת ממגבלת הבדיקה",
+  "entry array overflow": "גלישה בטבלת הרשומות",
+  "entry array outside metadata area": "טבלת הרשומות מחוץ לאזור המטא־נתונים",
+  "partition array checksum mismatch": "סכום הביקורת של טבלת המחיצות אינו תואם",
+  "short disk GUID": "מזהה ה־GUID של הדיסק קצר מדי",
+  "invalid disk GUID": "מזהה ה־GUID של הדיסק אינו תקין",
+  "unknown logical sector size": "גודל סקטור לוגי לא ידוע"
 }
