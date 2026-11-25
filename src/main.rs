@@ -1350,6 +1350,28 @@ fn run() -> Result<(), slint::PlatformError> {
     ui.set_updates_managed(update_runtime::package_managed());
     ui_text::apply(&ui);
     ui.set_language(i18n::preference() as i32);
+    let state = Rc::new(RefCell::new(Reclaim::default()));
+    register_settings(&ui, &state);
+    state.borrow_mut().drive_monitor = drives::watch();
+    state.borrow_mut().refresh_drives();
+    register_source_actions(&ui, &state);
+    register_drive_checks(&ui, &state);
+    register_preview(&ui, &state);
+    let updates = register_updates(&ui, &state);
+    let _timer = start_polling(&ui, &state, &updates);
+    // macOS users expect the native traffic-light buttons; elsewhere the app
+    // draws its own themed title bar.
+    ui.set_custom_frame(!cfg!(target_os = "macos"));
+    ui.on_close_window(|| {
+        slint::quit_event_loop().ok();
+    });
+    state.borrow_mut().sync_ui(&ui);
+    let result = ui.run();
+    state.borrow().cancel.store(true, Ordering::Relaxed);
+    result
+}
+/// Language, links, the debug log, folder shortcuts and platform extras.
+fn register_settings(ui: &AppWindow, state: &Rc<RefCell<Reclaim>>) {
     {
         let weak = ui.as_weak();
         ui.on_change_language(move |i| {
@@ -1378,7 +1400,6 @@ fn run() -> Result<(), slint::PlatformError> {
             }
         });
     });
-    let state = Rc::new(RefCell::new(Reclaim::default()));
     if let Some(folder) = diagnostics::log_folder() {
         ui.set_debug_log_ready(folder.join(diagnostics::DEBUG_LOG_NAME).is_file());
     }
@@ -1412,7 +1433,7 @@ fn run() -> Result<(), slint::PlatformError> {
         });
     }
     {
-        let state = Rc::clone(&state);
+        let state = Rc::clone(state);
         ui.on_open_saved_folder(move || {
             if let Some(folder) = state.borrow().saved_folder.clone() {
                 std::thread::spawn(move || {
@@ -1435,7 +1456,7 @@ fn run() -> Result<(), slint::PlatformError> {
     }
     #[cfg(windows)]
     {
-        let state = Rc::clone(&state);
+        let state = Rc::clone(state);
         let weak = ui.as_weak();
         ui.on_restart_as_administrator(move || {
             if state.borrow().working() || !state.borrow().needs_administrator {
@@ -1457,8 +1478,10 @@ fn run() -> Result<(), slint::PlatformError> {
             }
         });
     }
-    state.borrow_mut().drive_monitor = drives::watch();
-    state.borrow_mut().refresh_drives();
+}
+/// Source, scan, filter, recovery and selection buttons. Each callback
+/// updates the state and then refreshes the window from it.
+fn register_source_actions(ui: &AppWindow, state: &Rc<RefCell<Reclaim>>) {
     macro_rules! action {
         ($method:ident, $body:expr) => {{
             let state = state.clone();
@@ -1491,7 +1514,6 @@ fn run() -> Result<(), slint::PlatformError> {
             s.choose_source();
         }
     });
-    register_drive_checks(&ui, &state);
     action!(on_refresh, |s: &mut Reclaim, _: &AppWindow| {
         s.refresh_drives();
     });
@@ -1557,8 +1579,11 @@ fn run() -> Result<(), slint::PlatformError> {
             }
         }
     });
+}
+/// Shows a result's details, and its image preview when the type has one.
+fn register_preview(ui: &AppWindow, state: &Rc<RefCell<Reclaim>>) {
     {
-        let state = Rc::clone(&state);
+        let state = Rc::clone(state);
         let weak = ui.as_weak();
         ui.on_inspect(move |i| {
             // A negative index from the UI means "nothing"; ignore it.
@@ -1587,28 +1612,34 @@ fn run() -> Result<(), slint::PlatformError> {
                 std::thread::spawn(move || {
                     let result = preview::load(&f, handle, alignment).map_err(|e| format!("{e:#}"));
                     // Fails only when the event loop has already quit.
-                    weak.upgrade_in_event_loop(move |ui| {
-                        if ui.get_preview_token() != token {
-                            return;
-                        }
-                        if let Ok(image) = result {
-                            let pixels =
-                                slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-                                    image.as_raw(),
-                                    image.width(),
-                                    image.height(),
-                                );
-                            ui.set_preview(slint::Image::from_rgba8(pixels));
-                        } else if let Err(error) = result {
-                            ui.set_preview_error(i18n::t(&error).into());
-                            ui.set_preview_error_raw(error.into());
-                        }
-                    })
-                    .ok();
+                    weak.upgrade_in_event_loop(move |ui| show_preview(&ui, token, result))
+                        .ok();
                 });
             }
         });
     }
+}
+/// Shows a finished preview unless the user has since inspected another file.
+fn show_preview(ui: &AppWindow, token: i32, result: Result<image::RgbaImage, String>) {
+    if ui.get_preview_token() != token {
+        return;
+    }
+    match result {
+        Ok(image) => {
+            let pixels = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                image.as_raw(),
+                image.width(),
+                image.height(),
+            );
+            ui.set_preview(slint::Image::from_rgba8(pixels));
+        }
+        Err(error) => {
+            ui.set_preview_error(i18n::t(&error).into());
+            ui.set_preview_error_raw(error.into());
+        }
+    }
+}
+fn register_updates(ui: &AppWindow, state: &Rc<RefCell<Reclaim>>) -> Rc<RefCell<updates::Updates>> {
     let updates = Rc::new(RefCell::new(updates::Updates::new()));
     {
         let updates = Rc::clone(&updates);
@@ -1620,7 +1651,7 @@ fn run() -> Result<(), slint::PlatformError> {
     }
     {
         let updates = Rc::clone(&updates);
-        let state = Rc::clone(&state);
+        let state = Rc::clone(state);
         let weak = ui.as_weak();
         ui.on_apply_update(move || {
             if !state.borrow().working() {
@@ -1633,9 +1664,19 @@ fn run() -> Result<(), slint::PlatformError> {
             }
         });
     }
+    updates
+}
+/// Every 100 ms: deliver worker results, check for updates and mirror the
+/// updater's state into the window. Keep the returned timer alive.
+fn start_polling(
+    ui: &AppWindow,
+    state: &Rc<RefCell<Reclaim>>,
+    updates: &Rc<RefCell<updates::Updates>>,
+) -> slint::Timer {
     let timer = slint::Timer::default();
     {
-        let state = Rc::clone(&state);
+        let state = Rc::clone(state);
+        let updates = Rc::clone(updates);
         let weak = ui.as_weak();
         let last_language = std::cell::Cell::new(i18n::preference());
         let started = std::time::Instant::now();
@@ -1695,16 +1736,7 @@ fn run() -> Result<(), slint::PlatformError> {
             },
         );
     }
-    // macOS users expect the native traffic-light buttons; elsewhere the app
-    // draws its own themed title bar.
-    ui.set_custom_frame(!cfg!(target_os = "macos"));
-    ui.on_close_window(|| {
-        slint::quit_event_loop().ok();
-    });
-    state.borrow_mut().sync_ui(&ui);
-    let result = ui.run();
-    state.borrow().cancel.store(true, Ordering::Relaxed);
-    result
+    timer
 }
 enum SectorAction {
     Open(u64),

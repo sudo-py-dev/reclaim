@@ -271,25 +271,13 @@ fn copy_verified_package(
 ) -> anyhow::Result<()> {
     let mut dest = std::fs::File::create_new(protected)?;
     let mut verifier = key.verify_stream(signature).ok().context(UNSIGNED)?;
-    let mut reader = regular_file(source)?.take(MAX_BINARY + 1);
-    let mut buffer = vec![0u8; 64 * 1024];
-    let mut size = 0u64;
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        // `Read` promises count <= buffer.len(); refuse a reader that breaks it.
-        let chunk = buffer
-            .get(..count)
-            .context("Update exceeds expected size")?;
-        size = size.saturating_add(count as u64);
-        if size > MAX_BINARY {
-            bail!("Update exceeds expected size");
-        }
-        verifier.update(chunk);
-        dest.write_all(chunk)?;
-    }
+    stream_verified(
+        regular_file(source)?,
+        &mut dest,
+        MAX_BINARY,
+        &mut verifier,
+        |_, _| {},
+    )?;
     verifier
         .finalize()
         .ok()
@@ -556,27 +544,17 @@ fn verify_download_progress(
     }
     let (key, signature) = signed_by_release_key(release)?;
     let mut verifier = key.verify_stream(&signature).ok().context(UNSIGNED)?;
-    let mut reader = reader.take(release.size.saturating_add(1));
     let mut hash = Sha256::new();
-    let mut size = 0u64;
-    let mut buffer = vec![0u8; 64 * 1024];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        let chunk = buffer
-            .get(..count)
-            .context("Update exceeds expected size")?;
-        size = size.saturating_add(count as u64);
-        if size > release.size {
-            bail!("Update exceeds expected size");
-        }
-        hash.update(chunk);
-        verifier.update(chunk);
-        progress(size, release.size);
-        file.write_all(chunk)?;
-    }
+    let size = stream_verified(
+        reader,
+        &mut file,
+        release.size,
+        &mut verifier,
+        |chunk, size| {
+            hash.update(chunk);
+            progress(size, release.size);
+        },
+    )?;
     if size != release.size || format!("{:x}", hash.finalize()) != release.digest {
         bail!("Update checksum verification failed");
     }
@@ -584,6 +562,39 @@ fn verify_download_progress(
         .finalize()
         .ok()
         .context("Update signature verification failed")
+}
+
+/// Streams `reader` into `writer` in 64 KiB chunks, feeding each chunk to the
+/// signature `verifier` and to `on_chunk` before it is written. Fails once more
+/// than `limit` bytes arrive and returns the number of bytes copied. Callers
+/// apply their own final checks and then finalize the verifier.
+fn stream_verified(
+    reader: impl Read,
+    mut writer: impl Write,
+    limit: u64,
+    verifier: &mut minisign_verify::StreamVerifier<'_>,
+    mut on_chunk: impl FnMut(&[u8], u64),
+) -> anyhow::Result<u64> {
+    let mut reader = reader.take(limit.saturating_add(1));
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut size = 0u64;
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(size);
+        }
+        // `Read` promises count <= buffer.len(); refuse a reader that breaks it.
+        let chunk = buffer
+            .get(..count)
+            .context("Update exceeds expected size")?;
+        size = size.saturating_add(count as u64);
+        if size > limit {
+            bail!("Update exceeds expected size");
+        }
+        verifier.update(chunk);
+        on_chunk(chunk, size);
+        writer.write_all(chunk)?;
+    }
 }
 
 #[cfg(test)]
